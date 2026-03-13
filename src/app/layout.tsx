@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Navigation } from "@/components/Navigation";
+import { AuthProvider } from "@/components/AuthProvider";
 
 export const metadata: Metadata = {
   title: "The Stacks",
-  description: "Personal A&R — music discovery by Pico",
+  description: "AI-powered underground music discovery",
 };
 
 export const viewport: Viewport = {
@@ -21,8 +22,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="font-sans min-h-screen">
-        <Navigation />
-        <main className="pb-20 md:pb-8">{children}</main>
+        <AuthProvider>
+          <Navigation />
+          <main className="pb-20 md:pb-8">{children}</main>
+        </AuthProvider>
       </body>
     </html>
   );
