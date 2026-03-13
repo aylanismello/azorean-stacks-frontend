@@ -11,11 +11,14 @@ export async function GET(req: NextRequest) {
   const source = searchParams.get("source");
   const episodeId = searchParams.get("episode_id");
 
+  const isPending = status === "pending";
+  const orderCol = isPending ? "created_at" : status === "approved" || status === "rejected" ? "voted_at" : "created_at";
+
   let query = supabase
     .from("tracks")
     .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date)", { count: "exact" })
     .eq("status", status)
-    .order("created_at", { ascending: false })
+    .order(orderCol, { ascending: isPending })
     .range(offset, offset + limit - 1);
 
   if (episodeId) {

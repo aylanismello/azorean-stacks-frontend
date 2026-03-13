@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Track } from "@/lib/types";
+import { openYouTube } from "@/lib/youtube";
 import { PlayerSection } from "@/components/PlayerSection";
 
 function safeCoverUrl(url: string | null): string | null {
@@ -67,27 +68,32 @@ export default function ApprovedPage() {
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
   const [updating, setUpdating] = useState<Set<string>>(new Set());
 
-  const handleDownload = async (track: Track) => {
+  const handleFetchAudio = async (track: Track) => {
     if (downloading.has(track.id)) return;
     setDownloading((prev) => new Set(prev).add(track.id));
     try {
-      const res = await fetch(`/api/tracks/${track.id}/download`);
-      if (res.status === 202) return;
-      if (!res.ok) throw new Error(`Download failed (${res.status})`);
+      const res = await fetch(`/api/tracks/${track.id}/download`, { method: "POST" });
       const data = await res.json();
-      if (data.url) {
-        const fileRes = await fetch(data.url);
-        if (!fileRes.ok) throw new Error("Failed to fetch file");
-        const blob = await fileRes.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = blobUrl;
-        a.download = (data.filename || `${track.artist} - ${track.title}`) + ".mp3";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
+      if (!res.ok) {
+        // Mark track locally so button disappears
+        setTracks((prev) =>
+          prev.map((t) =>
+            t.id === track.id
+              ? { ...t, dl_failed_at: new Date().toISOString(), dl_attempts: (t.dl_attempts || 0) + 1 }
+              : t
+          )
+        );
+        setError(data.error || "Couldn't find audio");
+        return;
       }
+      // Success — update track locally with the new audio
+      setTracks((prev) =>
+        prev.map((t) =>
+          t.id === track.id
+            ? { ...t, storage_path: data.storage_path || "downloaded", audio_url: data.audio_url, dl_failed_at: null, dl_attempts: 0 }
+            : t
+        )
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed");
     } finally {
@@ -269,27 +275,32 @@ export default function ApprovedPage() {
                               </button>
                             )}
                             {track.youtube_url && (
-                              <a
-                                href={track.youtube_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openYouTube(track.youtube_url!); }}
                                 className="p-1.5 hover:bg-surface-2 rounded transition-colors text-red-400/60 hover:text-red-400"
                                 title="Listen on YouTube"
                               >
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                              </a>
+                              </button>
                             )}
-                            {tab === "approved" && (
+                            {!track.storage_path && !track.audio_url && track.youtube_url && (
                               <button
-                                onClick={(e) => { e.stopPropagation(); handleDownload(track); }}
-                                className={`p-1.5 hover:bg-surface-2 rounded transition-colors ${
-                                  track.dl_attempts >= 3 ? "text-red-400/60 hover:text-red-400" : "text-muted hover:text-accent"
+                                onClick={(e) => { e.stopPropagation(); handleFetchAudio(track); }}
+                                className={`p-1.5 rounded transition-colors ${
+                                  track.dl_failed_at
+                                    ? "text-muted/20 cursor-not-allowed"
+                                    : downloading.has(track.id)
+                                    ? "text-muted animate-pulse"
+                                    : "text-muted hover:text-accent hover:bg-surface-2"
                                 }`}
-                                title={track.storage_path ? "Download MP3" : track.dl_attempts >= 3 ? `Failed ${track.dl_attempts}x` : "Pending download"}
-                                disabled={downloading.has(track.id)}
+                                title={track.dl_failed_at ? "Audio not found" : "Fetch audio"}
+                                disabled={!!track.dl_failed_at || downloading.has(track.id)}
                               >
-                                {downloading.has(track.id) ? "..." : track.storage_path ? "↓" : track.dl_attempts >= 3 ? "✗" : "⏳"}
+                                {downloading.has(track.id) ? (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                                ) : (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                                )}
                               </button>
                             )}
                           </div>
@@ -389,15 +400,32 @@ export default function ApprovedPage() {
                       </button>
                     )}
                     {track.youtube_url && (
-                      <a
-                        href={track.youtube_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openYouTube(track.youtube_url!); }}
                         className="p-1.5 text-red-400/60 hover:text-red-400"
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                      </a>
+                      </button>
+                    )}
+                    {!track.storage_path && !track.audio_url && track.youtube_url && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleFetchAudio(track); }}
+                        className={`p-1.5 rounded transition-colors ${
+                          track.dl_failed_at
+                            ? "text-muted/20 cursor-not-allowed"
+                            : downloading.has(track.id)
+                            ? "text-muted animate-pulse"
+                            : "text-muted hover:text-accent"
+                        }`}
+                        title={track.dl_failed_at ? "Audio not found" : "Fetch audio"}
+                        disabled={!!track.dl_failed_at || downloading.has(track.id)}
+                      >
+                        {downloading.has(track.id) ? (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                        ) : (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                        )}
+                      </button>
                     )}
                   </div>
                 </div>

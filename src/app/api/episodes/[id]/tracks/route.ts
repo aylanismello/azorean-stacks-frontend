@@ -9,7 +9,7 @@ export async function GET(
   const supabase = getServiceClient();
   const { data, error } = await supabase
     .from("tracks")
-    .select("id, artist, title, status, spotify_url, youtube_url")
+    .select("id, artist, title, status, spotify_url, youtube_url, storage_path, dl_attempts, dl_failed_at")
     .eq("episode_id", params.id)
     .order("created_at", { ascending: true });
 

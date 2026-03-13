@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Episode, EpisodeTrack } from "@/lib/types";
+import { openYouTube } from "@/lib/youtube";
 
 export default function EpisodesPage() {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -279,12 +280,16 @@ function TrackRow({
   track: t,
   statusDot,
   statusColor,
+  onTrackUpdate,
 }: {
   track: EpisodeTrack;
   statusDot: (s: string) => string;
   statusColor: (s: string) => string;
+  onTrackUpdate?: (updated: EpisodeTrack) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [localTrack, setLocalTrack] = useState(t);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(`${t.artist} - ${t.title}`);
@@ -292,13 +297,56 @@ function TrackRow({
     setTimeout(() => setCopied(false), 1500);
   };
 
+  const handleFetchAudio = async () => {
+    if (fetching) return;
+    setFetching(true);
+    try {
+      const res = await fetch(`/api/tracks/${localTrack.id}/download`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        const updated = { ...localTrack, dl_failed_at: new Date().toISOString(), dl_attempts: (localTrack.dl_attempts || 0) + 1 };
+        setLocalTrack(updated);
+        onTrackUpdate?.(updated);
+      } else {
+        const updated = { ...localTrack, storage_path: data.storage_path || "downloaded", dl_failed_at: null, dl_attempts: 0 };
+        setLocalTrack(updated);
+        onTrackUpdate?.(updated);
+      }
+    } catch {} finally {
+      setFetching(false);
+    }
+  };
+
+  const showFetchButton = !localTrack.storage_path && localTrack.youtube_url;
+  const fetchFailed = !!localTrack.dl_failed_at;
+
   return (
     <div className="flex items-center gap-2 py-1.5 text-sm">
-      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(t.status)}`} />
-      <span className={`flex-1 min-w-0 truncate ${statusColor(t.status)}`}>
-        {t.artist} — {t.title}
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(localTrack.status)}`} />
+      <span className={`flex-1 min-w-0 truncate ${statusColor(localTrack.status)}`}>
+        {localTrack.artist} — {localTrack.title}
       </span>
       <div className="flex gap-1.5 flex-shrink-0 items-center">
+        {showFetchButton && (
+          <button
+            onClick={handleFetchAudio}
+            disabled={fetching || fetchFailed}
+            className={`p-0.5 rounded transition-all ${
+              fetchFailed
+                ? "text-muted/20 cursor-not-allowed"
+                : fetching
+                ? "text-muted/50 animate-pulse"
+                : "text-muted/50 hover:text-accent hover:bg-surface-3"
+            }`}
+            title={fetchFailed ? "Audio not found" : "Fetch audio"}
+          >
+            {fetching ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+            )}
+          </button>
+        )}
         <button
           onClick={handleCopy}
           className="p-0.5 rounded hover:bg-surface-3 active:scale-90 transition-all"
@@ -320,9 +368,9 @@ function TrackRow({
           </a>
         )}
         {t.youtube_url && (
-          <a href={t.youtube_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-red-400/60 hover:text-red-400">
+          <button onClick={() => openYouTube(t.youtube_url!)} className="text-[10px] text-red-400/60 hover:text-red-400">
             YT
-          </a>
+          </button>
         )}
       </div>
     </div>

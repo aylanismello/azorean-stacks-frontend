@@ -83,6 +83,9 @@ export interface EpisodeTrack {
   status: string;
   spotify_url: string | null;
   youtube_url: string | null;
+  storage_path: string | null;
+  dl_attempts: number;
+  dl_failed_at: string | null;
 }
 
 export interface Stats {
