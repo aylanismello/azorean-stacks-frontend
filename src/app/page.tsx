@@ -38,22 +38,34 @@ export default function StackPage() {
       });
       if (!res.ok) throw new Error(`Vote failed (${res.status})`);
 
-      setTracks((prev) => prev.filter((t) => t.id !== id));
-      setTotal((prev) => prev - 1);
+      setTracks((prev) => {
+        const remaining = prev.filter((t) => t.id !== id);
 
-      // Refetch when running low
-      if (tracks.length <= 3) {
-        const refetch = await fetch("/api/tracks?status=pending&limit=20");
-        if (refetch.ok) {
-          const data = await refetch.json();
-          const existingIds = new Set(tracks.map((t) => t.id));
-          const newTracks = (data.tracks || []).filter(
-            (t: Track) => t.id !== id && !existingIds.has(t.id)
-          );
-          setTracks(newTracks);
-          setTotal(data.total || 0);
+        // Refetch when running low
+        if (remaining.length <= 3) {
+          const votedId = id;
+          const existingIds = new Set(remaining.map((t) => t.id));
+          fetch("/api/tracks?status=pending&limit=20")
+            .then((r) => r.ok ? r.json() : null)
+            .then((data) => {
+              if (!data) return;
+              const newTracks = (data.tracks || []).filter(
+                (t: Track) => t.id !== votedId && !existingIds.has(t.id)
+              );
+              if (newTracks.length > 0) {
+                setTracks((curr) => {
+                  const currIds = new Set(curr.map((t: Track) => t.id));
+                  const fresh = newTracks.filter((t: Track) => !currIds.has(t.id));
+                  return [...curr, ...fresh];
+                });
+              }
+              setTotal(data.total || 0);
+            });
         }
-      }
+
+        return remaining;
+      });
+      setTotal((prev) => prev - 1);
     } catch (err) {
       console.error("Vote error:", err);
       setError("Failed to vote. Please try again.");
@@ -103,7 +115,12 @@ export default function StackPage() {
   if (tracks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[80vh] px-6 text-center">
-        <div className="text-6xl animate-gentle-pulse mb-6">◉</div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="https://theaggie.org/wp-content/uploads/2019/10/kdvs_fe_JUSTIN_HAN-1536x864.jpg"
+          alt=""
+          className="w-64 h-40 object-cover rounded-xl mb-6 opacity-60 grayscale hover:grayscale-0 hover:opacity-100 transition-all duration-500"
+        />
         <h2 className="text-xl font-medium text-white/80 mb-2">
           Pico&apos;s digging...
         </h2>
@@ -131,7 +148,7 @@ export default function StackPage() {
       </div>
 
       {/* Current card */}
-      <TrackCard track={tracks[0]} onVote={handleVote} />
+      <TrackCard key={tracks[0].id} track={tracks[0]} onVote={handleVote} />
 
       {/* Keyboard hint (desktop only) */}
       <div className="hidden md:flex justify-center gap-6 mt-6 text-xs text-muted">
