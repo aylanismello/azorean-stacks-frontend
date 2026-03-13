@@ -144,9 +144,18 @@ export function TrackCard({ track, onVote }: TrackCardProps) {
             )
           )}
 
-          {/* Audio player — prefer stored audio, fall back to Spotify preview */}
-          {(track.audio_url || track.preview_url) && (
+          {/* Audio player — streams from storage */}
+          {(track.audio_url || track.preview_url) ? (
             <AudioPlayer src={track.audio_url || track.preview_url} coverArt={track.cover_art_url} />
+          ) : (
+            <div className="flex items-center gap-2 py-3 px-4 bg-surface-2 rounded-xl text-sm text-white/30">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-50">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <line x1="23" y1="9" x2="17" y2="15" />
+                <line x1="17" y1="9" x2="23" y2="15" />
+              </svg>
+              Audio not yet available
+            </div>
           )}
 
           {/* External links — single row, equal size */}

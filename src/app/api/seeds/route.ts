@@ -32,9 +32,42 @@ export async function GET() {
     });
   }
 
+  // Get episodes linked to each seed via episode_seeds
+  const seedIds = (data || []).map((s) => s.id);
+  let episodesBySeed: Record<string, Array<{ id: string; title: string | null; url: string; source: string; aired_date: string | null }>> = {};
+
+  if (seedIds.length > 0) {
+    const { data: episodeLinks } = await supabase
+      .from("episode_seeds")
+      .select("seed_id, episodes(id, title, url, source, aired_date)")
+      .in("seed_id", seedIds);
+
+    (episodeLinks || []).forEach((link: any) => {
+      if (!link.episodes) return;
+      if (!episodesBySeed[link.seed_id]) episodesBySeed[link.seed_id] = [];
+      episodesBySeed[link.seed_id].push(link.episodes);
+    });
+  }
+
+  // Get latest discovery run per seed
+  const { data: runs } = await supabase
+    .from("discovery_runs")
+    .select("seed_id, tracks_found, tracks_added, started_at")
+    .in("seed_id", seedIds)
+    .order("started_at", { ascending: false });
+
+  const lastRunBySeed: Record<string, { tracks_found: number; tracks_added: number; started_at: string }> = {};
+  (runs || []).forEach((r: any) => {
+    if (r.seed_id && !lastRunBySeed[r.seed_id]) {
+      lastRunBySeed[r.seed_id] = { tracks_found: r.tracks_found, tracks_added: r.tracks_added, started_at: r.started_at };
+    }
+  });
+
   const seedsWithCounts = (data || []).map((seed) => ({
     ...seed,
     discovery_count: seed.track_id ? (trackCounts[seed.track_id] || 0) : 0,
+    episodes: episodesBySeed[seed.id] || [],
+    last_run: lastRunBySeed[seed.id] || null,
   }));
 
   return NextResponse.json(seedsWithCounts);

@@ -68,7 +68,7 @@ export default function SeedsPage() {
   };
 
   return (
-    <div className="px-4 md:px-6 pt-4 md:pt-8 max-w-2xl mx-auto">
+    <div className="px-4 md:px-6 pt-4 md:pt-8 max-w-2xl mx-auto pb-24">
       <h1 className="text-xl font-semibold mb-6">Seeds</h1>
 
       {/* Add seed form */}
@@ -99,49 +99,136 @@ export default function SeedsPage() {
       ) : (
         <div className="space-y-2">
           {seeds.map((seed) => (
-            <div
+            <SeedCard
               key={seed.id}
-              className={`flex items-center gap-4 p-4 rounded-xl transition-colors ${
-                seed.active
-                  ? "bg-surface-1"
-                  : "bg-surface-1/50 opacity-60"
-              }`}
+              seed={seed}
+              onToggle={handleToggle}
+              onDelete={handleDelete}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SeedCard({
+  seed,
+  onToggle,
+  onDelete,
+}: {
+  seed: Seed;
+  onToggle: (id: string, active: boolean) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const episodes = seed.episodes || [];
+  const lastRun = seed.last_run;
+  const noMatches = lastRun && lastRun.tracks_found === 0;
+
+  return (
+    <div
+      className={`rounded-xl transition-colors ${
+        seed.active ? "bg-surface-1" : "bg-surface-1/50 opacity-60"
+      }`}
+    >
+      {/* Main row */}
+      <div className="flex items-center gap-4 p-4">
+        {/* Active indicator */}
+        <button
+          onClick={() => onToggle(seed.id, seed.active)}
+          className={`w-3 h-3 rounded-full flex-shrink-0 transition-colors ${
+            seed.active ? "bg-accent" : "bg-surface-4"
+          }`}
+          title={seed.active ? "Active — click to deactivate" : "Inactive — click to activate"}
+        />
+
+        {/* Info — clickable to expand */}
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex-1 min-w-0 text-left"
+        >
+          <p className="text-sm font-medium text-white truncate">
+            {seed.artist}
+          </p>
+          <p className="text-xs text-white/60 truncate">{seed.title}</p>
+          {/* Episode count hint */}
+          {episodes.length > 0 && (
+            <p className="text-[10px] text-muted mt-0.5">
+              {episodes.length} episode{episodes.length !== 1 ? "s" : ""} {expanded ? "▾" : "▸"}
+            </p>
+          )}
+        </button>
+
+        {/* Discovery count + no-match warning */}
+        <div className="text-right flex-shrink-0">
+          <p className="text-sm font-mono text-accent">
+            {seed.discovery_count || 0}
+          </p>
+          <p className="text-[10px] text-muted">found</p>
+          {noMatches && (
+            <p className="text-[10px] text-amber-400 mt-0.5" title="Last pipeline run found no matching episodes for this seed">
+              no matches
+            </p>
+          )}
+        </div>
+
+        {/* Delete */}
+        <button
+          onClick={() => onDelete(seed.id)}
+          className="p-1.5 text-muted hover:text-red-400 transition-colors text-xs"
+          title="Remove seed"
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* No-match banner */}
+      {noMatches && seed.active && (
+        <div className="mx-4 mb-3 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-400">
+          Last run ({new Date(lastRun.started_at).toLocaleDateString()}) found no episodes — consider deactivating or removing this seed.
+        </div>
+      )}
+
+      {/* Expanded: related episodes */}
+      {expanded && episodes.length > 0 && (
+        <div className="border-t border-surface-3 px-4 py-3 space-y-1.5">
+          <p className="text-[10px] text-muted uppercase tracking-wider mb-2">Related Episodes</p>
+          {episodes.map((ep) => (
+            <div
+              key={ep.id}
+              className="flex items-center gap-2 py-1.5 text-sm"
             >
-              {/* Active indicator */}
-              <button
-                onClick={() => handleToggle(seed.id, seed.active)}
-                className={`w-3 h-3 rounded-full flex-shrink-0 transition-colors ${
-                  seed.active ? "bg-accent" : "bg-surface-4"
-                }`}
-                title={seed.active ? "Active — click to deactivate" : "Inactive — click to activate"}
-              />
-
-              {/* Info */}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">
-                  {seed.artist}
-                </p>
-                <p className="text-xs text-white/60 truncate">{seed.title}</p>
-              </div>
-
-              {/* Discovery count */}
-              <div className="text-right flex-shrink-0">
-                <p className="text-sm font-mono text-accent">
-                  {seed.discovery_count || 0}
-                </p>
-                <p className="text-[10px] text-muted">found</p>
-              </div>
-
-              {/* Delete */}
-              <button
-                onClick={() => handleDelete(seed.id)}
-                className="p-1.5 text-muted hover:text-red-400 transition-colors text-xs"
-                title="Remove seed"
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-muted uppercase tracking-wider flex-shrink-0">
+                {ep.source}
+              </span>
+              <a
+                href={ep.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-white/80 truncate flex-1 min-w-0 hover:text-white transition-colors"
               >
-                ✕
-              </button>
+                {ep.title || ep.url}
+              </a>
+              {ep.aired_date && (
+                <span className="text-[10px] text-muted flex-shrink-0">
+                  {ep.aired_date}
+                </span>
+              )}
+              <a
+                href={`/?episode_id=${ep.id}&episode_title=${encodeURIComponent(ep.title || ep.url)}`}
+                className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent hover:bg-accent/20 transition-colors flex-shrink-0"
+              >
+                Swipe →
+              </a>
             </div>
           ))}
+        </div>
+      )}
+
+      {expanded && episodes.length === 0 && (
+        <div className="border-t border-surface-3 px-4 py-3">
+          <p className="text-[11px] text-muted/50">No episodes linked to this seed yet</p>
         </div>
       )}
     </div>

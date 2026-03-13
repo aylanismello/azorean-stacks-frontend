@@ -7,6 +7,7 @@ const links = [
   { href: "/", label: "Stack", icon: "◉" },
   { href: "/approved", label: "Approved", icon: "✓" },
   { href: "/seeds", label: "Seeds", icon: "◎" },
+  { href: "/episodes", label: "Episodes", icon: "▶" },
   { href: "/stats", label: "Stats", icon: "▤" },
 ];
 

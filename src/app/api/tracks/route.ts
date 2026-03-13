@@ -9,6 +9,7 @@ export async function GET(req: NextRequest) {
   const offset = parseInt(searchParams.get("offset") || "0", 10);
   const search = searchParams.get("search");
   const source = searchParams.get("source");
+  const episodeId = searchParams.get("episode_id");
 
   let query = supabase
     .from("tracks")
@@ -17,6 +18,9 @@ export async function GET(req: NextRequest) {
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
 
+  if (episodeId) {
+    query = query.eq("episode_id", episodeId);
+  }
   if (search) {
     // Escape special ilike pattern characters
     const escaped = search.replace(/[%_\\]/g, (c) => `\\${c}`);

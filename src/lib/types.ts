@@ -19,6 +19,7 @@ export interface Track {
   voted_at: string | null;
   downloaded_at: string | null;
   audio_url?: string | null;
+  episode_id: string | null;
 }
 
 export interface Seed {
@@ -29,6 +30,8 @@ export interface Seed {
   active: boolean;
   created_at: string;
   discovery_count?: number;
+  episodes?: Array<{ id: string; title: string | null; url: string; source: string; aired_date: string | null }>;
+  last_run?: { tracks_found: number; tracks_added: number; started_at: string } | null;
 }
 
 export interface DiscoveryRun {
@@ -49,6 +52,31 @@ export interface TasteSignal {
   weight: number;
   sample_count: number;
   updated_at: string;
+}
+
+export interface Episode {
+  id: string;
+  url: string;
+  title: string | null;
+  source: string;
+  aired_date: string | null;
+  crawled_at: string;
+  seeds: Array<{ id: string; artist: string; title: string }>;
+  track_stats: {
+    total: number;
+    pending: number;
+    approved: number;
+    rejected: number;
+  };
+}
+
+export interface EpisodeTrack {
+  id: string;
+  artist: string;
+  title: string;
+  status: string;
+  spotify_url: string | null;
+  youtube_url: string | null;
 }
 
 export interface Stats {

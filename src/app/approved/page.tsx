@@ -65,22 +65,38 @@ export default function ApprovedPage() {
     setPage(0);
   }, [debouncedSearch, source]);
 
+  const [downloading, setDownloading] = useState<Set<string>>(new Set());
+
   const handleDownload = async (track: Track) => {
+    if (downloading.has(track.id)) return;
+    setDownloading((prev) => new Set(prev).add(track.id));
     try {
       const res = await fetch(`/api/tracks/${track.id}/download`);
-      if (!res.ok) {
-        if (res.status === 202) return; // queued, not ready yet
-        throw new Error(`Download failed (${res.status})`);
-      }
+      if (res.status === 202) return; // queued, not ready yet
+      if (!res.ok) throw new Error(`Download failed (${res.status})`);
       const data = await res.json();
       if (data.url) {
+        // Fetch as blob to force a real download instead of navigating
+        const fileRes = await fetch(data.url);
+        if (!fileRes.ok) throw new Error("Failed to fetch file");
+        const blob = await fileRes.blob();
+        const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = data.url;
-        a.download = data.filename || `${track.artist} - ${track.title}`;
+        a.href = blobUrl;
+        a.download = (data.filename || `${track.artist} - ${track.title}`) + ".mp3";
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloading((prev) => {
+        const next = new Set(prev);
+        next.delete(track.id);
+        return next;
+      });
     }
   };
 
@@ -222,8 +238,9 @@ export default function ApprovedPage() {
                           onClick={() => handleDownload(track)}
                           className="p-1.5 hover:bg-surface-2 rounded transition-colors text-muted hover:text-accent"
                           title={track.storage_path ? "Download MP3" : "Not downloaded yet"}
+                          disabled={downloading.has(track.id)}
                         >
-                          {track.storage_path ? "↓" : "⏳"}
+                          {downloading.has(track.id) ? "..." : track.storage_path ? "↓" : "⏳"}
                         </button>
                       </div>
                     </td>
@@ -297,8 +314,9 @@ export default function ApprovedPage() {
                   <button
                     onClick={() => handleDownload(track)}
                     className="p-1.5 text-muted hover:text-accent"
+                    disabled={downloading.has(track.id)}
                   >
-                    {track.storage_path ? "↓" : "⏳"}
+                    {downloading.has(track.id) ? "..." : track.storage_path ? "↓" : "⏳"}
                   </button>
                 </div>
               </div>
