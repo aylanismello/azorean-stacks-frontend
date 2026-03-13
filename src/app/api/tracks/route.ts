@@ -72,7 +72,6 @@ export async function POST(req: NextRequest) {
     seed_track_id?: string;
     preview_url?: string;
     cover_art_url?: string;
-    agent_reason?: string;
     metadata?: Record<string, unknown>;
   }> = Array.isArray(body) ? body : [body];
 
@@ -107,7 +106,6 @@ export async function POST(req: NextRequest) {
       seed_track_id: track.seed_track_id || null,
       preview_url: track.preview_url || null,
       cover_art_url: track.cover_art_url || null,
-      agent_reason: track.agent_reason || null,
       metadata: track.metadata || {},
     });
 

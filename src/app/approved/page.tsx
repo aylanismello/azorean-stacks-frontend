@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Track } from "@/lib/types";
-
-const SOURCES = ["all", "nts", "1001tracklists", "spotify", "bandcamp", "manual"];
+import { PlayerSection } from "@/components/PlayerSection";
 
 function safeCoverUrl(url: string | null): string | null {
   if (!url) return null;
@@ -15,12 +14,12 @@ function safeCoverUrl(url: string | null): string | null {
 }
 
 export default function ApprovedPage() {
+  const [tab, setTab] = useState<"approved" | "rejected">("approved");
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [source, setSource] = useState("all");
   const [page, setPage] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const limit = 30;
@@ -36,12 +35,11 @@ export default function ApprovedPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams({
-        status: "approved",
+        status: tab,
         limit: String(limit),
         offset: String(page * limit),
       });
       if (debouncedSearch) params.set("search", debouncedSearch);
-      if (source !== "all") params.set("source", source);
 
       const res = await fetch(`/api/tracks?${params}`);
       if (!res.ok) throw new Error(`Failed to load tracks (${res.status})`);
@@ -54,7 +52,7 @@ export default function ApprovedPage() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, source, page]);
+  }, [debouncedSearch, tab, page]);
 
   useEffect(() => {
     fetchTracks();
@@ -63,20 +61,21 @@ export default function ApprovedPage() {
   // Reset page when filters change
   useEffect(() => {
     setPage(0);
-  }, [debouncedSearch, source]);
+  }, [debouncedSearch, tab]);
 
+  const [expandedTrack, setExpandedTrack] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
+  const [updating, setUpdating] = useState<Set<string>>(new Set());
 
   const handleDownload = async (track: Track) => {
     if (downloading.has(track.id)) return;
     setDownloading((prev) => new Set(prev).add(track.id));
     try {
       const res = await fetch(`/api/tracks/${track.id}/download`);
-      if (res.status === 202) return; // queued, not ready yet
+      if (res.status === 202) return;
       if (!res.ok) throw new Error(`Download failed (${res.status})`);
       const data = await res.json();
       if (data.url) {
-        // Fetch as blob to force a real download instead of navigating
         const fileRes = await fetch(data.url);
         if (!fileRes.ok) throw new Error("Failed to fetch file");
         const blob = await fileRes.blob();
@@ -95,6 +94,30 @@ export default function ApprovedPage() {
       setDownloading((prev) => {
         const next = new Set(prev);
         next.delete(track.id);
+        return next;
+      });
+    }
+  };
+
+  const handleChangeStatus = async (trackId: string, newStatus: "approved" | "rejected") => {
+    if (updating.has(trackId)) return;
+    setUpdating((prev) => new Set(prev).add(trackId));
+    try {
+      const res = await fetch(`/api/tracks/${trackId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+      // Remove from current list since it changed tabs
+      setTracks((prev) => prev.filter((t) => t.id !== trackId));
+      setTotal((prev) => prev - 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update track");
+    } finally {
+      setUpdating((prev) => {
+        const next = new Set(prev);
+        next.delete(trackId);
         return next;
       });
     }
@@ -123,39 +146,45 @@ export default function ApprovedPage() {
 
   return (
     <div className="px-4 md:px-6 pt-4 md:pt-8 max-w-4xl mx-auto">
-      <h1 className="text-xl font-semibold mb-6">
-        Approved
-        {total > 0 && (
-          <span className="text-muted font-normal text-base ml-2">
-            {total}
-          </span>
-        )}
-      </h1>
+      {/* Tabs */}
+      <div className="flex items-center gap-1 mb-6">
+        <button
+          onClick={() => setTab("approved")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            tab === "approved"
+              ? "bg-accent/15 text-accent"
+              : "text-muted hover:text-white"
+          }`}
+        >
+          Approved
+          {tab === "approved" && total > 0 && (
+            <span className="ml-1.5 text-xs font-normal opacity-70">{total}</span>
+          )}
+        </button>
+        <button
+          onClick={() => setTab("rejected")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            tab === "rejected"
+              ? "bg-red-400/15 text-red-400"
+              : "text-muted hover:text-white"
+          }`}
+        >
+          Rejected
+          {tab === "rejected" && total > 0 && (
+            <span className="ml-1.5 text-xs font-normal opacity-70">{total}</span>
+          )}
+        </button>
+      </div>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+      {/* Search */}
+      <div className="mb-6">
         <input
           type="text"
           placeholder="Search artist or title..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 px-4 py-2.5 bg-surface-1 border border-surface-3 rounded-lg text-sm text-white placeholder:text-muted focus:outline-none focus:border-accent/50 transition-colors"
+          className="w-full px-4 py-2.5 bg-surface-1 border border-surface-3 rounded-lg text-sm text-white placeholder:text-muted focus:outline-none focus:border-accent/50 transition-colors"
         />
-        <div className="flex gap-1.5 overflow-x-auto pb-1">
-          {SOURCES.map((s) => (
-            <button
-              key={s}
-              onClick={() => setSource(s)}
-              className={`px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
-                source === s
-                  ? "bg-accent/15 text-accent"
-                  : "bg-surface-2 text-muted hover:text-white"
-              }`}
-            >
-              {s === "all" ? "All" : sourceLabel(s)}
-            </button>
-          ))}
-        </div>
       </div>
 
       {error ? (
@@ -174,9 +203,11 @@ export default function ApprovedPage() {
         </div>
       ) : tracks.length === 0 ? (
         <div className="text-center py-20 text-muted text-sm">
-          {search || source !== "all"
-            ? "No tracks match your filters"
-            : "No approved tracks yet. Start swiping!"}
+          {search
+            ? "No tracks match your search"
+            : tab === "approved"
+            ? "No approved tracks yet. Start swiping!"
+            : "No rejected tracks"}
         </div>
       ) : (
         <>
@@ -187,62 +218,111 @@ export default function ApprovedPage() {
                 <tr className="text-left text-muted text-xs border-b border-surface-2">
                   <th className="pb-3 font-medium">Artist</th>
                   <th className="pb-3 font-medium">Title</th>
-                  <th className="pb-3 font-medium">Source</th>
                   <th className="pb-3 font-medium">Date</th>
-                  <th className="pb-3 font-medium w-10"></th>
+                  <th className="pb-3 font-medium w-24"></th>
                 </tr>
               </thead>
               <tbody>
                 {tracks.map((track) => (
-                  <tr
-                    key={track.id}
-                    className="border-b border-surface-1 hover:bg-surface-1/50 transition-colors"
-                  >
-                    <td className="py-3 pr-4 text-white font-medium">
-                      {track.artist}
-                    </td>
-                    <td className="py-3 pr-4 text-white/80">{track.title}</td>
-                    <td className="py-3 pr-4">
-                      <span className="px-2 py-0.5 bg-surface-2 rounded text-xs text-muted">
-                        {sourceLabel(track.source)}
-                      </span>
-                    </td>
-                    <td className="py-3 pr-4 text-muted text-xs font-mono">
-                      {formatDate(track.voted_at)}
-                    </td>
-                    <td className="py-3">
-                      <div className="flex items-center gap-1">
-                        {track.spotify_url && (
-                          <a
-                            href={track.spotify_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 hover:bg-surface-2 rounded transition-colors text-green-400/60 hover:text-green-400"
-                            title="Open in Spotify"
+                  <tr key={track.id} className="group">
+                    <td colSpan={5} className="p-0">
+                      <div
+                        className="flex items-center border-b border-surface-1 hover:bg-surface-1/50 transition-colors cursor-pointer"
+                        onClick={() => setExpandedTrack(expandedTrack === track.id ? null : track.id)}
+                      >
+                        <div className="py-3 pr-4 pl-1 text-white font-medium text-sm flex-[2] flex items-center gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedTrack(track.id);
+                            }}
+                            className={`w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-full transition-colors ${
+                              expandedTrack === track.id ? "bg-accent text-surface-0" : "bg-surface-2 text-muted group-hover:text-white hover:bg-accent hover:text-surface-0"
+                            }`}
                           >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
-                          </a>
-                        )}
-                        {track.youtube_url && (
-                          <a
-                            href={track.youtube_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 hover:bg-surface-2 rounded transition-colors text-red-400/60 hover:text-red-400"
-                            title="Listen on YouTube"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                          </a>
-                        )}
-                        <button
-                          onClick={() => handleDownload(track)}
-                          className="p-1.5 hover:bg-surface-2 rounded transition-colors text-muted hover:text-accent"
-                          title={track.storage_path ? "Download MP3" : "Not downloaded yet"}
-                          disabled={downloading.has(track.id)}
-                        >
-                          {downloading.has(track.id) ? "..." : track.storage_path ? "↓" : "⏳"}
-                        </button>
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+                          </button>
+                          {track.artist}
+                        </div>
+                        <div className="py-3 pr-4 text-white/80 text-sm flex-[2]">
+                          {track.title}
+                        </div>
+                        <div className="py-3 pr-4 text-muted text-xs font-mono flex-1">
+                          {formatDate(track.voted_at)}
+                        </div>
+                        <div className="py-3 w-24 flex justify-end">
+                          <div className="flex items-center gap-1">
+                            {track.spotify_url && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedTrack(expandedTrack === track.id ? null : track.id);
+                                }}
+                                className={`p-1.5 rounded transition-colors ${
+                                  expandedTrack === track.id
+                                    ? "bg-green-400/15 text-green-400"
+                                    : "hover:bg-surface-2 text-green-400/60 hover:text-green-400"
+                                }`}
+                                title="Preview on Spotify"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+                              </button>
+                            )}
+                            {track.youtube_url && (
+                              <a
+                                href={track.youtube_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="p-1.5 hover:bg-surface-2 rounded transition-colors text-red-400/60 hover:text-red-400"
+                                title="Listen on YouTube"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                              </a>
+                            )}
+                            {tab === "approved" && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDownload(track); }}
+                                className={`p-1.5 hover:bg-surface-2 rounded transition-colors ${
+                                  track.dl_attempts >= 3 ? "text-red-400/60 hover:text-red-400" : "text-muted hover:text-accent"
+                                }`}
+                                title={track.storage_path ? "Download MP3" : track.dl_attempts >= 3 ? `Failed ${track.dl_attempts}x` : "Pending download"}
+                                disabled={downloading.has(track.id)}
+                              >
+                                {downloading.has(track.id) ? "..." : track.storage_path ? "↓" : track.dl_attempts >= 3 ? "✗" : "⏳"}
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       </div>
+                      {/* Expandable player section */}
+                      {expandedTrack === track.id && (
+                        <div className="px-2 py-3 border-b border-surface-2 bg-surface-1/30 space-y-2">
+                          <PlayerSection
+                            spotifyUrl={track.spotify_url}
+                            audioSrc={track.audio_url || track.preview_url}
+                            compact
+                            autoPlay
+                          />
+                          {/* Move to other list */}
+                          <div className="flex justify-end pt-1">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleChangeStatus(track.id, tab === "approved" ? "rejected" : "approved");
+                              }}
+                              disabled={updating.has(track.id)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                tab === "approved"
+                                  ? "text-muted hover:text-red-400 hover:bg-red-400/10"
+                                  : "text-muted hover:text-green-400 hover:bg-green-400/10"
+                              } disabled:opacity-50`}
+                            >
+                              {tab === "approved" ? "Move to rejected" : "Move to approved"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -253,72 +333,101 @@ export default function ApprovedPage() {
           {/* Mobile: cards */}
           <div className="md:hidden space-y-2">
             {tracks.map((track) => (
-              <div
-                key={track.id}
-                className="bg-surface-1 rounded-xl p-4 flex items-center gap-3"
-              >
-                {/* Mini cover */}
+              <div key={track.id} className="bg-surface-1 rounded-xl overflow-hidden">
                 <div
-                  className="w-12 h-12 rounded-lg flex-shrink-0"
-                  style={
-                    safeCoverUrl(track.cover_art_url)
-                      ? {
-                          backgroundImage: `url(${safeCoverUrl(track.cover_art_url)})`,
-                          backgroundSize: "cover",
-                          backgroundPosition: "center",
-                        }
-                      : {
-                          background: `linear-gradient(135deg, hsl(${
-                            (track.artist.length * 37) % 360
-                          }, 40%, 20%), hsl(${
-                            (track.title.length * 53) % 360
-                          }, 50%, 12%))`,
-                        }
-                  }
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-white truncate">
-                    {track.artist}
-                  </p>
-                  <p className="text-xs text-white/60 truncate">{track.title}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[10px] text-muted">
-                      {sourceLabel(track.source)}
+                  className="p-4 flex items-center gap-3 cursor-pointer"
+                  onClick={() => setExpandedTrack(expandedTrack === track.id ? null : track.id)}
+                >
+                  {/* Cover art / play button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExpandedTrack(track.id);
+                    }}
+                    className="w-10 h-10 rounded-lg flex-shrink-0 flex items-center justify-center"
+                    style={
+                      safeCoverUrl(track.cover_art_url)
+                        ? {
+                            backgroundImage: `url(${safeCoverUrl(track.cover_art_url)})`,
+                            backgroundSize: "cover",
+                            backgroundPosition: "center",
+                          }
+                        : {
+                            background: `linear-gradient(135deg, hsl(${(track.artist.length * 37) % 360}, 40%, 20%), hsl(${(track.title.length * 53) % 360}, 50%, 12%))`,
+                          }
+                    }
+                  >
+                    <span className={`w-6 h-6 flex items-center justify-center rounded-full backdrop-blur-sm ${
+                      expandedTrack === track.id ? "bg-accent/90 text-surface-0" : "bg-black/40 text-white/80"
+                    }`}>
+                      <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
                     </span>
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white truncate">
+                      {track.artist}
+                    </p>
+                    <p className="text-xs text-white/60 truncate">{track.title}</p>
                     <span className="text-[10px] text-muted font-mono">
                       {formatDate(track.voted_at)}
                     </span>
                   </div>
+                  <div className="flex items-center gap-1">
+                    {track.spotify_url && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExpandedTrack(expandedTrack === track.id ? null : track.id);
+                        }}
+                        className={`p-1.5 rounded transition-colors ${
+                          expandedTrack === track.id
+                            ? "bg-green-400/15 text-green-400"
+                            : "text-green-400/60 hover:text-green-400"
+                        }`}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+                      </button>
+                    )}
+                    {track.youtube_url && (
+                      <a
+                        href={track.youtube_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="p-1.5 text-red-400/60 hover:text-red-400"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                      </a>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-1">
-                  {track.spotify_url && (
-                    <a
-                      href={track.spotify_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-1.5 text-green-400/60 hover:text-green-400"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
-                    </a>
-                  )}
-                  {track.youtube_url && (
-                    <a
-                      href={track.youtube_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-1.5 text-red-400/60 hover:text-red-400"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                    </a>
-                  )}
-                  <button
-                    onClick={() => handleDownload(track)}
-                    className="p-1.5 text-muted hover:text-accent"
-                    disabled={downloading.has(track.id)}
-                  >
-                    {downloading.has(track.id) ? "..." : track.storage_path ? "↓" : "⏳"}
-                  </button>
-                </div>
+                {/* Expandable player section */}
+                {expandedTrack === track.id && (
+                  <div className="px-4 pb-4 space-y-2">
+                    <PlayerSection
+                      spotifyUrl={track.spotify_url}
+                      audioSrc={track.audio_url || track.preview_url}
+                      compact
+                      autoPlay
+                    />
+                    <div className="flex justify-end pt-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleChangeStatus(track.id, tab === "approved" ? "rejected" : "approved");
+                        }}
+                        disabled={updating.has(track.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                          tab === "approved"
+                            ? "text-muted hover:text-red-400 hover:bg-red-400/10"
+                            : "text-muted hover:text-green-400 hover:bg-green-400/10"
+                        } disabled:opacity-50`}
+                      >
+                        {tab === "approved" ? "Move to rejected" : "Move to approved"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

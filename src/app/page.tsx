@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Track } from "@/lib/types";
 import { TrackCard } from "@/components/TrackCard";
 
@@ -21,6 +21,7 @@ export default function StackPage() {
 
 function StackPageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const episodeId = searchParams.get("episode_id");
   const episodeTitle = searchParams.get("episode_title");
 
@@ -28,6 +29,7 @@ function StackPageContent() {
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [skippingEpisode, setSkippingEpisode] = useState(false);
 
   const buildUrl = useCallback((extra?: string) => {
     let url = `/api/tracks?status=pending&limit=20`;
@@ -55,7 +57,7 @@ function StackPageContent() {
     fetchTracks();
   }, [fetchTracks]);
 
-  const handleVote = async (id: string, status: "approved" | "rejected") => {
+  const handleVote = async (id: string, status: "approved" | "rejected", advance: boolean = true) => {
     try {
       const res = await fetch(`/api/tracks/${id}`, {
         method: "PATCH",
@@ -63,6 +65,9 @@ function StackPageContent() {
         body: JSON.stringify({ status }),
       });
       if (!res.ok) throw new Error(`Vote failed (${res.status})`);
+
+      // If not advancing (user wants to keep listening), don't remove from list
+      if (!advance) return;
 
       setTracks((prev) => {
         const remaining = prev.filter((t) => t.id !== id);
@@ -95,6 +100,35 @@ function StackPageContent() {
     } catch (err) {
       console.error("Vote error:", err);
       setError("Failed to vote. Please try again.");
+    }
+  };
+
+  // The episode to skip: either from URL param or from the current track
+  const currentEpisodeId = episodeId || (tracks.length > 0 ? tracks[0].episode_id : null);
+
+  const handleSkipEpisode = async () => {
+    if (!currentEpisodeId || skippingEpisode) return;
+    setSkippingEpisode(true);
+    try {
+      const res = await fetch(`/api/episodes/${currentEpisodeId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skipped: true }),
+      });
+      if (!res.ok) throw new Error("Failed to skip episode");
+
+      if (episodeId) {
+        // Came from episodes page — go back
+        router.push("/episodes");
+      } else {
+        // Main swipe — remove all tracks from this episode and refetch
+        setTracks((prev) => prev.filter((t) => t.episode_id !== currentEpisodeId));
+        fetchTracks();
+        setSkippingEpisode(false);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to skip episode");
+      setSkippingEpisode(false);
     }
   };
 
@@ -207,13 +241,20 @@ function StackPageContent() {
       </div>
 
       {/* Current card */}
-      <TrackCard key={tracks[0].id} track={tracks[0]} onVote={handleVote} />
+      <TrackCard
+        key={tracks[0].id}
+        track={tracks[0]}
+        onVote={handleVote}
+        onSkipEpisode={currentEpisodeId ? handleSkipEpisode : undefined}
+        skippingEpisode={skippingEpisode}
+      />
 
       {/* Keyboard hint (desktop only) */}
       <div className="hidden md:flex justify-center gap-6 mt-6 text-xs text-muted">
         <span>← / j to skip</span>
         <span>→ / k to keep</span>
       </div>
+
     </div>
   );
 }

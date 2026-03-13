@@ -8,6 +8,8 @@ export async function GET(req: NextRequest) {
   const offset = parseInt(searchParams.get("offset") || "0", 10);
   const source = searchParams.get("source");
 
+  const showSkipped = searchParams.get("show_skipped") === "true";
+
   let query = supabase
     .from("episodes")
     .select("*, episode_seeds(seed_id, seeds(artist, title))", { count: "exact" })
@@ -16,6 +18,10 @@ export async function GET(req: NextRequest) {
 
   if (source) {
     query = query.eq("source", source);
+  }
+
+  if (!showSkipped) {
+    query = query.or("skipped.is.null,skipped.eq.false");
   }
 
   const { data: episodes, error, count } = await query;
@@ -38,6 +44,7 @@ export async function GET(req: NextRequest) {
     source: ep.source,
     aired_date: ep.aired_date,
     crawled_at: ep.crawled_at,
+    skipped: ep.skipped || false,
     seeds: (ep.episode_seeds || [])
       .filter((es: any) => es.seeds)
       .map((es: any) => ({ id: es.seed_id, artist: es.seeds.artist, title: es.seeds.title })),

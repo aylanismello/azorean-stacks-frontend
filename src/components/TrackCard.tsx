@@ -2,11 +2,13 @@
 
 import { useState, useCallback, useRef } from "react";
 import { Track } from "@/lib/types";
-import { AudioPlayer } from "./AudioPlayer";
+import { PlayerSection } from "./PlayerSection";
 
 interface TrackCardProps {
   track: Track;
-  onVote: (id: string, status: "approved" | "rejected") => Promise<void>;
+  onVote: (id: string, status: "approved" | "rejected", advance?: boolean) => Promise<void>;
+  onSkipEpisode?: () => void;
+  skippingEpisode?: boolean;
 }
 
 // Generate a deterministic gradient from artist+title
@@ -41,20 +43,29 @@ function sourceLabel(source: string): string {
   return labels[source] || source;
 }
 
-export function TrackCard({ track, onVote }: TrackCardProps) {
+export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: TrackCardProps) {
   const [exiting, setExiting] = useState<"left" | "right" | null>(null);
   const [voting, setVoting] = useState(false);
+  const [approved, setApproved] = useState(false);
   const votingRef = useRef(false);
 
   const handleVote = useCallback(
-    async (status: "approved" | "rejected") => {
+    async (status: "approved" | "rejected", advance: boolean = true) => {
       if (votingRef.current) return;
+
+      // "Keep" without advance: approve in background, stay on card
+      if (status === "approved" && !advance) {
+        setApproved(true);
+        await onVote(track.id, status, false);
+        return;
+      }
+
       votingRef.current = true;
       setVoting(true);
       setExiting(status === "approved" ? "right" : "left");
       // Wait for animation, then fire vote
       await new Promise((r) => setTimeout(r, 250));
-      await onVote(track.id, status);
+      await onVote(track.id, status, true);
     },
     [track.id, onVote]
   );
@@ -112,10 +123,11 @@ export function TrackCard({ track, onVote }: TrackCardProps) {
 
         {/* Details section */}
         <div className="p-5 space-y-4">
-          {/* Agent reason */}
-          {track.agent_reason && (
-            <p className="text-sm text-white/60 leading-relaxed italic">
-              &ldquo;{track.agent_reason}&rdquo;
+          {/* Discovery context */}
+          {(track.metadata as any)?.seed_artist && (
+            <p className="text-sm text-white/60 leading-relaxed">
+              via {(track.metadata as any).seed_artist}
+              {(track.metadata as any)?.co_occurrence > 1 && ` · ${(track.metadata as any).co_occurrence} sets`}
             </p>
           )}
 
@@ -144,65 +156,74 @@ export function TrackCard({ track, onVote }: TrackCardProps) {
             )
           )}
 
-          {/* Audio player — streams from storage */}
-          {(track.audio_url || track.preview_url) ? (
-            <AudioPlayer src={track.audio_url || track.preview_url} coverArt={track.cover_art_url} />
-          ) : (
-            <div className="flex items-center gap-2 py-3 px-4 bg-surface-2 rounded-xl text-sm text-white/30">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-50">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                <line x1="23" y1="9" x2="17" y2="15" />
-                <line x1="17" y1="9" x2="23" y2="15" />
-              </svg>
-              Audio not yet available
-            </div>
-          )}
+          {/* Player — audio preferred over Spotify, tabs if both */}
+          <PlayerSection
+            spotifyUrl={track.spotify_url}
+            audioSrc={track.audio_url || track.preview_url}
+            compact
+            autoPlay
+          />
 
-          {/* External links — single row, equal size */}
-          {(track.spotify_url || track.youtube_url) && (
-            <div className="flex gap-2">
-              {track.spotify_url && (
-                <a
-                  href={track.spotify_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-surface-2 hover:bg-surface-3 rounded-xl text-sm text-green-400/80 hover:text-green-400 transition-colors"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
-                  Spotify
-                </a>
-              )}
-              {track.youtube_url && (
-                <a
-                  href={track.youtube_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-surface-2 hover:bg-surface-3 rounded-xl text-sm text-red-400/80 hover:text-red-400 transition-colors"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                  YouTube
-                </a>
-              )}
-            </div>
+          {/* YouTube link — shown separately if available */}
+          {track.youtube_url && (
+            <a
+              href={track.youtube_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 py-2.5 bg-surface-2 hover:bg-surface-3 rounded-xl text-sm text-red-400/80 hover:text-red-400 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+              YouTube
+            </a>
           )}
 
           {/* Vote buttons */}
-          <div className="flex gap-3 pt-1">
+          <div className="flex gap-2 pt-1">
             <button
               onClick={() => handleVote("rejected")}
               disabled={voting}
-              className="flex-1 py-3.5 rounded-xl bg-surface-3 hover:bg-red-950/40 text-white/70 hover:text-red-400 text-base font-medium transition-all active:scale-95 disabled:opacity-50"
+              className="flex-1 py-3 rounded-xl bg-surface-3 hover:bg-red-950/40 text-white/70 hover:text-red-400 text-sm font-medium transition-all active:scale-95 disabled:opacity-50"
             >
-              ✕ Skip
+              Skip
             </button>
-            <button
-              onClick={() => handleVote("approved")}
-              disabled={voting}
-              className="flex-1 py-3.5 rounded-xl bg-accent/15 hover:bg-accent/25 text-accent text-base font-medium transition-all active:scale-95 disabled:opacity-50"
-            >
-              ✓ Keep
-            </button>
+            <div className={`flex-1 flex rounded-xl overflow-hidden transition-all ${
+              approved ? "bg-green-500/20" : "bg-accent/15"
+            } ${voting ? "opacity-50" : ""}`}>
+              <button
+                onClick={() => handleVote("approved", false)}
+                disabled={voting || approved}
+                className={`flex-[4] py-3 text-sm font-medium transition-all active:scale-[0.97] disabled:cursor-default ${
+                  approved
+                    ? "text-green-400"
+                    : "text-accent hover:bg-accent/10"
+                }`}
+              >
+                {approved ? "Kept ✓" : "Keep"}
+              </button>
+              <button
+                onClick={() => handleVote("approved", true)}
+                disabled={voting}
+                className={`flex-[1] py-3 border-l text-sm transition-all active:scale-[0.97] flex items-center justify-center ${
+                  approved
+                    ? "border-green-400/20 text-green-400 hover:bg-green-500/10"
+                    : "border-accent/20 text-accent/60 hover:text-accent hover:bg-accent/10"
+                }`}
+              >
+                →
+              </button>
+            </div>
           </div>
+
+          {/* Skip episode */}
+          {onSkipEpisode && (
+            <button
+              onClick={onSkipEpisode}
+              disabled={skippingEpisode}
+              className="w-full mt-2 py-2.5 rounded-xl border border-surface-3 bg-surface-2/50 hover:bg-red-950/30 hover:border-red-400/20 text-xs text-muted hover:text-red-400 font-medium transition-all active:scale-[0.98] disabled:opacity-50"
+            >
+              {skippingEpisode ? "Skipping episode..." : "Skip entire episode ×"}
+            </button>
+          )}
         </div>
       </div>
     </div>

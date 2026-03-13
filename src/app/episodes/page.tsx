@@ -9,11 +9,12 @@ export default function EpisodesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
+  const [showSkipped, setShowSkipped] = useState(false);
   const limit = 30;
 
   const fetchEpisodes = useCallback(async () => {
     try {
-      const res = await fetch(`/api/episodes?limit=${limit}&offset=${offset}`);
+      const res = await fetch(`/api/episodes?limit=${limit}&offset=${offset}${showSkipped ? "&show_skipped=true" : ""}`);
       if (!res.ok) throw new Error(`Failed to load episodes (${res.status})`);
       const data = await res.json();
       setEpisodes(data.episodes || []);
@@ -24,7 +25,7 @@ export default function EpisodesPage() {
     } finally {
       setLoading(false);
     }
-  }, [offset]);
+  }, [offset, showSkipped]);
 
   useEffect(() => {
     fetchEpisodes();
@@ -34,7 +35,17 @@ export default function EpisodesPage() {
 
   return (
     <div className="px-4 md:px-6 pt-4 md:pt-8 max-w-2xl mx-auto pb-24">
-      <h1 className="text-xl font-semibold mb-1">Episodes</h1>
+      <div className="flex items-center justify-between mb-1">
+        <h1 className="text-xl font-semibold">Episodes</h1>
+        <button
+          onClick={() => { setShowSkipped(!showSkipped); setOffset(0); }}
+          className={`text-[11px] px-2.5 py-1 rounded-lg transition-colors ${
+            showSkipped ? "bg-surface-2 text-white/70" : "text-muted/50 hover:text-muted"
+          }`}
+        >
+          {showSkipped ? "Hide skipped" : "Show skipped"}
+        </button>
+      </div>
       <p className="text-sm text-muted mb-6">
         {total} episode{total !== 1 ? "s" : ""} crawled
       </p>
@@ -59,7 +70,18 @@ export default function EpisodesPage() {
       ) : (
         <div className="space-y-2">
           {episodes.map((ep) => (
-            <EpisodeCard key={ep.id} episode={ep} />
+            <EpisodeCard
+              key={ep.id}
+              episode={ep}
+              onUnskip={ep.skipped ? async () => {
+                await fetch(`/api/episodes/${ep.id}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ skipped: false }),
+                });
+                fetchEpisodes();
+              } : undefined}
+            />
           ))}
         </div>
       )}
@@ -87,7 +109,7 @@ export default function EpisodesPage() {
   );
 }
 
-function EpisodeCard({ episode }: { episode: Episode }) {
+function EpisodeCard({ episode, onUnskip }: { episode: Episode; onUnskip?: () => void }) {
   const { track_stats } = episode;
   const total = track_stats.total || 0;
   const [expanded, setExpanded] = useState(false);
@@ -123,7 +145,7 @@ function EpisodeCard({ episode }: { episode: Episode }) {
   };
 
   return (
-    <div className="rounded-xl bg-surface-1 overflow-hidden">
+    <div className={`rounded-xl overflow-hidden ${episode.skipped ? "bg-surface-1/50 opacity-60" : "bg-surface-1"}`}>
       <button
         onClick={handleExpand}
         className="w-full text-left p-4 hover:bg-surface-2/50 transition-colors"
@@ -139,6 +161,11 @@ function EpisodeCard({ episode }: { episode: Episode }) {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
+            {episode.skipped && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-400/10 text-red-400/70">
+                skipped
+              </span>
+            )}
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface-2 text-muted uppercase tracking-wider">
               {episode.source}
             </span>
@@ -218,6 +245,14 @@ function EpisodeCard({ episode }: { episode: Episode }) {
               >
                 Swipe {track_stats.pending} pending →
               </a>
+            )}
+            {episode.skipped && onUnskip && (
+              <button
+                onClick={onUnskip}
+                className="text-[11px] px-3 py-1 rounded-full bg-surface-2 text-muted hover:text-white transition-colors"
+              >
+                Restore episode
+              </button>
             )}
           </div>
 

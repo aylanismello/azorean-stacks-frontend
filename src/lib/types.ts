@@ -12,12 +12,14 @@ export interface Track {
   storage_path: string | null;
   spotify_url: string | null;
   youtube_url: string | null;
-  agent_reason: string | null;
+
   metadata: Record<string, unknown>;
   status: "pending" | "approved" | "rejected" | "downloaded";
   created_at: string;
   voted_at: string | null;
   downloaded_at: string | null;
+  dl_attempts: number;
+  dl_failed_at: string | null;
   audio_url?: string | null;
   episode_id: string | null;
 }
@@ -61,6 +63,7 @@ export interface Episode {
   source: string;
   aired_date: string | null;
   crawled_at: string;
+  skipped: boolean;
   seeds: Array<{ id: string; artist: string; title: string }>;
   track_stats: {
     total: number;
