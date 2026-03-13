@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: #0a0a0a;
+  color: #e0e0e0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #111111;
+}
+::-webkit-scrollbar-thumb {
+  background: #333333;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #444444;
+}
+
+/* Smooth card transitions */
+.card-enter {
+  opacity: 0;
+  transform: translateY(20px) scale(0.98);
+}
+.card-enter-active {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition: opacity 300ms ease-out, transform 300ms ease-out;
+}
+.card-exit {
+  opacity: 1;
+  transform: translateX(0);
+}
+.card-exit-left {
+  opacity: 0;
+  transform: translateX(-120px) rotate(-5deg);
+  transition: opacity 250ms ease-in, transform 250ms ease-in;
+}
+.card-exit-right {
+  opacity: 0;
+  transform: translateX(120px) rotate(5deg);
+  transition: opacity 250ms ease-in, transform 250ms ease-in;
+}
+
+/* Pulse animation for empty state */
+@keyframes gentle-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+.animate-gentle-pulse {
+  animation: gentle-pulse 3s ease-in-out infinite;
+}
+
+/* Safe area for mobile devices with notch/home indicator */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Audio player styling */
+audio::-webkit-media-controls-panel {
+  background: #1a1a1a;
+}
