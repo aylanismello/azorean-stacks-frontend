@@ -1,11 +1,25 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Track } from "@/lib/types";
 import { TrackCard } from "@/components/TrackCard";
 
 export default function StackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-[80vh]">
+          <div className="w-8 h-8 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <StackPageContent />
+    </Suspense>
+  );
+}
+
+function StackPageContent() {
   const searchParams = useSearchParams();
   const episodeId = searchParams.get("episode_id");
   const episodeTitle = searchParams.get("episode_title");
