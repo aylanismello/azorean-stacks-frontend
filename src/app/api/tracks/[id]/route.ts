@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabase, getServiceClient } from "@/lib/supabase";
 
 // PATCH /api/tracks/[id] — update track status (vote)
 export async function PATCH(
@@ -23,6 +23,22 @@ export async function PATCH(
   }
   if (status === "downloaded") {
     updates.downloaded_at = new Date().toISOString();
+  }
+
+  // If rejecting, delete the audio file from storage
+  if (status === "rejected") {
+    const { data: track } = await supabase
+      .from("tracks")
+      .select("storage_path")
+      .eq("id", params.id)
+      .single();
+
+    if (track?.storage_path) {
+      const service = getServiceClient();
+      await service.storage.from("tracks").remove([track.storage_path]);
+      updates.storage_path = null;
+      updates.download_url = null;
+    }
   }
 
   const { data, error } = await supabase

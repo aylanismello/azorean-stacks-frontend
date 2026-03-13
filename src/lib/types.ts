@@ -18,6 +18,7 @@ export interface Track {
   created_at: string;
   voted_at: string | null;
   downloaded_at: string | null;
+  audio_url?: string | null;
 }
 
 export interface Seed {

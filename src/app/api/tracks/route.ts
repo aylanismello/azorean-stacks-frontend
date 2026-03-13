@@ -32,7 +32,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ tracks: data, total: count });
+  // Generate fresh signed URLs for tracks with audio in storage
+  const tracks = data || [];
+  for (const track of tracks) {
+    if (track.storage_path) {
+      const { data: signed } = await supabase.storage
+        .from("tracks")
+        .createSignedUrl(track.storage_path, 3600); // 1 hour
+      if (signed) {
+        track.audio_url = signed.signedUrl;
+      }
+    }
+  }
+
+  return NextResponse.json({ tracks, total: count });
 }
 
 // POST /api/tracks — agent pushes new discoveries (service role)
