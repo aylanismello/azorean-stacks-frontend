@@ -26,8 +26,8 @@ const TAB_CONFIG: Record<Tab, { label: string; color: string; activeBg: string; 
   },
   pending: {
     label: "Unlistened",
-    color: "text-white/60",
-    activeBg: "bg-white/5 text-white/80 ring-1 ring-white/10",
+    color: "text-foreground/60",
+    activeBg: "bg-foreground/5 text-foreground/80 ring-1 ring-foreground/10",
     emptyMsg: "Queue is empty — all caught up.",
   },
   rejected: {
@@ -252,7 +252,7 @@ export default function TracksPage() {
   const moveOptions = (trackId: string): { label: string; status: Tab; color: string }[] => {
     const opts: { label: string; status: Tab; color: string }[] = [];
     if (tab !== "approved") opts.push({ label: "Keep", status: "approved", color: "text-green-400 hover:bg-green-400/10" });
-    if (tab !== "pending") opts.push({ label: "Back to queue", status: "pending", color: "text-white/50 hover:bg-white/5" });
+    if (tab !== "pending") opts.push({ label: "Back to queue", status: "pending", color: "text-foreground/50 hover:bg-foreground/5" });
     if (tab !== "rejected") opts.push({ label: "Skip", status: "rejected", color: "text-red-400/70 hover:bg-red-400/10" });
     return opts;
   };
@@ -292,7 +292,7 @@ export default function TracksPage() {
               key={t}
               onClick={() => setTab(t)}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                isActive ? cfg.activeBg : "text-muted hover:text-white/70 hover:bg-surface-1"
+                isActive ? cfg.activeBg : "text-muted hover:text-foreground/70 hover:bg-surface-1"
               }`}
             >
               {cfg.label}
@@ -321,12 +321,12 @@ export default function TracksPage() {
             placeholder="Search artist or title..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-surface-1 border border-surface-2 rounded-xl text-sm text-white placeholder:text-muted/50 focus:outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 transition-all"
+            className="w-full pl-10 pr-4 py-2.5 bg-surface-1 border border-surface-2 rounded-xl text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 transition-all"
           />
           {search && (
             <button
               onClick={() => setSearch("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-white transition-colors"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground transition-colors"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -382,7 +382,7 @@ export default function TracksPage() {
                           }`}
                           onClick={() => setExpandedTrack(isExpanded ? null : track.id)}
                         >
-                          <div className="py-3 pr-4 pl-1 text-white font-medium text-sm flex-[2] flex items-center gap-2">
+                          <div className="py-3 pr-4 pl-1 text-foreground font-medium text-sm flex-[2] flex items-center gap-2">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -391,7 +391,7 @@ export default function TracksPage() {
                               className={`w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-full transition-all ${
                                 isPlaying
                                   ? "bg-accent text-surface-0 shadow-lg shadow-accent/20"
-                                  : "bg-surface-2 text-muted group-hover:text-white hover:bg-accent hover:text-surface-0"
+                                  : "bg-surface-2 text-muted group-hover:text-foreground hover:bg-accent hover:text-surface-0"
                               }`}
                             >
                               {isPlaying && globalPlayer.playing ? (
@@ -402,7 +402,7 @@ export default function TracksPage() {
                             </button>
                             <span className="truncate">{track.artist}</span>
                           </div>
-                          <div className="py-3 pr-4 text-white/70 text-sm flex-[2] truncate">
+                          <div className="py-3 pr-4 text-foreground/70 text-sm flex-[2] truncate">
                             {track.episode_id ? (
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleGoToStack(track); }}
@@ -548,7 +548,7 @@ export default function TracksPage() {
                       }
                     >
                       <span className={`w-7 h-7 flex items-center justify-center rounded-full backdrop-blur-sm transition-all ${
-                        isPlaying ? "bg-accent/90 text-surface-0" : "bg-black/40 text-white/80"
+                        isPlaying ? "bg-accent/90 text-surface-0" : "bg-black/40 text-foreground/80"
                       }`}>
                         {isPlaying && globalPlayer.playing ? (
                           <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
@@ -558,16 +558,16 @@ export default function TracksPage() {
                       </span>
                     </button>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white truncate">{track.artist}</p>
+                      <p className="text-sm font-medium text-foreground truncate">{track.artist}</p>
                       {track.episode_id ? (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleGoToStack(track); }}
-                          className="text-xs text-white/50 truncate hover:text-accent transition-colors text-left w-full"
+                          className="text-xs text-foreground/50 truncate hover:text-accent transition-colors text-left w-full"
                         >
                           {track.title}
                         </button>
                       ) : (
-                        <p className="text-xs text-white/50 truncate">{track.title}</p>
+                        <p className="text-xs text-foreground/50 truncate">{track.title}</p>
                       )}
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">

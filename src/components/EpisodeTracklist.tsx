@@ -96,13 +96,13 @@ export function EpisodeTracklist({
   const statusDot = (s: string) => {
     if (s === "approved" || s === "downloaded") return "bg-green-500";
     if (s === "rejected") return "bg-red-500/60";
-    return "bg-white/20";
+    return "bg-foreground/20";
   };
 
   const statusText = (s: string) => {
-    if (s === "approved" || s === "downloaded") return "text-white/80";
-    if (s === "rejected") return "text-white/30 line-through";
-    return "text-white/60";
+    if (s === "approved" || s === "downloaded") return "text-foreground/80";
+    if (s === "rejected") return "text-foreground/30 line-through";
+    return "text-foreground/60";
   };
 
   const approved = tracks.filter((t) => t.status === "approved" || t.status === "downloaded").length;
@@ -115,7 +115,7 @@ export function EpisodeTracklist({
       <div className="flex-shrink-0 px-4 pt-4 pb-3 border-b border-surface-3">
         <div className="flex items-center justify-between">
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-medium text-white truncate">
+            <h3 className="text-sm font-medium text-foreground truncate">
               {episodeTitle || "Episode tracklist"}
             </h3>
             {!loading && (
@@ -123,14 +123,14 @@ export function EpisodeTracklist({
                 <span>{tracks.length} tracks</span>
                 {approved > 0 && <span className="text-green-400/70">{approved} kept</span>}
                 {rejected > 0 && <span className="text-red-400/50">{rejected} skipped</span>}
-                {pending > 0 && <span className="text-white/40">{pending} pending</span>}
+                {pending > 0 && <span className="text-foreground/40">{pending} pending</span>}
               </div>
             )}
           </div>
           {onClose && (
             <button
               onClick={onClose}
-              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-colors"
+              className="p-2 rounded-full bg-foreground/10 hover:bg-foreground/20 text-foreground/80 hover:text-foreground transition-colors"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -235,7 +235,7 @@ export function TracklistSheet({
       <div className="absolute inset-0 liquid-glass flex flex-col overflow-hidden">
         {/* Drag handle */}
         <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
-          <div className="w-10 h-1 rounded-full bg-white/25" />
+          <div className="w-10 h-1 rounded-full bg-foreground/25" />
         </div>
         <EpisodeTracklist
           episodeId={episodeId}

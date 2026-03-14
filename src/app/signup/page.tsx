@@ -50,15 +50,15 @@ export default function SignupPage() {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
         <div className="w-full max-w-sm space-y-4 text-center">
-          <h1 className="text-2xl font-bold text-white">Check your email</h1>
-          <p className="text-neutral-400">
+          <h1 className="text-2xl font-bold text-foreground">Check your email</h1>
+          <p className="text-muted">
             We sent a confirmation link to{" "}
-            <span className="text-white">{email}</span>. Click it to activate
+            <span className="text-foreground">{email}</span>. Click it to activate
             your account.
           </p>
           <a
             href="/login"
-            className="inline-block text-sm text-[#d4a053] hover:underline"
+            className="inline-block text-sm text-accent hover:underline"
           >
             Back to login
           </a>
@@ -71,16 +71,16 @@ export default function SignupPage() {
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm space-y-8">
         <div className="text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-white">
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">
             The Stacks
           </h1>
-          <p className="mt-2 text-sm text-neutral-400">
+          <p className="mt-2 text-sm text-muted">
             Start digging
           </p>
         </div>
 
         {error && (
-          <div className="rounded-lg bg-red-900/30 border border-red-800/50 px-4 py-3 text-sm text-red-300">
+          <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">
             {error}
           </div>
         )}
@@ -97,7 +97,7 @@ export default function SignupPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email"
-              className="w-full rounded-lg bg-neutral-900 border border-neutral-700 px-4 py-3 text-white placeholder:text-neutral-500 focus:border-[#d4a053] focus:outline-none focus:ring-1 focus:ring-[#d4a053]"
+              className="w-full rounded-lg bg-surface-1 border border-surface-3 px-4 py-3 text-foreground placeholder:text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
             />
           </div>
           <div>
@@ -112,13 +112,13 @@ export default function SignupPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password (min 8 characters)"
-              className="w-full rounded-lg bg-neutral-900 border border-neutral-700 px-4 py-3 text-white placeholder:text-neutral-500 focus:border-[#d4a053] focus:outline-none focus:ring-1 focus:ring-[#d4a053]"
+              className="w-full rounded-lg bg-surface-1 border border-surface-3 px-4 py-3 text-foreground placeholder:text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
             />
           </div>
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-lg bg-[#d4a053] px-4 py-3 font-medium text-black hover:bg-[#c4903f] disabled:opacity-50 transition-colors"
+            className="w-full rounded-lg bg-accent px-4 py-3 font-medium text-surface-0 hover:bg-accent-bright disabled:opacity-50 transition-colors"
           >
             {loading ? "Creating account..." : "Create account"}
           </button>
@@ -126,26 +126,26 @@ export default function SignupPage() {
 
         <div className="relative">
           <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-neutral-700" />
+            <div className="w-full border-t border-surface-3" />
           </div>
           <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-[#0a0a0a] px-2 text-neutral-500">or</span>
+            <span className="bg-surface-0 px-2 text-muted">or</span>
           </div>
         </div>
 
         <button
           onClick={handleGoogleSignup}
           disabled={loading}
-          className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-3 font-medium text-white hover:bg-neutral-800 disabled:opacity-50 transition-colors"
+          className="w-full rounded-lg border border-surface-3 bg-surface-1 px-4 py-3 font-medium text-foreground hover:bg-surface-2 disabled:opacity-50 transition-colors"
         >
           Continue with Google
         </button>
 
-        <p className="text-center text-sm text-neutral-500">
+        <p className="text-center text-sm text-muted">
           Already have an account?{" "}
           <a
             href="/login"
-            className="text-[#d4a053] hover:underline"
+            className="text-accent hover:underline"
           >
             Sign in
           </a>

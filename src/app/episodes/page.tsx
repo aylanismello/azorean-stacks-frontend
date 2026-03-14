@@ -41,7 +41,7 @@ export default function EpisodesPage() {
         <button
           onClick={() => { setShowSkipped(!showSkipped); setOffset(0); }}
           className={`text-[11px] px-2.5 py-1 rounded-lg transition-colors ${
-            showSkipped ? "bg-surface-2 text-white/70" : "text-muted/50 hover:text-muted"
+            showSkipped ? "bg-surface-2 text-foreground/70" : "text-muted/50 hover:text-muted"
           }`}
         >
           {showSkipped ? "Hide skipped" : "Show skipped"}
@@ -93,14 +93,14 @@ export default function EpisodesPage() {
           <button
             onClick={() => setOffset(Math.max(0, offset - limit))}
             disabled={offset === 0}
-            className="px-4 py-2 text-sm rounded-lg bg-surface-1 text-muted hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+            className="px-4 py-2 text-sm rounded-lg bg-surface-1 text-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
           >
             Previous
           </button>
           <button
             onClick={() => setOffset(offset + limit)}
             disabled={!hasMore}
-            className="px-4 py-2 text-sm rounded-lg bg-surface-1 text-muted hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+            className="px-4 py-2 text-sm rounded-lg bg-surface-1 text-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
           >
             Next
           </button>
@@ -154,7 +154,7 @@ function EpisodeCard({ episode, onUnskip }: { episode: Episode; onUnskip?: () =>
         {/* Title + source + date */}
         <div className="flex items-start justify-between gap-2 mb-2">
           <div className="min-w-0">
-            <span className="text-sm font-medium text-white truncate block">
+            <span className="text-sm font-medium text-foreground truncate block">
               {episode.title || episode.url}
             </span>
             <p className="text-[11px] text-muted mt-0.5">
@@ -250,7 +250,7 @@ function EpisodeCard({ episode, onUnskip }: { episode: Episode; onUnskip?: () =>
             {episode.skipped && onUnskip && (
               <button
                 onClick={onUnskip}
-                className="text-[11px] px-3 py-1.5 rounded-full bg-surface-2 text-muted hover:text-white transition-colors active:scale-95"
+                className="text-[11px] px-3 py-1.5 rounded-full bg-surface-2 text-muted hover:text-foreground transition-colors active:scale-95"
               >
                 Restore episode
               </button>

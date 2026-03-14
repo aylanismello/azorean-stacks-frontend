@@ -71,7 +71,7 @@ export function SeedForm({ onSubmit }: SeedFormProps) {
               placeholder="Title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="flex-1 min-w-0 px-4 py-2.5 bg-surface-2 border border-surface-3 rounded-lg text-sm text-white placeholder:text-muted focus:outline-none focus:border-accent/50 transition-colors"
+              className="flex-1 min-w-0 px-4 py-2.5 bg-surface-2 border border-surface-3 rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50 transition-colors"
             />
             <span className="text-xs text-muted/40 flex-shrink-0">by</span>
             <input
@@ -79,7 +79,7 @@ export function SeedForm({ onSubmit }: SeedFormProps) {
               placeholder="Artist"
               value={artist}
               onChange={(e) => setArtist(e.target.value)}
-              className="flex-1 min-w-0 px-4 py-2.5 bg-surface-2 border border-surface-3 rounded-lg text-sm text-white placeholder:text-muted focus:outline-none focus:border-accent/50 transition-colors"
+              className="flex-1 min-w-0 px-4 py-2.5 bg-surface-2 border border-surface-3 rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50 transition-colors"
             />
           </>
         ) : (
@@ -88,7 +88,7 @@ export function SeedForm({ onSubmit }: SeedFormProps) {
             placeholder="https://open.spotify.com/track/..."
             value={spotifyUrl}
             onChange={(e) => setSpotifyUrl(e.target.value)}
-            className="flex-1 px-4 py-2.5 bg-surface-2 border border-surface-3 rounded-lg text-sm text-white placeholder:text-muted focus:outline-none focus:border-green-400/50 transition-colors"
+            className="flex-1 px-4 py-2.5 bg-surface-2 border border-surface-3 rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-green-400/50 transition-colors"
           />
         )}
         <button

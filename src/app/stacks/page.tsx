@@ -123,10 +123,10 @@ export default function StacksPage() {
               <button
                 key={g.genre}
                 onClick={() => router.push(`/?source=genre&genre=${encodeURIComponent(g.genre)}`)}
-                className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 hover:border-accent/30 transition-all duration-150 active:scale-95"
+                className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-foreground/5 hover:bg-foreground/10 border border-foreground/10 hover:border-accent/30 transition-all duration-150 active:scale-95"
               >
-                <span className="text-xs text-white/80 group-hover:text-white">{g.genre}</span>
-                <span className="text-[10px] font-mono text-white/30">{g.pending}</span>
+                <span className="text-xs text-foreground/80 group-hover:text-foreground">{g.genre}</span>
+                <span className="text-[10px] font-mono text-foreground/30">{g.pending}</span>
               </button>
             ))}
           </div>

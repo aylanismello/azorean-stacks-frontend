@@ -164,7 +164,7 @@ function CuratorTile({
       onClick={onSelect}
       className={`group relative aspect-square rounded-2xl overflow-hidden transition-all duration-200 ${
         isSelected
-          ? "ring-2 ring-accent ring-offset-2 ring-offset-[#0a0a0a] scale-[0.97]"
+          ? "ring-2 ring-accent ring-offset-2 ring-offset-surface-0 scale-[0.97]"
           : "hover:scale-[1.03] hover:shadow-xl active:scale-[0.98]"
       }`}
     >
@@ -259,7 +259,7 @@ function CuratorDetail({ curator, onClose }: { curator: Curator; onClose: () => 
       />
 
       {/* Sheet */}
-      <div className="fixed inset-x-0 bottom-0 z-50 max-h-[85vh] flex flex-col bg-[#111] border-t border-surface-3 rounded-t-2xl animate-in slide-in-from-bottom duration-300">
+      <div className="fixed inset-x-0 bottom-0 z-50 max-h-[85vh] flex flex-col bg-surface-1 border-t border-surface-3 rounded-t-2xl animate-in slide-in-from-bottom duration-300">
         {/* Header */}
         <div className="flex items-start gap-4 p-4 pb-3 border-b border-surface-3/50 flex-shrink-0">
           {curator.avatar_url ? (
@@ -270,7 +270,7 @@ function CuratorDetail({ curator, onClose }: { curator: Curator; onClose: () => 
             />
           ) : (
             <div
-              className="w-16 h-16 rounded-xl flex-shrink-0 flex items-center justify-center text-xl font-bold text-white/40"
+              className="w-16 h-16 rounded-xl flex-shrink-0 flex items-center justify-center text-xl font-bold text-foreground/40"
               style={{
                 background: `linear-gradient(135deg, hsl(${(curator.slug.length * 37) % 360}, 35%, 20%), hsl(${(curator.slug.length * 71) % 360}, 45%, 10%))`,
               }}
@@ -279,14 +279,14 @@ function CuratorDetail({ curator, onClose }: { curator: Curator; onClose: () => 
             </div>
           )}
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-semibold text-white leading-tight">{displayName}</h2>
+            <h2 className="text-lg font-semibold text-foreground leading-tight">{displayName}</h2>
             {(curator.location || curator.genres.length > 0) && (
               <p className="text-xs text-muted mt-0.5">
                 {[curator.location, curator.genres.slice(0, 3).join(", ")].filter(Boolean).join(" · ")}
               </p>
             )}
             {curator.description && (
-              <p className="text-[11px] text-white/40 mt-1 line-clamp-2 leading-relaxed">
+              <p className="text-[11px] text-foreground/40 mt-1 line-clamp-2 leading-relaxed">
                 {curator.description}
               </p>
             )}
@@ -308,7 +308,7 @@ function CuratorDetail({ curator, onClose }: { curator: Curator; onClose: () => 
                   href={link.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[10px] px-2 py-0.5 rounded-full bg-surface-2 text-muted hover:text-white hover:bg-surface-3 transition-colors"
+                  className="text-[10px] px-2 py-0.5 rounded-full bg-surface-2 text-muted hover:text-foreground hover:bg-surface-3 transition-colors"
                   title={link.name}
                 >
                   {socialIcon(link.url || link.name || "")}
@@ -318,7 +318,7 @@ function CuratorDetail({ curator, onClose }: { curator: Curator; onClose: () => 
           </div>
           <button
             onClick={onClose}
-            className="text-muted hover:text-white p-1 -mr-1 -mt-1 transition-colors"
+            className="text-muted hover:text-foreground p-1 -mr-1 -mt-1 transition-colors"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M18 6L6 18M6 6l12 12" />
@@ -380,7 +380,7 @@ function CuratorEpisodeRow({ episode: ep }: { episode: CuratorEpisode }) {
       >
         <div className="flex items-center gap-2">
           {ep.aired_date && (
-            <span className="text-[11px] text-white/60 font-mono flex-shrink-0 w-20">{ep.aired_date}</span>
+            <span className="text-[11px] text-foreground/60 font-mono flex-shrink-0 w-20">{ep.aired_date}</span>
           )}
           {total > 0 && (
             <span className="text-[10px] text-muted/40 flex-shrink-0">{total} trk</span>

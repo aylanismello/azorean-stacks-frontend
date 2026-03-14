@@ -5,6 +5,7 @@ import { AuthProvider } from "@/components/AuthProvider";
 import { SpotifyProvider } from "@/components/SpotifyProvider";
 import { GlobalPlayerProvider } from "@/components/GlobalPlayerProvider";
 import { GlobalPlayer } from "@/components/GlobalPlayer";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
 export const metadata: Metadata = {
   title: "The Stacks",
@@ -25,17 +26,26 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}})()`,
+          }}
+        />
+      </head>
       <body className="font-sans min-h-screen">
-        <AuthProvider>
-          <SpotifyProvider>
-            <GlobalPlayerProvider>
-              <Navigation />
-              <main className="pb-0 md:pb-20">{children}</main>
-              <GlobalPlayer />
-            </GlobalPlayerProvider>
-          </SpotifyProvider>
-        </AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <SpotifyProvider>
+              <GlobalPlayerProvider>
+                <Navigation />
+                <main className="pb-0 md:pb-20">{children}</main>
+                <GlobalPlayer />
+              </GlobalPlayerProvider>
+            </SpotifyProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

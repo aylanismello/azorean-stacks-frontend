@@ -484,7 +484,7 @@ function StackPageContent() {
       <div className="flex flex-col items-center justify-center min-h-[80vh] px-6 text-center gap-4">
         <div className="w-8 h-8 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
         <div>
-          <h2 className="text-lg font-medium text-white/80">Episode complete</h2>
+          <h2 className="text-lg font-medium text-foreground/80">Episode complete</h2>
           <p className="text-sm text-muted mt-1">Loading next episode...</p>
         </div>
       </div>
@@ -507,7 +507,7 @@ function StackPageContent() {
         <p className="text-sm text-red-400 mb-4">{error}</p>
         <button
           onClick={() => { setError(null); fetchTracks(); }}
-          className="px-5 py-2 text-sm bg-surface-2 hover:bg-surface-3 rounded-lg text-muted hover:text-white transition-colors"
+          className="px-5 py-2 text-sm bg-surface-2 hover:bg-surface-3 rounded-lg text-muted hover:text-foreground transition-colors"
         >
           Retry
         </button>
@@ -521,7 +521,7 @@ function StackPageContent() {
       <div className="flex flex-col items-center justify-center min-h-[80vh] px-6 text-center">
         {episodeId ? (
           <>
-            <h2 className="text-xl font-medium text-white/80 mb-2">All done!</h2>
+            <h2 className="text-xl font-medium text-foreground/80 mb-2">All done!</h2>
             <p className="text-sm text-muted max-w-xs">
               No pending tracks left{episodeTitle ? ` in "${episodeTitle}"` : " in this episode"}.
             </p>
@@ -535,7 +535,7 @@ function StackPageContent() {
               {fromEpisodes && (
                 <a
                   href="/episodes"
-                  className="px-5 py-2 text-sm bg-surface-2 hover:bg-surface-3 rounded-lg text-muted hover:text-white transition-colors"
+                  className="px-5 py-2 text-sm bg-surface-2 hover:bg-surface-3 rounded-lg text-muted hover:text-foreground transition-colors"
                 >
                   Back to Episodes
                 </a>
@@ -550,7 +550,7 @@ function StackPageContent() {
               alt=""
               className="w-64 h-40 object-cover rounded-xl mb-6 opacity-60 grayscale hover:grayscale-0 hover:opacity-100 transition-all duration-500"
             />
-            <h2 className="text-xl font-medium text-white/80 mb-2">
+            <h2 className="text-xl font-medium text-foreground/80 mb-2">
               Pico&apos;s digging...
             </h2>
             <p className="text-sm text-muted max-w-xs">
@@ -558,7 +558,7 @@ function StackPageContent() {
             </p>
             <button
               onClick={fetchTracks}
-              className="mt-6 px-5 py-2 text-sm bg-surface-2 hover:bg-surface-3 rounded-lg text-muted hover:text-white transition-colors"
+              className="mt-6 px-5 py-2 text-sm bg-surface-2 hover:bg-surface-3 rounded-lg text-muted hover:text-foreground transition-colors"
             >
               Refresh
             </button>
@@ -576,7 +576,7 @@ function StackPageContent() {
         {/* Left: back to stacks */}
         <button
           onClick={handleGoBack}
-          className="flex items-center gap-1.5 text-muted hover:text-white transition-colors flex-shrink-0 z-10"
+          className="flex items-center gap-1.5 text-muted hover:text-foreground transition-colors flex-shrink-0 z-10"
           title={fromEpisodes ? "Back to episodes" : "All stacks"}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -592,7 +592,7 @@ function StackPageContent() {
           onClick={handleGoBack}
           className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"
         >
-          <span className="text-sm font-semibold text-white truncate max-w-[200px] md:max-w-[400px] pointer-events-auto">
+          <span className="text-sm font-semibold text-foreground truncate max-w-[200px] md:max-w-[400px] pointer-events-auto">
             {hasEpisodeTracks && currentEpisodeTitle
               ? currentEpisodeTitle
               : seedName
@@ -612,7 +612,7 @@ function StackPageContent() {
         {currentEpisodeId ? (
           <button
             onClick={() => setTracklistOpen(!tracklistOpen)}
-            className="md:hidden flex-shrink-0 p-2 text-muted hover:text-white transition-colors z-10"
+            className="md:hidden flex-shrink-0 p-2 text-muted hover:text-foreground transition-colors z-10"
             title="Show episode tracklist"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -305,7 +305,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
           className={`flex items-center gap-1.5 px-2.5 py-1 transition-colors ${
             globalPlayer.source === "audio"
               ? "bg-accent/20 text-accent"
-              : "text-white/40 hover:text-white/60"
+              : "text-foreground/40 hover:text-foreground/60"
           }`}
         >
           {globalPlayer.source === "audio" && eqBars}
@@ -316,7 +316,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
           className={`flex items-center gap-1.5 px-2.5 py-1 transition-colors ${
             globalPlayer.source === "spotify"
               ? "bg-[#1DB954]/20 text-[#1DB954]"
-              : "text-white/40 hover:text-white/60"
+              : "text-foreground/40 hover:text-foreground/60"
           }`}
         >
           {globalPlayer.source === "spotify" && eqBars}
@@ -339,13 +339,13 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
   const seedArtist = track.seed_track?.artist || (track.metadata as any)?.seed_artist;
   const seedTitle = track.seed_track?.title || (track.metadata as any)?.seed_title;
   const discoveryContext = seedArtist && (
-    <p className="text-xs text-white/50 leading-relaxed truncate">
+    <p className="text-xs text-foreground/50 leading-relaxed truncate">
       via{" "}
-      <span className="text-white/70">{seedArtist}</span>
+      <span className="text-foreground/70">{seedArtist}</span>
       {seedTitle && (
         <>
           {" — "}
-          <span className="text-white/60">{seedTitle}</span>
+          <span className="text-foreground/60">{seedTitle}</span>
         </>
       )}
       {(track.metadata as any)?.co_occurrence > 1 && ` · ${(track.metadata as any).co_occurrence} sets`}
@@ -361,7 +361,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
         className="flex items-center gap-1.5 text-[11px] text-muted hover:text-accent transition-colors group truncate"
       >
         <span className="text-accent">◉</span>
-        <span className="truncate underline underline-offset-2 decoration-white/10 group-hover:decoration-accent">
+        <span className="truncate underline underline-offset-2 decoration-foreground/10 group-hover:decoration-accent">
           {track.source_context}
         </span>
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-40 group-hover:opacity-100">
@@ -423,7 +423,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
             ? "bg-emerald-500/30 border-emerald-400/50 text-emerald-400"
             : seeding
             ? "bg-surface-2 border-emerald-400/30 text-emerald-400/50 animate-pulse"
-            : "bg-surface-2 md:bg-black/40 border-white/10 text-white/40 hover:border-emerald-400/40 hover:text-emerald-400/70"
+            : "bg-surface-2 md:bg-black/40 border-foreground/10 text-foreground/40 hover:border-emerald-400/40 hover:text-emerald-400/70"
         }`}
         title={seeded ? "Planted as seed!" : "Plant as seed for future discovery"}
       >
@@ -637,14 +637,14 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
 
         {/* Track title + artist */}
         <div className="mb-6">
-          <h2 className="text-3xl font-bold text-white leading-tight truncate">
+          <h2 className="text-3xl font-bold text-foreground leading-tight truncate">
             {track.title}
           </h2>
           <div className="flex items-center gap-2 mt-1">
-            <p className="text-xl text-white/70 truncate">{track.artist}</p>
+            <p className="text-xl text-foreground/70 truncate">{track.artist}</p>
             <button
               onClick={handleCopy}
-              className="flex-shrink-0 p-1.5 rounded-md hover:bg-white/10 active:scale-90 transition-all"
+              className="flex-shrink-0 p-1.5 rounded-md hover:bg-foreground/10 active:scale-90 transition-all"
               title="Copy artist - title"
             >
               {copied ? (

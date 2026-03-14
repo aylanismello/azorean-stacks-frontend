@@ -6,18 +6,19 @@ const config: Config = {
     extend: {
       colors: {
         surface: {
-          0: "#0a0a0a",
-          1: "#111111",
-          2: "#1a1a1a",
-          3: "#242424",
-          4: "#2e2e2e",
+          0: "rgb(var(--surface-0) / <alpha-value>)",
+          1: "rgb(var(--surface-1) / <alpha-value>)",
+          2: "rgb(var(--surface-2) / <alpha-value>)",
+          3: "rgb(var(--surface-3) / <alpha-value>)",
+          4: "rgb(var(--surface-4) / <alpha-value>)",
         },
         accent: {
-          DEFAULT: "#d4a053",
-          dim: "#a67c3d",
-          bright: "#e8b96a",
+          DEFAULT: "rgb(var(--accent) / <alpha-value>)",
+          dim: "rgb(var(--accent-dim) / <alpha-value>)",
+          bright: "rgb(var(--accent-bright) / <alpha-value>)",
         },
-        muted: "#666666",
+        muted: "rgb(var(--muted) / <alpha-value>)",
+        foreground: "rgb(var(--foreground) / <alpha-value>)",
       },
       fontFamily: {
         sans: [

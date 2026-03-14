@@ -38,7 +38,7 @@ export default function StatsPage() {
         <p className="text-sm text-red-400 mb-4">{error}</p>
         <button
           onClick={() => window.location.reload()}
-          className="px-4 py-2 text-sm bg-surface-2 hover:bg-surface-3 rounded-lg text-muted hover:text-white transition-colors"
+          className="px-4 py-2 text-sm bg-surface-2 hover:bg-surface-3 rounded-lg text-muted hover:text-foreground transition-colors"
         >
           Retry
         </button>
@@ -99,7 +99,7 @@ export default function StatsPage() {
                 <div key={a.artist} className="flex items-center gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm text-white truncate">
+                      <span className="text-sm text-foreground truncate">
                         {a.artist}
                       </span>
                       <span className="text-xs text-muted font-mono ml-2">
@@ -134,7 +134,7 @@ export default function StatsPage() {
                 <div key={s.source} className="flex items-center gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm text-white">
+                      <span className="text-sm text-foreground">
                         {sourceLabel(s.source)}
                       </span>
                       <span className="text-xs text-muted font-mono ml-2">
@@ -183,11 +183,11 @@ export default function StatsPage() {
                     )}
                   </div>
                   {run.notes && (
-                    <p className="text-xs text-white/50 truncate">{run.notes}</p>
+                    <p className="text-xs text-foreground/50 truncate">{run.notes}</p>
                   )}
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-sm font-mono text-white">
+                  <p className="text-sm font-mono text-foreground">
                     +{run.tracks_added}
                   </p>
                   <p className="text-[10px] text-muted">
@@ -217,7 +217,7 @@ function StatCard({
       <p className="text-xs text-muted mb-1">{label}</p>
       <p
         className={`text-2xl font-semibold font-mono ${
-          accent ? "text-accent" : "text-white"
+          accent ? "text-accent" : "text-foreground"
         }`}
       >
         {value}

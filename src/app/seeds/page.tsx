@@ -279,7 +279,7 @@ function SeedCard({
           className="flex-1 min-w-0 text-left"
         >
           <div className="flex items-center gap-1.5">
-            <p className="text-sm font-medium text-white truncate">
+            <p className="text-sm font-medium text-foreground truncate">
               {decodeEntities(seed.artist)}
             </p>
             {seed.source === "re-seed" && (
@@ -288,7 +288,7 @@ function SeedCard({
               </span>
             )}
           </div>
-          <p className="text-xs text-white/60 truncate">{decodeEntities(seed.title)}</p>
+          <p className="text-xs text-foreground/60 truncate">{decodeEntities(seed.title)}</p>
           {/* Episode count hint */}
           {episodes.length > 0 && (
             <p className="text-[10px] text-muted mt-0.5">
@@ -419,7 +419,7 @@ function SeedEpisodeRow({ episode: ep, seedArtist, seedTitle }: {
           <span className="text-muted text-xs">{open ? "▾" : "▸"}</span>
         </div>
         {/* Title */}
-        <p className="text-sm text-white/80 leading-snug">
+        <p className="text-sm text-foreground/80 leading-snug">
           {ep.title || ep.url}
         </p>
         {ep.match_type !== "full" && ep.matched_tracks && ep.matched_tracks.length > 0 && (
