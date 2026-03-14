@@ -221,7 +221,9 @@ function StackPageContent() {
     });
   }, [globalPlayer.currentTrack?.id]);
 
-  // Auto-advance on song end
+  // Auto-advance on song end — drop the finished track instead of rotating
+  // If the track was voted on (kept/skipped), it won't reappear in refetch.
+  // If unvoted, it stays pending in DB and will return on next refetch.
   const lastEndedCount = useRef(globalPlayer.trackEndedCount);
   useEffect(() => {
     if (globalPlayer.trackEndedCount === lastEndedCount.current) return;
@@ -231,9 +233,30 @@ function StackPageContent() {
     if (globalPlayer.currentTrack?.id !== currentId) return;
     setTracks((prev) => {
       if (prev.length < 2) return prev;
-      return [...prev.slice(1), prev[0]];
+      const remaining = prev.slice(1);
+      // Refetch if running low
+      if (remaining.length <= 3) {
+        const existingIds = new Set(remaining.map((t) => t.id));
+        fetch(buildUrl())
+          .then((r) => r.ok ? r.json() : null)
+          .then((data) => {
+            if (!data) return;
+            const newTracks = (data.tracks || []).filter(
+              (t: Track) => !existingIds.has(t.id)
+            );
+            if (newTracks.length > 0) {
+              setTracks((curr) => {
+                const currIds = new Set(curr.map((t: Track) => t.id));
+                const fresh = newTracks.filter((t: Track) => !currIds.has(t.id));
+                return [...curr, ...fresh];
+              });
+            }
+            setTotal(data.total || 0);
+          });
+      }
+      return remaining;
     });
-  }, [globalPlayer.trackEndedCount, browsing, tracks, globalPlayer.currentTrack?.id]);
+  }, [globalPlayer.trackEndedCount, browsing, tracks, globalPlayer.currentTrack?.id, buildUrl]);
 
   // Keyboard shortcuts
   useEffect(() => {
