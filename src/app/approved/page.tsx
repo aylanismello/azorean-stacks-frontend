@@ -223,6 +223,10 @@ export default function TracksPage() {
         [tab]: Math.max(0, (prev[tab] ?? 1) - 1),
         [newStatus]: (prev[newStatus as Tab] ?? 0) + 1,
       }));
+      // Auto-sync Spotify playlist when approved list changes
+      if (tab === "approved" || newStatus === "approved") {
+        fetch("/api/spotify/sync-seeds", { method: "POST" }).catch(() => {});
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update track");
     } finally {

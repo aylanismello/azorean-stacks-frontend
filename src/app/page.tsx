@@ -163,6 +163,11 @@ function StackPageContent() {
       });
       if (!res.ok) throw new Error(`Vote failed (${res.status})`);
 
+      // Auto-sync Spotify playlist when a track is approved
+      if (status === "approved") {
+        fetch("/api/spotify/sync-seeds", { method: "POST" }).catch(() => {});
+      }
+
       // Update the track's status locally so the UI reflects the vote
       setTracks((prev) =>
         prev.map((t) => t.id === id ? { ...t, status, voted_at: new Date().toISOString() } : t)

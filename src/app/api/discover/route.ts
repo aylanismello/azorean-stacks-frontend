@@ -298,13 +298,19 @@ async function crawlNTS(
         { onConflict: "episode_id,seed_id" }
       );
 
-    // Insert tracks
+    // Insert tracks (skip garbage)
+    const GARBAGE_TITLES = new Set(["unknown track", "untitled", "id", "?", "unknown", ""]);
     for (let pos = 0; pos < tracks.length; pos++) {
       const track = tracks[pos];
       if (isSameTrack(track, { artist: seedArtist, title: seedTitle }))
         continue;
 
-      const key = `${track.artist.toLowerCase().trim()}::${track.title.toLowerCase().trim()}`;
+      const lTitle = track.title.toLowerCase().trim();
+      const lArtist = track.artist.toLowerCase().trim();
+      if (GARBAGE_TITLES.has(lTitle) || lTitle.length <= 1 || lArtist.length <= 1)
+        continue;
+
+      const key = `${lArtist}::${lTitle}`;
       if (seenKeys.has(key)) continue;
       seenKeys.add(key);
 

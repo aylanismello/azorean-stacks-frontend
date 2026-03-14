@@ -68,13 +68,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: seedsError.message }, { status: 500 });
   }
 
-  // 2. Get all approved tracks with spotify_url
+  // 2. Get all approved tracks with spotify_url, ordered by voted_at (newest first)
   const { data: approvedTracks, error: tracksError } = await supabase
     .from("tracks")
     .select("id, spotify_url")
-    .eq("status", "approved")
+    .in("status", ["approved", "downloaded"])
     .not("spotify_url", "is", null)
-    .neq("spotify_url", "");
+    .neq("spotify_url", "")
+    .order("voted_at", { ascending: false, nullsFirst: false });
 
   if (tracksError) {
     return NextResponse.json({ error: tracksError.message }, { status: 500 });
@@ -96,19 +97,27 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Combine: seed tracks + approved tracks (deduplicated by spotify_url)
-  const spotifyUrlSet = new Set<string>();
-  Object.values(seedTrackUrls).forEach((url) => spotifyUrlSet.add(url));
-  (approvedTracks || []).forEach((t) => {
-    if (t.spotify_url) spotifyUrlSet.add(t.spotify_url);
-  });
-
-  // Convert URLs to Spotify URIs
+  // Combine: approved tracks first (preserving voted_at order), then seed tracks
+  const seenUrls = new Set<string>();
   const spotifyUris: string[] = [];
-  Array.from(spotifyUrlSet).forEach((url) => {
-    const uri = urlToUri(url);
-    if (uri) spotifyUris.push(uri);
-  });
+
+  // Approved tracks first — order matches what the user sees
+  for (const t of approvedTracks || []) {
+    if (t.spotify_url && !seenUrls.has(t.spotify_url)) {
+      seenUrls.add(t.spotify_url);
+      const uri = urlToUri(t.spotify_url);
+      if (uri) spotifyUris.push(uri);
+    }
+  }
+
+  // Then seed-linked tracks (if not already included)
+  for (const url of Object.values(seedTrackUrls)) {
+    if (url && !seenUrls.has(url)) {
+      seenUrls.add(url);
+      const uri = urlToUri(url);
+      if (uri) spotifyUris.push(uri);
+    }
+  }
 
   if (spotifyUris.length === 0) {
     return NextResponse.json({
