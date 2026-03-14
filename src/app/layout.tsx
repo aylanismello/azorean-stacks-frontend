@@ -31,7 +31,7 @@ export default function RootLayout({
           <SpotifyProvider>
             <GlobalPlayerProvider>
               <Navigation />
-              <main className="pb-32 md:pb-20">{children}</main>
+              <main className="pb-0 md:pb-20">{children}</main>
               <GlobalPlayer />
             </GlobalPlayerProvider>
           </SpotifyProvider>

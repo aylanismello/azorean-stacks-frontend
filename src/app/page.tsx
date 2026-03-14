@@ -342,7 +342,7 @@ function StackPageContent() {
 
   // ── Main stack view ──
   return (
-    <div className="px-4 pt-2 pb-4 md:h-[calc(100dvh-120px)] md:flex md:flex-col md:overflow-hidden">
+    <div className="px-4 pt-2 pb-0 h-[calc(100dvh-3.5rem-env(safe-area-inset-bottom,0px))] flex flex-col overflow-hidden md:h-[calc(100dvh-120px)] md:pb-4">
       {/* Top bar — clean, readable */}
       <div className="flex items-center justify-between mb-3 md:mb-2 md:max-w-6xl md:mx-auto md:w-full md:flex-shrink-0">
         {/* Left: back to stacks */}
@@ -395,7 +395,7 @@ function StackPageContent() {
       </div>
 
       {/* Desktop: tracklist always visible on left, card on right */}
-      <div className="md:flex-1 md:min-h-0 md:flex md:gap-6 md:max-w-6xl md:mx-auto md:w-full">
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row md:gap-6 md:max-w-6xl md:mx-auto md:w-full">
         {/* Desktop tracklist sidebar — always visible */}
         {currentEpisodeId && (
           <div className="hidden md:flex md:w-80 md:flex-shrink-0 md:self-stretch">
@@ -407,8 +407,8 @@ function StackPageContent() {
           </div>
         )}
 
-        {/* Track card — centered vertically */}
-        <div className="md:flex-1 md:min-w-0 md:flex md:items-center md:justify-center">
+        {/* Track card — fills remaining space on mobile, centered on desktop */}
+        <div className="flex-1 min-h-0 md:flex md:items-center md:justify-center">
           <TrackCard
             key={tracks[0].id}
             track={tracks[0]}

@@ -70,7 +70,7 @@ export function GlobalPlayer() {
   const bgColor = currentTrack.coverArtUrl ? undefined : generateGradient(currentTrack.artist, currentTrack.title);
 
   return (
-    <div className="global-player fixed left-0 right-0 z-40 bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px))] md:bottom-0">
+    <div className="global-player fixed left-0 right-0 z-40 hidden md:block md:bottom-0">
       {/* Progress bar — full width at top of player, tall hit area, thin visual */}
       <div
         ref={progressRef}
