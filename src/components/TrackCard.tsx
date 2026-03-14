@@ -206,6 +206,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
 
   // Desktop artwork block (rewind | play/pause | forward)
   // Controls hidden when playing, shown on hover over artwork
+  // No controls at all when no playable source
   const controlsHidden = isCurrentTrack && globalPlayer.playing;
   const artworkBlockDesktop = (
     <div
@@ -228,21 +229,21 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
         </div>
       )}
 
-      <div className={`relative z-10 flex items-center gap-5 transition-opacity duration-200 ${
-        controlsHidden
-          ? "opacity-0 group-hover/artwork:opacity-100"
-          : "opacity-100"
-      } ${isCurrentTrack && globalPlayer.loading ? "!opacity-100" : ""}`}>
-        {/* Rewind 30s */}
-        <button
-          onClick={handleRewind}
-          className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/50 active:scale-90 transition-all"
-        >
-          {rewindIcon}
-        </button>
+      {hasPlayableSource && (
+        <div className={`relative z-10 flex items-center gap-5 transition-opacity duration-200 ${
+          controlsHidden
+            ? "opacity-0 group-hover/artwork:opacity-100"
+            : "opacity-100"
+        } ${isCurrentTrack && globalPlayer.loading ? "!opacity-100" : ""}`}>
+          {/* Rewind 30s */}
+          <button
+            onClick={handleRewind}
+            className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/50 active:scale-90 transition-all"
+          >
+            {rewindIcon}
+          </button>
 
-        {/* Play/pause */}
-        {hasPlayableSource && (
+          {/* Play/pause */}
           <button
             onClick={handleArtworkPlay}
           >
@@ -263,16 +264,16 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
               )}
             </span>
           </button>
-        )}
 
-        {/* Forward 30s */}
-        <button
-          onClick={handleForward}
-          className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/50 active:scale-90 transition-all"
-        >
-          {forwardIcon}
-        </button>
-      </div>
+          {/* Forward 30s */}
+          <button
+            onClick={handleForward}
+            className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/50 active:scale-90 transition-all"
+          >
+            {forwardIcon}
+          </button>
+        </div>
+      )}
     </div>
   );
 
@@ -427,7 +428,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
         }`}
         title={seeded ? "Planted as seed!" : "Plant as seed for future discovery"}
       >
-        <span className="text-sm">{seeded ? "🌿" : "🌱"}</span>
+        <span className={`text-sm ${seeded ? "seed-sprout" : ""}`}>{seeded ? "🌿" : "🌱"}</span>
       </button>
 
       {/* Keep (approve) */}
@@ -435,7 +436,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
         <button
           onClick={handleAdvance}
           disabled={voting}
-          className="flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-full bg-green-500/20 border-2 border-green-400 text-green-400 transition-all active:scale-90 disabled:opacity-50 kept-pop"
+          className="flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-full bg-green-500/20 border-2 border-green-400 text-green-400 transition-all active:scale-90 disabled:opacity-50 kept-pop approve-glow"
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
@@ -486,19 +487,19 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
           </div>
         )}
 
-        {/* Center playback controls: rewind | play/pause | forward */}
-        <div className="absolute inset-0 z-10 flex items-center justify-center">
-          <div className="flex items-center gap-6">
-            {/* Rewind 30s */}
-            <button
-              onClick={handleRewind}
-              className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 active:scale-90 transition-all"
-            >
-              {rewindIcon}
-            </button>
+        {/* Center playback controls: rewind | play/pause | forward — only when audio available */}
+        {hasPlayableSource && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center">
+            <div className="flex items-center gap-6">
+              {/* Rewind 30s */}
+              <button
+                onClick={handleRewind}
+                className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 active:scale-90 transition-all"
+              >
+                {rewindIcon}
+              </button>
 
-            {/* Play/pause */}
-            {hasPlayableSource && (
+              {/* Play/pause */}
               <button
                 onClick={handleArtworkPlay}
                 className="group/play"
@@ -524,17 +525,17 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
                   )}
                 </span>
               </button>
-            )}
 
-            {/* Forward 30s */}
-            <button
-              onClick={handleForward}
-              className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 active:scale-90 transition-all"
-            >
-              {forwardIcon}
-            </button>
+              {/* Forward 30s */}
+              <button
+                onClick={handleForward}
+                className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 active:scale-90 transition-all"
+              >
+                {forwardIcon}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Progress line — thin, no interaction, just visual */}
         {isCurrentTrack && globalPlayer.duration > 0 && (
@@ -558,8 +559,33 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
 
           {/* Source indicator + external links row */}
           <div className="flex items-center gap-2 mb-3">
-            {/* Audio source indicator (simpler than desktop) */}
-            {isCurrentTrack && !globalPlayer.noSource && (
+            {/* Audio source switcher — tabs when both sources available */}
+            {isCurrentTrack && !globalPlayer.noSource && globalPlayer.canSwitchSource ? (
+              <div className="flex items-center bg-black/30 backdrop-blur-sm rounded-lg overflow-hidden text-[11px]">
+                <button
+                  onClick={() => globalPlayer.switchSource("audio")}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 transition-colors ${
+                    globalPlayer.source === "audio"
+                      ? "bg-white/15 text-accent"
+                      : "text-white/40"
+                  }`}
+                >
+                  {globalPlayer.source === "audio" && eqBars}
+                  Audio
+                </button>
+                <button
+                  onClick={() => globalPlayer.switchSource("spotify")}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 transition-colors ${
+                    globalPlayer.source === "spotify"
+                      ? "bg-white/15 text-[#1DB954]"
+                      : "text-white/40"
+                  }`}
+                >
+                  {globalPlayer.source === "spotify" && eqBars}
+                  Spotify
+                </button>
+              </div>
+            ) : isCurrentTrack && !globalPlayer.noSource ? (
               <div className="flex items-center gap-1.5 text-[11px]">
                 <span className={globalPlayer.source === "spotify" ? "text-[#1DB954]" : "text-accent"}>
                   {eqBars}
@@ -568,7 +594,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
                   {globalPlayer.source === "spotify" ? "Spotify" : "Audio"}
                 </span>
               </div>
-            )}
+            ) : null}
             {/* No audio source */}
             {!hasPlayableSource && (
               <div className="flex items-center gap-1.5 text-[11px] text-white/40">
@@ -642,7 +668,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
               }`}
               title={seeded ? "Planted as seed!" : "Plant as seed"}
             >
-              <span className="text-xs">{seeded ? "🌿" : "🌱"}</span>
+              <span className={`text-xs ${seeded ? "seed-sprout" : ""}`}>{seeded ? "🌿" : "🌱"}</span>
             </button>
 
             {/* Keep (approve) */}
@@ -650,7 +676,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
               <button
                 onClick={handleAdvance}
                 disabled={voting}
-                className="flex items-center justify-center w-13 h-13 rounded-full bg-green-500/20 backdrop-blur-md border-2 border-green-400 text-green-400 transition-all active:scale-90 disabled:opacity-50 kept-pop"
+                className="flex items-center justify-center w-13 h-13 rounded-full bg-green-500/20 backdrop-blur-md border-2 border-green-400 text-green-400 transition-all active:scale-90 disabled:opacity-50 kept-pop approve-glow"
               >
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12" />
@@ -743,6 +769,22 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
         <div className="mb-8">
           {voteButtons}
         </div>
+
+        {/* Skip track button — prominent when no audio */}
+        {!hasPlayableSource && (
+          <div className="mb-4">
+            <button
+              onClick={() => handleVote("skipped", true)}
+              disabled={voting}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/10 border border-amber-400/20 text-amber-400 hover:bg-amber-500/20 hover:border-amber-400/40 transition-all active:scale-95 disabled:opacity-50 text-sm"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
+              </svg>
+              Skip — no audio available
+            </button>
+          </div>
+        )}
 
         {/* Secondary actions */}
         <div className="flex items-center gap-3 pt-4 border-t border-surface-2">

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Track } from "@/lib/types";
 import { openYouTube } from "@/lib/youtube";
 import { useGlobalPlayer } from "@/components/GlobalPlayerProvider";
+import { useSpotify } from "@/components/SpotifyProvider";
 
 function safeCoverUrl(url: string | null): string | null {
   if (!url) return null;
@@ -131,10 +132,35 @@ export default function TracksPage() {
 
   const globalPlayer = useGlobalPlayer();
   const router = useRouter();
+  const { connected: spotifyConnected } = useSpotify();
   const [expandedTrack, setExpandedTrack] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
   const [updating, setUpdating] = useState<Set<string>>(new Set());
   const [seeding, setSeeding] = useState<Set<string>>(new Set());
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ synced: number; playlist_url: string | null } | null>(null);
+
+  const handleSyncToSpotify = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/spotify/sync-seeds", { method: "POST" });
+      const data = await res.json();
+      if (data.error && !data.synced && data.synced !== 0) {
+        throw new Error(data.error);
+      }
+      if (data.synced === 0) {
+        setError(data.error || "No tracks with Spotify URLs to sync");
+      } else {
+        setSyncResult({ synced: data.synced, playlist_url: data.playlist_url });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to sync to Spotify");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const handleToggleSeed = async (track: Track) => {
     if (seeding.has(track.id)) return;
@@ -290,6 +316,42 @@ export default function TracksPage() {
 
   return (
     <div className="px-4 md:px-6 pt-4 md:pt-8 max-w-4xl mx-auto pb-32 md:pb-8">
+      {/* Sync to Spotify + result banner */}
+      <div className="flex items-center justify-between mb-4">
+        <div />
+        {spotifyConnected && (
+          <button
+            onClick={handleSyncToSpotify}
+            disabled={syncing}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-[#1DB954]/15 text-[#1DB954] hover:bg-[#1DB954]/25 transition-colors disabled:opacity-50"
+          >
+            {syncing ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-[#1DB954]/30 border-t-[#1DB954] rounded-full animate-spin" />
+                Syncing...
+              </>
+            ) : (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="#1DB954"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+                Sync to Spotify
+              </>
+            )}
+          </button>
+        )}
+      </div>
+
+      {syncResult && (
+        <div className="mb-4 p-3 bg-[#1DB954]/10 border border-[#1DB954]/20 rounded-lg text-sm text-[#1DB954] flex items-center justify-between">
+          <span>Synced {syncResult.synced} tracks to Spotify</span>
+          <div className="flex items-center gap-2">
+            {syncResult.playlist_url && (
+              <a href={syncResult.playlist_url} target="_blank" rel="noopener noreferrer" className="underline hover:no-underline">Open playlist</a>
+            )}
+            <button onClick={() => setSyncResult(null)} className="text-[#1DB954]/60 hover:text-[#1DB954]">✕</button>
+          </div>
+        </div>
+      )}
+
       {/* Tabs — always show counts */}
       <div className="flex items-center gap-2 mb-6">
         {(Object.keys(TAB_CONFIG) as Tab[]).map((t) => {
