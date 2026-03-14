@@ -153,7 +153,7 @@ function StackPageContent() {
     }
   }, [router, episodeId]);
 
-  const handleVote = async (id: string, status: "approved" | "rejected", advance: boolean = true) => {
+  const handleVote = async (id: string, status: "approved" | "rejected" | "skipped", advance: boolean = true) => {
     userHasInteracted.current = true;
     try {
       const res = await fetch(`/api/tracks/${id}`, {
@@ -609,39 +609,42 @@ function StackPageContent() {
         </button>
 
         {/* Right: tracklist button (mobile only — desktop always shows sidebar) */}
-        {currentEpisodeId ? (
-          <button
-            onClick={() => setTracklistOpen(!tracklistOpen)}
-            className="md:hidden flex-shrink-0 p-2 text-muted hover:text-foreground transition-colors z-10"
-            title="Show episode tracklist"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="8" y1="6" x2="21" y2="6" />
-              <line x1="8" y1="12" x2="21" y2="12" />
-              <line x1="8" y1="18" x2="21" y2="18" />
-              <line x1="3" y1="6" x2="3.01" y2="6" />
-              <line x1="3" y1="12" x2="3.01" y2="12" />
-              <line x1="3" y1="18" x2="3.01" y2="18" />
-            </svg>
-          </button>
-        ) : (
-          <div className="w-[34px] md:hidden" />
-        )}
+        <button
+          onClick={() => setTracklistOpen(!tracklistOpen)}
+          className="md:hidden flex-shrink-0 p-2 text-muted hover:text-foreground transition-colors z-10"
+          title="Show tracklist"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6" />
+            <line x1="8" y1="12" x2="21" y2="12" />
+            <line x1="8" y1="18" x2="21" y2="18" />
+            <line x1="3" y1="6" x2="3.01" y2="6" />
+            <line x1="3" y1="12" x2="3.01" y2="12" />
+            <line x1="3" y1="18" x2="3.01" y2="18" />
+          </svg>
+        </button>
       </div>
 
       {/* Desktop: tracklist always visible on left, card on right */}
       <div className="flex-1 min-h-0 flex flex-col md:flex-row md:gap-6 md:max-w-6xl md:mx-auto md:w-full">
         {/* Desktop tracklist sidebar — always visible */}
-        {currentEpisodeId && (
-          <div className="hidden md:block md:w-80 md:min-w-[20rem] md:max-w-[20rem] md:flex-shrink-0 md:self-stretch">
+        <div className="hidden md:block md:w-80 md:min-w-[20rem] md:max-w-[20rem] md:flex-shrink-0 md:self-stretch">
+          {currentEpisodeId ? (
             <EpisodeTracklist
               episodeId={currentEpisodeId}
               episodeTitle={currentEpisodeTitle}
+              listTitle={currentEpisodeTitle}
               refreshKey={voteCount}
               onTrackSelect={handleTrackSelect}
             />
-          </div>
-        )}
+          ) : (
+            <EpisodeTracklist
+              directTracks={tracks as any}
+              listTitle={seedName || genreFilter || "For You"}
+              onTrackSelect={handleTrackSelect}
+            />
+          )}
+        </div>
 
         {/* Track card — fills remaining space on mobile, centered on desktop */}
         <div className="flex-1 min-h-0 md:flex md:items-center md:justify-center">
@@ -655,17 +658,17 @@ function StackPageContent() {
         </div>
       </div>
 
-      {/* Mobile tracklist sheet */}
-      {currentEpisodeId && (
-        <TracklistSheet
-          episodeId={currentEpisodeId}
-          episodeTitle={currentEpisodeTitle}
-          refreshKey={voteCount}
-          open={tracklistOpen}
-          onClose={() => setTracklistOpen(false)}
-          onTrackSelect={handleTrackSelect}
-        />
-      )}
+      {/* Mobile tracklist sheet — works for all views */}
+      <TracklistSheet
+        episodeId={currentEpisodeId || undefined}
+        episodeTitle={currentEpisodeTitle}
+        listTitle={currentEpisodeId ? currentEpisodeTitle : (seedName || genreFilter || "For You")}
+        directTracks={currentEpisodeId ? undefined : (tracks as any)}
+        refreshKey={voteCount}
+        open={tracklistOpen}
+        onClose={() => setTracklistOpen(false)}
+        onTrackSelect={handleTrackSelect}
+      />
 
       {/* Keyboard hint (desktop only) */}
       <div className="hidden md:flex justify-center gap-6 py-3 text-xs text-muted md:flex-shrink-0">

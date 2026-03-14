@@ -12,20 +12,17 @@ export async function PATCH(
   const body = await req.json();
   const { status } = body;
 
-  if (!status || !["approved", "rejected", "downloaded", "pending"].includes(status)) {
+  if (!status || !["approved", "rejected", "pending", "skipped"].includes(status)) {
     return NextResponse.json(
-      { error: "Invalid status. Must be: approved, rejected, downloaded, pending" },
+      { error: "Invalid status. Must be: approved, rejected, pending, skipped" },
       { status: 400 }
     );
   }
 
   const updates: Record<string, unknown> = { status };
 
-  if (status === "approved" || status === "rejected") {
+  if (status === "approved" || status === "rejected" || status === "skipped") {
     updates.voted_at = new Date().toISOString();
-  }
-  if (status === "downloaded") {
-    updates.downloaded_at = new Date().toISOString();
   }
 
   // If rejecting, delete the audio file from storage

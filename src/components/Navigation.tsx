@@ -16,12 +16,12 @@ const links = [
   { href: "/stats", label: "Stats", icon: "▤" },
 ];
 
-// Fewer tabs on mobile — Stats moves into More sheet
+// Fewer tabs on mobile — Episodes + Stats move into More sheet
 const mobileLinks = [
   { href: "/stacks", label: "Stacks", icon: "◉" },
+  { href: "/", label: "Playing", icon: "▶" },
   { href: "/approved", label: "Tracks", icon: "✓" },
   { href: "/seeds", label: "Seeds", icon: "◎" },
-  { href: "/episodes", label: "Episodes", icon: "▶" },
 ];
 
 function ThemeToggle() {
@@ -184,6 +184,8 @@ export function Navigation() {
         {mobileLinks.map((link) => {
           const isActive = link.href === "/stacks"
             ? pathname.startsWith("/stacks")
+            : link.href === "/"
+            ? pathname === "/"
             : pathname === link.href;
           return (
             <Link
@@ -262,6 +264,14 @@ function MobileAccountButton() {
 
             <div className="px-4 pb-6 space-y-2">
               {/* Extra pages — only in mobile More sheet */}
+              <Link
+                href="/episodes"
+                onClick={() => setOpen(false)}
+                className="w-full flex items-center gap-3 px-4 py-3 bg-surface-2 rounded-xl text-sm text-foreground/80 hover:bg-surface-3 transition-colors"
+              >
+                <span className="text-base">▶</span>
+                Episodes
+              </Link>
               <Link
                 href="/curators"
                 onClick={() => setOpen(false)}

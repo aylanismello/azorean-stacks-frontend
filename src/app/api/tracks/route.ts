@@ -95,12 +95,7 @@ export async function GET(req: NextRequest) {
     .from("tracks")
     .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url), seeds!track_id(id)", { count: "exact" });
 
-  // "approved" includes "downloaded" (same logical status)
-  if (status === "approved") {
-    query = query.in("status", ["approved", "downloaded"]);
-  } else {
-    query = query.eq("status", status);
-  }
+  query = query.eq("status", status);
 
   // taste_score: highest first; created_at for pending: oldest first; voted_at: newest first
   const ascending = orderBy === "taste_score" ? false : isPending;

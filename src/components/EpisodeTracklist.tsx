@@ -16,14 +16,28 @@ interface TrackListItem {
   storage_path: string | null;
 }
 
-interface EpisodeTracklistProps {
-  episodeId: string;
-  episodeTitle?: string | null;
-  refreshKey?: number;
+interface BaseTracklistProps {
+  listTitle?: string | null;
   onClose?: () => void;
   onTrackSelect?: (trackId: string) => void;
   variant?: "sidebar" | "sheet";
 }
+
+interface EpisodeTracklistProps extends BaseTracklistProps {
+  episodeId: string;
+  episodeTitle?: string | null;
+  refreshKey?: number;
+  directTracks?: never;
+}
+
+interface DirectTracklistProps extends BaseTracklistProps {
+  directTracks: TrackListItem[];
+  episodeId?: never;
+  episodeTitle?: never;
+  refreshKey?: never;
+}
+
+type TracklistProps = EpisodeTracklistProps | DirectTracklistProps;
 
 function safeCoverUrl(url: string | null): string | null {
   if (!url) return null;
@@ -34,26 +48,33 @@ function safeCoverUrl(url: string | null): string | null {
   return null;
 }
 
-export function EpisodeTracklist({
-  episodeId,
-  episodeTitle,
-  refreshKey = 0,
-  onClose,
-  onTrackSelect,
-  variant = "sidebar",
-}: EpisodeTracklistProps) {
-  const [tracks, setTracks] = useState<TrackListItem[]>([]);
-  const [loading, setLoading] = useState(true);
+export function EpisodeTracklist(props: TracklistProps) {
+  const {
+    listTitle,
+    onClose,
+    onTrackSelect,
+    variant = "sidebar",
+  } = props;
+
+  const isDirectMode = "directTracks" in props && !!props.directTracks;
+  const episodeId = isDirectMode ? undefined : (props as EpisodeTracklistProps).episodeId;
+  const episodeTitle = isDirectMode ? undefined : (props as EpisodeTracklistProps).episodeTitle;
+  const refreshKey = isDirectMode ? 0 : ((props as EpisodeTracklistProps).refreshKey || 0);
+
+  const [fetchedTracks, setFetchedTracks] = useState<TrackListItem[]>([]);
+  const [loading, setLoading] = useState(!isDirectMode);
   const [error, setError] = useState<string | null>(null);
   const globalPlayer = useGlobalPlayer();
   const playingRef = useRef<HTMLButtonElement>(null);
   const prevEpisodeIdRef = useRef(episodeId);
 
+  // Fetch tracks from API when in episode mode
   useEffect(() => {
-    // Show loading spinner only on initial load or episode change, not on vote refreshes
+    if (isDirectMode || !episodeId) return;
+
     const isNewEpisode = prevEpisodeIdRef.current !== episodeId;
     prevEpisodeIdRef.current = episodeId;
-    if (isNewEpisode || tracks.length === 0) {
+    if (isNewEpisode || fetchedTracks.length === 0) {
       setLoading(true);
     }
     setError(null);
@@ -62,14 +83,16 @@ export function EpisodeTracklist({
         if (!r.ok) throw new Error(`Failed to load tracks (${r.status})`);
         return r.json();
       })
-      .then((data) => setTracks(Array.isArray(data) ? data : []))
+      .then((data) => setFetchedTracks(Array.isArray(data) ? data : []))
       .catch((err) => {
-        setTracks([]);
+        setFetchedTracks([]);
         setError(err instanceof Error ? err.message : "Failed to load tracklist");
       })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [episodeId, refreshKey]);
+  }, [episodeId, refreshKey, isDirectMode]);
+
+  const tracks = isDirectMode ? (props as DirectTracklistProps).directTracks : fetchedTracks;
 
   // Auto-scroll to playing track when tracklist loads or track changes
   useEffect(() => {
@@ -87,27 +110,32 @@ export function EpisodeTracklist({
       coverArtUrl: safeCoverUrl(t.cover_art_url),
       spotifyUrl: t.spotify_url,
       audioUrl,
-      episodeId,
+      episodeId: episodeId,
       episodeTitle: episodeTitle || undefined,
       youtubeUrl: t.youtube_url,
     });
   };
 
   const statusDot = (s: string) => {
-    if (s === "approved" || s === "downloaded") return "bg-green-500";
+    if (s === "approved") return "bg-green-500";
     if (s === "rejected") return "bg-red-500/60";
+    if (s === "skipped") return "bg-amber-400/60";
     return "bg-foreground/20";
   };
 
   const statusText = (s: string) => {
-    if (s === "approved" || s === "downloaded") return "text-foreground/80";
+    if (s === "approved") return "text-foreground/80";
     if (s === "rejected") return "text-foreground/30 line-through";
+    if (s === "skipped") return "text-foreground/40";
     return "text-foreground/60";
   };
 
-  const approved = tracks.filter((t) => t.status === "approved" || t.status === "downloaded").length;
+  const approved = tracks.filter((t) => t.status === "approved").length;
   const rejected = tracks.filter((t) => t.status === "rejected").length;
+  const skipped = tracks.filter((t) => t.status === "skipped").length;
   const pending = tracks.filter((t) => t.status === "pending").length;
+
+  const displayTitle = listTitle || episodeTitle || "Tracklist";
 
   const content = (
     <div className="flex flex-col h-full">
@@ -116,13 +144,14 @@ export function EpisodeTracklist({
         <div className="flex items-center justify-between">
           <div className="min-w-0 flex-1">
             <h3 className="text-sm font-medium text-foreground truncate">
-              {episodeTitle || "Episode tracklist"}
+              {displayTitle}
             </h3>
             {!loading && (
               <div className="flex items-center gap-3 mt-1 text-[10px] font-mono text-muted">
                 <span>{tracks.length} tracks</span>
                 {approved > 0 && <span className="text-green-400/70">{approved} kept</span>}
-                {rejected > 0 && <span className="text-red-400/50">{rejected} skipped</span>}
+                {rejected > 0 && <span className="text-red-400/50">{rejected} nope</span>}
+                {skipped > 0 && <span className="text-amber-400/50">{skipped} skipped</span>}
                 {pending > 0 && <span className="text-foreground/40">{pending} pending</span>}
               </div>
             )}
@@ -149,7 +178,7 @@ export function EpisodeTracklist({
         ) : error ? (
           <p className="text-center text-red-400/70 text-xs py-8">{error}</p>
         ) : tracks.length === 0 ? (
-          <p className="text-center text-muted text-xs py-8">No tracks in this episode</p>
+          <p className="text-center text-muted text-xs py-8">No tracks</p>
         ) : (
           <div className="space-y-0.5">
             {tracks.map((t) => {
@@ -212,16 +241,21 @@ export function EpisodeTracklist({
 }
 
 // Mobile bottom sheet wrapper — liquid glass overlay
+// Supports both episode-based (fetch) and direct tracks modes
 export function TracklistSheet({
   episodeId,
   episodeTitle,
+  listTitle,
+  directTracks,
   refreshKey,
   open,
   onClose,
   onTrackSelect,
 }: {
-  episodeId: string;
+  episodeId?: string;
   episodeTitle?: string | null;
+  listTitle?: string | null;
+  directTracks?: TrackListItem[];
   refreshKey?: number;
   open: boolean;
   onClose: () => void;
@@ -237,14 +271,25 @@ export function TracklistSheet({
         <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
           <div className="w-10 h-1 rounded-full bg-foreground/25" />
         </div>
-        <EpisodeTracklist
-          episodeId={episodeId}
-          episodeTitle={episodeTitle}
-          refreshKey={refreshKey}
-          onClose={onClose}
-          onTrackSelect={onTrackSelect}
-          variant="sheet"
-        />
+        {directTracks ? (
+          <EpisodeTracklist
+            directTracks={directTracks}
+            listTitle={listTitle}
+            onClose={onClose}
+            onTrackSelect={onTrackSelect}
+            variant="sheet"
+          />
+        ) : episodeId ? (
+          <EpisodeTracklist
+            episodeId={episodeId}
+            episodeTitle={episodeTitle}
+            listTitle={listTitle}
+            refreshKey={refreshKey}
+            onClose={onClose}
+            onTrackSelect={onTrackSelect}
+            variant="sheet"
+          />
+        ) : null}
       </div>
     </div>
   );

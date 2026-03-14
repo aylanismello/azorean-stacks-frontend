@@ -83,7 +83,7 @@ export async function GET() {
     const s = episodeStats[epId];
     s.total++;
     if (t.status === "pending") s.pending++;
-    else if (t.status === "approved" || t.status === "downloaded") s.approved++;
+    else if (t.status === "approved") s.approved++;
     else if (t.status === "rejected") s.rejected++;
 
     if (!s.cover_art_url && t.cover_art_url) s.cover_art_url = t.cover_art_url;

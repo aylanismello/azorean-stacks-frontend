@@ -59,7 +59,7 @@ export async function GET(
     statsByEpisode[eid].total++;
     const s = row.tracks?.status;
     if (s === "pending") statsByEpisode[eid].pending++;
-    else if (s === "approved" || s === "downloaded") statsByEpisode[eid].approved++;
+    else if (s === "approved") statsByEpisode[eid].approved++;
     else if (s === "rejected") statsByEpisode[eid].rejected++;
   }
 

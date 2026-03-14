@@ -1,0 +1,23 @@
+[     964ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3002/login:0
+[    1179ms] TypeError: __webpack_modules__[moduleId] is not a function
+    at Object.__webpack_require__ [as require] (file:///Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-client/.next/server/webpack-runtime.js:33:42)
+    at require (file:///Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-client/node_modules/next/dist/compiled/next-server/app-page.runtime.dev.js:40:20064)
+    at <unknown> (file:///Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-client/node_modules/next/dist/compiled/next-server/app-page.runtime.dev.js:35:108376)
+    at ea (file:///Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-client/node_modules/next/dist/compiled/next-server/app-page.runtime.dev.js:35:108583)
+    at <unknown> (file:///Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-client/node_modules/next/dist/compiled/next-server/app-page.runtime.dev.js:35:110813)
+    at Object._fromJSON (file:///Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-client/node_modules/next/dist/compiled/next-server/app-page.runtime.dev.js:35:111370)
+    at JSON.parse (<anonymous>)
+    at ec (file:///Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-client/node_modules/next/dist/compiled/next-server/app-page.runtime.dev.js:35:109078)
+    at eo (file:///Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-client/node_modules/next/dist/compiled/next-server/app-page.runtime.dev.js:35:108123)
+    at <unknown> (file:///Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-client/node_modules/next/dist/compiled/next-server/app-page.runtime.dev.js:35:115291)
+    at <unknown> (file:///Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-client/node_modules/next/dist/compiled/next-server/app-page.runtime.dev.js:35:115308)
+    at <unknown> (file:///Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-client/node_modules/next/dist/compiled/next-server/app-page.runtime.dev.js:35:115341)
+    at <unknown> (file:///Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-client/node_modules/next/dist/compiled/next-server/app-page.runtime.dev.js:35:115358)
+    at t (file:///Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-client/node_modules/next/dist/compiled/next-server/app-page.runtime.dev.js:35:115581)
+[    1190ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3002/favicon.ico:0
+[    1240ms] [WARNING] [Fast Refresh] performing full reload because your application had an unrecoverable error @ webpack-internal:///./node_modules/next/dist/client/components/react-dev-overlay/pages/hot-reloader-client.js:349
+[    1443ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3002/_next/static/css/app/layout.css?v=1773518001382:0
+[    1459ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3002/_next/static/chunks/main-app.js?v=1773518001382:0
+[    1470ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3002/_next/static/chunks/app-pages-internals.js:0
+[    1471ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3002/_next/static/chunks/app/layout.js:0
+[    1471ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:3002/_next/static/chunks/app/login/page.js:0

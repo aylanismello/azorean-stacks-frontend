@@ -381,14 +381,16 @@ function SeedEpisodeRow({ episode: ep, seedArtist, seedTitle }: {
   };
 
   const statusDot = (s: string) => {
-    if (s === "approved" || s === "downloaded") return "bg-green-500";
+    if (s === "approved") return "bg-green-500";
     if (s === "rejected") return "bg-red-500";
+    if (s === "skipped") return "bg-amber-400";
     return "bg-surface-4";
   };
 
   const statusColor = (s: string) => {
-    if (s === "approved" || s === "downloaded") return "text-green-400";
+    if (s === "approved") return "text-green-400";
     if (s === "rejected") return "text-red-400";
+    if (s === "skipped") return "text-amber-400";
     return "text-muted";
   };
 
@@ -499,7 +501,7 @@ function SeedTrackRow({
         setLocal({ ...local, dl_failed_at: new Date().toISOString(), dl_attempts: (local.dl_attempts || 0) + 1 });
       } else {
         const data = await res.json();
-        setLocal({ ...local, storage_path: data.storage_path || "downloaded", dl_failed_at: null, dl_attempts: 0 });
+        setLocal({ ...local, storage_path: data.storage_path || "fetched", dl_failed_at: null, dl_attempts: 0 });
       }
     } catch {} finally {
       setFetching(false);

@@ -12,7 +12,7 @@ export async function GET() {
     // Counts by status — use limit(0) with count to stay compatible with RLS
     const [pending, approved, rejected] = await Promise.all([
       supabase.from("tracks").select("id", { count: "exact" }).eq("status", "pending").limit(0),
-      supabase.from("tracks").select("id", { count: "exact" }).in("status", ["approved", "downloaded"]).limit(0),
+      supabase.from("tracks").select("id", { count: "exact" }).eq("status", "approved").limit(0),
       supabase.from("tracks").select("id", { count: "exact" }).eq("status", "rejected").limit(0),
     ]);
 
@@ -25,7 +25,7 @@ export async function GET() {
     const { data: approvedTracks } = await supabase
       .from("tracks")
       .select("artist")
-      .in("status", ["approved", "downloaded"])
+      .eq("status", "approved")
       .limit(5000);
 
     const artistCounts: Record<string, number> = {};

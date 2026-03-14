@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
   const { data: approvedTracks, error: tracksError } = await supabase
     .from("tracks")
     .select("id, spotify_url")
-    .in("status", ["approved", "downloaded"])
+    .eq("status", "approved")
     .not("spotify_url", "is", null)
     .neq("spotify_url", "")
     .order("voted_at", { ascending: false, nullsFirst: false });

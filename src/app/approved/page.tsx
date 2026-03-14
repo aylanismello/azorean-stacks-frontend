@@ -15,7 +15,7 @@ function safeCoverUrl(url: string | null): string | null {
   return null;
 }
 
-type Tab = "approved" | "pending" | "rejected";
+type Tab = "approved" | "pending" | "rejected" | "skipped";
 
 const TAB_CONFIG: Record<Tab, { label: string; color: string; activeBg: string; emptyMsg: string }> = {
   approved: {
@@ -31,9 +31,15 @@ const TAB_CONFIG: Record<Tab, { label: string; color: string; activeBg: string; 
     emptyMsg: "Queue is empty — all caught up.",
   },
   rejected: {
-    label: "Skipped",
+    label: "Nope",
     color: "text-red-400/70",
     activeBg: "bg-red-400/10 text-red-400 ring-1 ring-red-400/20",
+    emptyMsg: "Nothing rejected yet.",
+  },
+  skipped: {
+    label: "Skipped",
+    color: "text-amber-400/70",
+    activeBg: "bg-amber-400/10 text-amber-400 ring-1 ring-amber-400/20",
     emptyMsg: "Nothing skipped yet.",
   },
 };
@@ -47,6 +53,7 @@ export default function TracksPage() {
     approved: null,
     pending: null,
     rejected: null,
+    skipped: null,
   });
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -63,7 +70,7 @@ export default function TracksPage() {
 
   // Fetch counts for all tabs (lightweight)
   const fetchCounts = useCallback(async () => {
-    const tabs: Tab[] = ["approved", "pending", "rejected"];
+    const tabs: Tab[] = ["approved", "pending", "rejected", "skipped"];
     const results = await Promise.all(
       tabs.map(async (t) => {
         try {
@@ -80,6 +87,7 @@ export default function TracksPage() {
       approved: results[0],
       pending: results[1],
       rejected: results[2],
+      skipped: results[3],
     });
   }, []);
 
@@ -190,7 +198,7 @@ export default function TracksPage() {
       setTracks((prev) =>
         prev.map((t) =>
           t.id === track.id
-            ? { ...t, storage_path: data.storage_path || "downloaded", audio_url: data.audio_url, dl_failed_at: null, dl_attempts: 0 }
+            ? { ...t, storage_path: data.storage_path || "fetched", audio_url: data.audio_url, dl_failed_at: null, dl_attempts: 0 }
             : t
         )
       );
@@ -205,7 +213,7 @@ export default function TracksPage() {
     }
   };
 
-  const handleChangeStatus = async (trackId: string, newStatus: "approved" | "rejected" | "pending") => {
+  const handleChangeStatus = async (trackId: string, newStatus: "approved" | "rejected" | "pending" | "skipped") => {
     if (updating.has(trackId)) return;
     setUpdating((prev) => new Set(prev).add(trackId));
     try {
@@ -253,7 +261,8 @@ export default function TracksPage() {
     const opts: { label: string; status: Tab; color: string }[] = [];
     if (tab !== "approved") opts.push({ label: "Keep", status: "approved", color: "text-green-400 hover:bg-green-400/10" });
     if (tab !== "pending") opts.push({ label: "Back to queue", status: "pending", color: "text-foreground/50 hover:bg-foreground/5" });
-    if (tab !== "rejected") opts.push({ label: "Skip", status: "rejected", color: "text-red-400/70 hover:bg-red-400/10" });
+    if (tab !== "skipped") opts.push({ label: "Skip", status: "skipped", color: "text-amber-400/70 hover:bg-amber-400/10" });
+    if (tab !== "rejected") opts.push({ label: "Nope", status: "rejected", color: "text-red-400/70 hover:bg-red-400/10" });
     return opts;
   };
 

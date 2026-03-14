@@ -453,8 +453,8 @@ function CuratorTrackRow({ track: t }: { track: EpisodeTrack }) {
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const statusColor = t.status === "approved" || t.status === "downloaded"
-    ? "text-green-400" : t.status === "rejected" ? "text-red-400" : "text-muted";
+  const statusColor = t.status === "approved"
+    ? "text-green-400" : t.status === "rejected" ? "text-red-400" : t.status === "skipped" ? "text-amber-400" : "text-muted";
 
   return (
     <div className="flex items-center gap-2 py-1 text-[13px]">

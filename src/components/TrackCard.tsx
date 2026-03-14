@@ -7,7 +7,7 @@ import { useGlobalPlayer } from "./GlobalPlayerProvider";
 
 interface TrackCardProps {
   track: Track;
-  onVote: (id: string, status: "approved" | "rejected", advance?: boolean) => Promise<void>;
+  onVote: (id: string, status: "approved" | "rejected" | "skipped", advance?: boolean) => Promise<void>;
   onSkipEpisode?: () => void;
   skippingEpisode?: boolean;
 }
@@ -82,7 +82,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
   }, [track.artist, track.title, seeding, seeded]);
 
   const handleVote = useCallback(
-    async (status: "approved" | "rejected", advance: boolean = true) => {
+    async (status: "approved" | "rejected" | "skipped", advance: boolean = true) => {
       if (votingRef.current) return;
       if (!advance) {
         setKept(true);
@@ -91,7 +91,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
       }
       votingRef.current = true;
       setVoting(true);
-      setExiting(status === "approved" ? "right" : "left");
+      setExiting(status === "approved" ? "right" : status === "skipped" ? "right" : "left");
       await new Promise((r) => setTimeout(r, 250));
       await onVote(track.id, status, true);
     },
@@ -546,26 +546,86 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
           </div>
         )}
 
-        {/* Bottom overlay: track info + vote buttons */}
+        {/* Bottom overlay: track info + source + links + vote buttons */}
         <div className="absolute bottom-0 left-0 right-0 z-10 px-4 pb-4">
           {/* Track info */}
-          <div className="mb-3">
+          <div className="mb-2">
             <h2 className="text-lg font-bold text-white leading-tight truncate drop-shadow-lg">
               {track.title}
             </h2>
             <p className="text-sm text-white/80 truncate drop-shadow-lg">{track.artist}</p>
           </div>
 
-          {/* Vote buttons row: X | seed | heart */}
-          <div className="flex items-center justify-center gap-6">
-            {/* Skip (reject) */}
+          {/* Source indicator + external links row */}
+          <div className="flex items-center gap-2 mb-3">
+            {/* Audio source indicator (simpler than desktop) */}
+            {isCurrentTrack && !globalPlayer.noSource && (
+              <div className="flex items-center gap-1.5 text-[11px]">
+                <span className={globalPlayer.source === "spotify" ? "text-[#1DB954]" : "text-accent"}>
+                  {eqBars}
+                </span>
+                <span className={globalPlayer.source === "spotify" ? "text-[#1DB954]" : "text-white/60"}>
+                  {globalPlayer.source === "spotify" ? "Spotify" : "Audio"}
+                </span>
+              </div>
+            )}
+            {/* No audio source */}
+            {!hasPlayableSource && (
+              <div className="flex items-center gap-1.5 text-[11px] text-white/40">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <line x1="23" y1="9" x2="17" y2="15" />
+                  <line x1="17" y1="9" x2="23" y2="15" />
+                </svg>
+                No audio
+              </div>
+            )}
+            <div className="flex-1" />
+            {/* Spotify + YouTube external links */}
+            {track.spotify_url && (
+              <a
+                href={track.spotify_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm active:scale-90 transition-all"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="#1DB954">
+                  <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
+                </svg>
+              </a>
+            )}
+            {track.youtube_url && (
+              <button
+                onClick={() => openYouTube(track.youtube_url!)}
+                className="flex items-center justify-center w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm text-red-400/80 active:scale-90 transition-all"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+              </button>
+            )}
+          </div>
+
+          {/* Vote buttons row: X reject | skip neutral | seed | heart approve */}
+          <div className="flex items-center justify-center gap-5">
+            {/* Reject (X) */}
             <button
               onClick={() => handleVote("rejected", true)}
               disabled={voting}
-              className="flex items-center justify-center w-14 h-14 rounded-full bg-black/40 backdrop-blur-md border-2 border-red-400/40 text-red-400/90 active:scale-90 transition-all disabled:opacity-50"
+              className="flex items-center justify-center w-13 h-13 rounded-full bg-black/40 backdrop-blur-md border-2 border-red-400/40 text-red-400/90 active:scale-90 transition-all disabled:opacity-50"
             >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+
+            {/* Skip (neutral — yellow) */}
+            <button
+              onClick={() => handleVote("skipped", true)}
+              disabled={voting}
+              className="flex items-center justify-center w-11 h-11 rounded-full bg-black/40 backdrop-blur-md border-2 border-amber-400/40 text-amber-400/90 active:scale-90 transition-all disabled:opacity-50"
+              title="Skip — no opinion"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
               </svg>
             </button>
 
@@ -573,7 +633,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
             <button
               onClick={handlePlantSeed}
               disabled={seeding || seeded}
-              className={`flex items-center justify-center w-10 h-10 rounded-full border backdrop-blur-md transition-all active:scale-90 ${
+              className={`flex items-center justify-center w-9 h-9 rounded-full border backdrop-blur-md transition-all active:scale-90 ${
                 seeded
                   ? "bg-emerald-500/30 border-emerald-400/50 text-emerald-400"
                   : seeding
@@ -582,7 +642,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
               }`}
               title={seeded ? "Planted as seed!" : "Plant as seed"}
             >
-              <span className="text-sm">{seeded ? "🌿" : "🌱"}</span>
+              <span className="text-xs">{seeded ? "🌿" : "🌱"}</span>
             </button>
 
             {/* Keep (approve) */}
@@ -590,19 +650,19 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
               <button
                 onClick={handleAdvance}
                 disabled={voting}
-                className="flex items-center justify-center w-14 h-14 rounded-full bg-green-500/20 backdrop-blur-md border-2 border-green-400 text-green-400 transition-all active:scale-90 disabled:opacity-50 kept-pop"
+                className="flex items-center justify-center w-13 h-13 rounded-full bg-green-500/20 backdrop-blur-md border-2 border-green-400 text-green-400 transition-all active:scale-90 disabled:opacity-50 kept-pop"
               >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
                 </svg>
               </button>
             ) : (
               <button
                 onClick={() => handleVote("approved", false)}
                 disabled={voting}
-                className="flex items-center justify-center w-14 h-14 rounded-full bg-black/40 backdrop-blur-md border-2 border-green-400/40 text-green-400/90 active:scale-90 transition-all disabled:opacity-50"
+                className="flex items-center justify-center w-13 h-13 rounded-full bg-black/40 backdrop-blur-md border-2 border-green-400/40 text-green-400/90 active:scale-90 transition-all disabled:opacity-50"
               >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
                 </svg>
               </button>
