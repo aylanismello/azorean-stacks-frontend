@@ -50,6 +50,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
   const [approved, setApproved] = useState(false);
   const votingRef = useRef(false);
   const [copied, setCopied] = useState(false);
+  const [seeded, setSeeded] = useState(false);
+  const [seeding, setSeeding] = useState(false);
   const [swipeX, setSwipeX] = useState(0);
   const touchRef = useRef<{ startX: number; startY: number; swiping: boolean } | null>(null);
   const globalPlayer = useGlobalPlayer();
@@ -59,6 +61,26 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }, [track.artist, track.title]);
+
+  const handlePlantSeed = useCallback(async () => {
+    if (seeding || seeded) return;
+    setSeeding(true);
+    try {
+      const res = await fetch("/api/seeds", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artist: track.artist, title: track.title, source: "re-seed" }),
+      });
+      if (res.ok || res.status === 409) {
+        // 409 = already a seed, still counts as success
+        setSeeded(true);
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setSeeding(false);
+    }
+  }, [track.artist, track.title, seeding, seeded]);
 
   const handleVote = useCallback(
     async (status: "approved" | "rejected", advance: boolean = true) => {
@@ -369,6 +391,24 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
                   </svg>
                 )}
               </button>
+
+              {/* Plant as seed — only visible after approval */}
+              {approved && (
+                <button
+                  onClick={handlePlantSeed}
+                  disabled={seeding || seeded}
+                  className={`flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-md border transition-all active:scale-90 ${
+                    seeded
+                      ? "bg-emerald-500/30 border-emerald-400/50 text-emerald-400 scale-110"
+                      : seeding
+                      ? "bg-black/40 border-emerald-400/30 text-emerald-400/50 animate-pulse"
+                      : "bg-black/40 border-emerald-400/30 text-emerald-400/70 hover:bg-emerald-950/50 hover:border-emerald-400/60 hover:text-emerald-400"
+                  }`}
+                  title={seeded ? "Planted as seed!" : "Plant as seed for future discovery"}
+                >
+                  <span className="text-base">{seeded ? "🌿" : "🌱"}</span>
+                </button>
+              )}
 
               {/* Keep & Next (approve and advance) */}
               <button

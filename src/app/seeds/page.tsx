@@ -152,9 +152,16 @@ function SeedCard({
           onClick={() => setExpanded(!expanded)}
           className="flex-1 min-w-0 text-left"
         >
-          <p className="text-sm font-medium text-white truncate">
-            {seed.artist}
-          </p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm font-medium text-white truncate">
+              {seed.artist}
+            </p>
+            {seed.source === "re-seed" && (
+              <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" title="Planted from discovery">
+                🌱 re-seed
+              </span>
+            )}
+          </div>
           <p className="text-xs text-white/60 truncate">{seed.title}</p>
           {/* Episode count hint */}
           {episodes.length > 0 && (
@@ -237,7 +244,15 @@ function SeedCard({
         </div>
       )}
 
-      {expanded && episodes.length === 0 && (
+      {expanded && seed.source === "re-seed" && (
+        <div className="border-t border-surface-3 px-4 py-3">
+          <p className="text-[10px] text-emerald-400/60 italic">
+            🌱 Planted from discovery — exploration begets exploration
+          </p>
+        </div>
+      )}
+
+      {expanded && episodes.length === 0 && !seed.source && (
         <div className="border-t border-surface-3 px-4 py-3">
           <p className="text-[11px] text-muted/50">No episodes linked to this seed yet</p>
         </div>

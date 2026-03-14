@@ -212,12 +212,15 @@ export async function POST(req: NextRequest) {
     .limit(1)
     .maybeSingle();
 
+  const source = body.source?.trim() || null;
+
   const { data, error } = await supabase
     .from("seeds")
     .insert({
       artist,
       title,
       track_id: existingTrack?.id || null,
+      ...(source ? { source } : {}),
     })
     .select()
     .single();
