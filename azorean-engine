@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# azorean-engine — CLI wrapper for the Azorean Stacks Engine service
+
+PLIST_NAME="com.azorean.stacks-engine"
+PLIST_SRC="$HOME/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-engine/com.azorean.stacks-engine.plist"
+PLIST_DST="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
+LOG_FILE="$HOME/.openclaw/logs/azorean-engine.log"
+STATUS_FILE="$HOME/.openclaw/data/azorean-engine-status.json"
+
+cmd_start() {
+  if [ ! -f "$PLIST_DST" ]; then
+    cp "$PLIST_SRC" "$PLIST_DST"
+  fi
+  launchctl load "$PLIST_DST" 2>/dev/null
+  echo "Azorean Stacks Engine started."
+}
+
+cmd_stop() {
+  launchctl unload "$PLIST_DST" 2>/dev/null
+  echo "Azorean Stacks Engine stopped."
+}
+
+cmd_restart() {
+  cmd_stop
+  sleep 1
+  cmd_start
+}
+
+cmd_status() {
+  echo "=== Azorean Stacks Engine ==="
+  echo ""
+
+  # Check if running via launchctl
+  if launchctl list "$PLIST_NAME" &>/dev/null; then
+    pid=$(launchctl list "$PLIST_NAME" 2>/dev/null | grep PID | awk '{print $NF}')
+    echo "Status: RUNNING"
+    if [ -n "$pid" ] && [ "$pid" != "-" ]; then
+      echo "PID: $pid"
+    fi
+  else
+    echo "Status: STOPPED"
+  fi
+
+  echo ""
+
+  # Show status file if it exists
+  if [ -f "$STATUS_FILE" ]; then
+    echo "--- Engine Status ---"
+    cat "$STATUS_FILE"
+    echo ""
+  fi
+
+  # Show last few log lines
+  if [ -f "$LOG_FILE" ]; then
+    echo "--- Recent Logs ---"
+    tail -n 10 "$LOG_FILE"
+  fi
+}
+
+cmd_logs() {
+  local lines=""
+  local follow=true
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n)
+        lines="$2"
+        follow=false
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  if [ ! -f "$LOG_FILE" ]; then
+    echo "No log file found at $LOG_FILE"
+    exit 1
+  fi
+
+  if [ "$follow" = true ]; then
+    tail -f "$LOG_FILE"
+  else
+    tail -n "${lines:-50}" "$LOG_FILE"
+  fi
+}
+
+case "${1:-}" in
+  start)   cmd_start ;;
+  stop)    cmd_stop ;;
+  restart) cmd_restart ;;
+  status)  cmd_status ;;
+  logs)    shift; cmd_logs "$@" ;;
+  *)
+    echo "Usage: azorean-engine {start|stop|restart|status|logs [-n N]}"
+    exit 1
+    ;;
+esac

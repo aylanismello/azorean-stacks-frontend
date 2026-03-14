@@ -1,0 +1,383 @@
+#!/usr/bin/env bun
+/**
+ * The Stacks — Realtime Seed Watcher
+ *
+ * Subscribes to Supabase Realtime INSERT events on the `seeds` table.
+ * When a new seed is inserted, immediately runs the discover+enrich+download
+ * pipeline for that seed — no waiting for the next engine cycle.
+ *
+ * Usage: bun run watcher
+ */
+import { getSupabase } from "../lib/supabase";
+import {
+  log, elapsed, sleep,
+  ntsSearch, ntsTracklist, ntsEpisodeArtwork,
+  isSameTrack,
+  enrichTrack, downloadTrack,
+  spotifyLookup,
+  logEngineEvent,
+} from "../lib/pipeline";
+import { writeFileSync, readFileSync, existsSync } from "fs";
+
+const db = getSupabase();
+const STATUS_FILE = `${process.env.HOME}/.openclaw/data/azorean-engine-status.json`;
+
+const ENRICH_CONCURRENCY = 5;
+const NTS_MAX_EPISODES = 10;
+const GARBAGE_TITLES = new Set(["unknown track", "untitled", "id", "?", "unknown", ""]);
+
+// ─── STATUS TRACKING ────────────────────────────────────────
+
+let watcherConnectedAt: string | null = null;
+let lastEventAt: string | null = null;
+
+function updateStatusFile() {
+  try {
+    if (!existsSync(STATUS_FILE)) return;
+    const raw = readFileSync(STATUS_FILE, "utf-8");
+    const status = JSON.parse(raw);
+    status.watcher_connected_at = watcherConnectedAt;
+    status.last_event_at = lastEventAt;
+    writeFileSync(STATUS_FILE, JSON.stringify(status, null, 2));
+  } catch {
+    // Non-critical — don't crash
+  }
+}
+
+// ─── SEED PIPELINE ──────────────────────────────────────────
+
+async function processSeed(seedId: string) {
+  const t0 = Date.now();
+
+  // Read seed record
+  const { data: seed, error: seedErr } = await db.from("seeds")
+    .select("*").eq("id", seedId).single();
+
+  if (seedErr || !seed) {
+    log("fail", `Could not read seed ${seedId}: ${seedErr?.message ?? "not found"}`);
+    await logEngineEvent("error", "failed", {
+      seedId,
+      message: `Could not read seed: ${seedErr?.message ?? "not found"}`,
+    });
+    return;
+  }
+
+  const seedLabel = `${seed.artist} – ${seed.title}`;
+  console.log(`\n━━━ WATCHER: New seed detected ━━━`);
+  console.log(`  ${seedLabel}`);
+
+  await logEngineEvent("seed_detected", "info", {
+    seedId,
+    message: seedLabel,
+    metadata: { artist: seed.artist, title: seed.title },
+  });
+
+  // ── Phase 1: NTS Discovery (first matching episode only) ──
+  await logEngineEvent("discover_started", "started", { seedId, message: seedLabel });
+
+  const query = `${seed.artist} ${seed.title}`;
+  let episodes: Awaited<ReturnType<typeof ntsSearch>>;
+  try {
+    episodes = await ntsSearch(query);
+  } catch (err) {
+    log("fail", `NTS search failed for ${seedLabel}: ${err instanceof Error ? err.message : err}`);
+    await logEngineEvent("error", "failed", {
+      seedId,
+      message: `NTS search failed: ${err instanceof Error ? err.message : err}`,
+    });
+    return;
+  }
+
+  if (episodes.length === 0) {
+    log("warn", `No NTS episodes found for ${seedLabel}`);
+    await logEngineEvent("discover_completed", "completed", {
+      seedId,
+      message: "No episodes found",
+      metadata: { episodes_found: 0 },
+    });
+    return;
+  }
+
+  // Process the FIRST matching episode only
+  let tracksAdded = 0;
+  let episodeProcessed: string | null = null;
+
+  for (const ep of episodes.slice(0, NTS_MAX_EPISODES)) {
+    await sleep(1000); // NTS rate limit
+
+    const episodeUrl = `https://www.nts.live${ep.path}`;
+    const context = `${ep.title}${ep.date ? ` (${ep.date.split("T")[0]})` : ""}`;
+
+    // Check if already crawled with tracks
+    const { data: existingEp } = await db.from("episodes")
+      .select("id").eq("url", episodeUrl).limit(1).single();
+
+    let episodeId: string;
+
+    if (existingEp) {
+      episodeId = existingEp.id;
+      await db.from("episode_seeds").upsert(
+        { episode_id: episodeId, seed_id: seedId },
+        { onConflict: "episode_id,seed_id" },
+      );
+
+      const { count } = await db.from("tracks")
+        .select("*", { count: "exact", head: true })
+        .eq("episode_id", episodeId);
+
+      if (count && count > 0) {
+        log("skip", `Already crawled (${count} tracks): ${context}`);
+        continue;
+      }
+    } else {
+      const artworkUrl = await ntsEpisodeArtwork(ep.path);
+      const { data: newEp, error: epErr } = await db.from("episodes").insert({
+        url: episodeUrl,
+        title: ep.title || null,
+        source: "nts",
+        aired_date: ep.date ? ep.date.split("T")[0] : null,
+        artwork_url: artworkUrl,
+      }).select("id").single();
+
+      if (!newEp) {
+        log("fail", `Episode insert failed: ${context} — ${epErr?.message}`);
+        continue;
+      }
+      episodeId = newEp.id;
+    }
+
+    await db.from("episode_seeds").upsert(
+      { episode_id: episodeId, seed_id: seedId },
+      { onConflict: "episode_id,seed_id" },
+    );
+
+    const tracks = await ntsTracklist(ep.path);
+    if (tracks.length === 0) {
+      log("fail", `Empty tracklist: ${context}`);
+      continue;
+    }
+
+    // Insert candidate tracks from this episode
+    const insertedTracks: any[] = [];
+    for (let pos = 0; pos < tracks.length; pos++) {
+      const track = tracks[pos];
+      if (isSameTrack(track, { artist: seed.artist, title: seed.title })) continue;
+
+      const lTitle = track.title.toLowerCase().trim();
+      const lArtist = track.artist.toLowerCase().trim();
+      if (GARBAGE_TITLES.has(lTitle) || lTitle.length <= 1 || lArtist.length <= 1) continue;
+
+      // Dedup against DB
+      const { data: existing } = await db.from("tracks")
+        .select("id").ilike("artist", track.artist.trim()).ilike("title", track.title.trim()).limit(1);
+      if (existing && existing.length > 0) continue;
+
+      const { data: inserted, error } = await db.from("tracks").insert({
+        artist: track.artist.trim(),
+        title: track.title.trim(),
+        source: "nts",
+        source_url: episodeUrl,
+        source_context: context,
+        metadata: { co_occurrence: 1, seed_artist: seed.artist, seed_title: seed.title },
+        status: "pending",
+        episode_id: episodeId,
+        seed_track_id: seed.track_id || null,
+      }).select("*").single();
+
+      if (error || !inserted) continue;
+
+      await db.from("episode_tracks").upsert(
+        { episode_id: episodeId, track_id: inserted.id, position: pos },
+        { onConflict: "episode_id,track_id" },
+      );
+
+      insertedTracks.push(inserted);
+      tracksAdded++;
+    }
+
+    episodeProcessed = context;
+    log("ok", `${context} — ${tracks.length} tracks, ${insertedTracks.length} new`);
+
+    // Log discovery run
+    await db.from("discovery_runs").insert({
+      started_at: new Date(t0).toISOString(),
+      completed_at: new Date().toISOString(),
+      seed_id: seedId,
+      seed_track_id: seed.track_id || null,
+      sources_searched: ["nts"],
+      tracks_found: tracks.length,
+      tracks_added: insertedTracks.length,
+      notes: `Watcher: processed first episode "${context}"`,
+    });
+
+    await logEngineEvent("discover_completed", "completed", {
+      seedId,
+      message: `${context}: ${insertedTracks.length} tracks added`,
+      metadata: { episode: context, tracks_found: tracks.length, tracks_added: insertedTracks.length },
+    });
+
+    // ── Phase 2: Enrich tracks from this episode ──
+    if (insertedTracks.length > 0) {
+      await logEngineEvent("enrich_started", "started", {
+        seedId,
+        message: `Enriching ${insertedTracks.length} tracks`,
+      });
+
+      let enriched = 0;
+      let enrichFailed = 0;
+
+      for (let i = 0; i < insertedTracks.length; i += ENRICH_CONCURRENCY) {
+        const batch = insertedTracks.slice(i, i + ENRICH_CONCURRENCY);
+        const results = await Promise.allSettled(batch.map(enrichTrack));
+        for (const r of results) {
+          if (r.status === "fulfilled" && r.value) enriched++;
+          else enrichFailed++;
+        }
+      }
+
+      await logEngineEvent("enrich_completed", "completed", {
+        seedId,
+        message: `Enriched: ${enriched}, Failed: ${enrichFailed}`,
+        metadata: { enriched, failed: enrichFailed },
+      });
+
+      // ── Phase 3: Download audio for enriched tracks ──
+      const { data: downloadable } = await db.from("tracks")
+        .select("*")
+        .in("id", insertedTracks.map((t) => t.id))
+        .not("youtube_url", "is", null)
+        .is("storage_path", null);
+
+      if (downloadable?.length) {
+        log("info", `Downloading audio for ${downloadable.length} tracks...`);
+        let downloaded = 0;
+        for (const track of downloadable) {
+          try {
+            const ok = await downloadTrack(track);
+            if (ok) downloaded++;
+            log(ok ? "ok" : "fail", `DL: ${track.artist} – ${track.title}`);
+          } catch (err) {
+            log("fail", `DL error: ${track.artist} – ${track.title}: ${err instanceof Error ? err.message : err}`);
+          }
+        }
+        log("info", `Downloaded ${downloaded}/${downloadable.length} tracks`);
+      }
+    }
+
+    // Only process the first episode with tracks
+    break;
+  }
+
+  // ── Phase 4: Populate seed cover art if missing ──
+  if (!seed.cover_art_url) {
+    try {
+      const spot = await spotifyLookup(seed.artist, seed.title);
+      if (spot?.cover_art_url) {
+        await db.from("seeds").update({ cover_art_url: spot.cover_art_url }).eq("id", seedId);
+        log("ok", `Set seed cover art for ${seedLabel}`);
+      }
+    } catch (err) {
+      log("fail", `Seed cover art lookup failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  console.log(`\n  Watcher pipeline done for ${seedLabel} (${elapsed(t0)})`);
+  console.log(`  Tracks added: ${tracksAdded}, Episode: ${episodeProcessed || "none"}\n`);
+}
+
+// ─── REALTIME SUBSCRIPTION ──────────────────────────────────
+
+let processing = false;
+const queue: string[] = [];
+
+async function processQueue() {
+  if (processing) return;
+  processing = true;
+
+  while (queue.length > 0) {
+    const seedId = queue.shift()!;
+    lastEventAt = new Date().toISOString();
+    updateStatusFile();
+
+    try {
+      await processSeed(seedId);
+    } catch (err) {
+      log("fail", `Pipeline error for seed ${seedId}: ${err instanceof Error ? err.message : err}`);
+      await logEngineEvent("error", "failed", {
+        seedId,
+        message: `Pipeline error: ${err instanceof Error ? err.message : err}`,
+      });
+    }
+  }
+
+  processing = false;
+}
+
+function startWatcher() {
+  log("info", "Connecting to Supabase Realtime...");
+
+  const channel = db.channel("seeds-watcher")
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "seeds" },
+      (payload) => {
+        const seedId = payload.new?.id;
+        if (!seedId) {
+          log("warn", "Received INSERT event without seed ID");
+          return;
+        }
+        log("ok", `Seed INSERT detected: ${payload.new?.artist} – ${payload.new?.title} (${seedId})`);
+        queue.push(seedId);
+        processQueue();
+      },
+    )
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        watcherConnectedAt = new Date().toISOString();
+        log("ok", "Realtime subscription active — watching for new seeds");
+        logEngineEvent("watcher_connected", "info", {
+          message: "Watcher connected to Supabase Realtime",
+        });
+        updateStatusFile();
+      } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
+        log("warn", `Realtime channel ${status} — will attempt reconnect`);
+        logEngineEvent("watcher_disconnected", "info", {
+          message: `Channel ${status}`,
+        });
+        // Manual reconnect fallback after 5s
+        setTimeout(() => {
+          log("info", "Attempting manual reconnect...");
+          channel.subscribe();
+        }, 5_000);
+      }
+    });
+}
+
+// ─── GRACEFUL SHUTDOWN ──────────────────────────────────────
+
+let shuttingDown = false;
+
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, async () => {
+    if (shuttingDown) { console.log("\n  Force quit."); process.exit(1); }
+    shuttingDown = true;
+    console.log(`\n  ${sig} received — shutting down watcher...`);
+    await logEngineEvent("watcher_disconnected", "info", {
+      message: `Watcher stopped (${sig})`,
+    });
+    watcherConnectedAt = null;
+    updateStatusFile();
+    // Give pending operations a moment to complete
+    setTimeout(() => process.exit(0), 2_000);
+  });
+}
+
+// ─── MAIN ───────────────────────────────────────────────────
+
+console.log(`\n  The Stacks — Realtime Seed Watcher`);
+console.log(`  ${new Date().toISOString()}\n`);
+
+startWatcher();
+
+// Keep process alive
+setInterval(() => {}, 60_000);

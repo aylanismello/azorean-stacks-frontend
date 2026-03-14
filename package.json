@@ -1,0 +1,22 @@
+{
+  "name": "azorean-stacks-engine",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "discover": "bun run scripts/discover.ts",
+    "download": "bun run scripts/download.ts",
+    "manual-seed": "bun run scripts/manual-seed.ts",
+    "status": "bun run scripts/status.ts",
+    "clear-storage": "bun run scripts/clear-storage.ts",
+    "update-signals": "bun run scripts/update-signals.ts",
+    "audit": "bun run scripts/audit.ts",
+    "watcher": "bun run scripts/watcher.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "cheerio": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0"
+  }
+}
