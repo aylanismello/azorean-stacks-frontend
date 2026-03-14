@@ -208,6 +208,19 @@ function StackPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTopTrackId, browsing]);
 
+  // Sync tracks order when a track is selected from the tracklist
+  useEffect(() => {
+    if (!globalPlayer.currentTrack) return;
+    setTracks((prev) => {
+      const idx = prev.findIndex((t) => t.id === globalPlayer.currentTrack!.id);
+      if (idx <= 0) return prev;
+      const reordered = [...prev];
+      const [selected] = reordered.splice(idx, 1);
+      reordered.unshift(selected);
+      return reordered;
+    });
+  }, [globalPlayer.currentTrack?.id]);
+
   // Auto-advance on song end
   const lastEndedCount = useRef(globalPlayer.trackEndedCount);
   useEffect(() => {
