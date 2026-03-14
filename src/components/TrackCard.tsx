@@ -48,6 +48,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
   const [exiting, setExiting] = useState<"left" | "right" | null>(null);
   const [voting, setVoting] = useState(false);
   const votingRef = useRef(false);
+  const [kept, setKept] = useState(false);
   const [copied, setCopied] = useState(false);
   const [seeded, setSeeded] = useState(false);
   const [seeding, setSeeding] = useState(false);
@@ -82,8 +83,14 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
   }, [track.artist, track.title, seeding, seeded]);
 
   const handleVote = useCallback(
-    async (status: "approved" | "rejected") => {
+    async (status: "approved" | "rejected", advance: boolean = true) => {
       if (votingRef.current) return;
+      if (!advance) {
+        // Keep without advancing — mark as kept, no exit animation
+        setKept(true);
+        await onVote(track.id, status, false);
+        return;
+      }
       votingRef.current = true;
       setVoting(true);
       setExiting(status === "approved" ? "right" : "left");
@@ -93,6 +100,15 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
     },
     [track.id, onVote]
   );
+
+  const handleAdvance = useCallback(async () => {
+    if (votingRef.current) return;
+    votingRef.current = true;
+    setVoting(true);
+    setExiting("right");
+    await new Promise((r) => setTimeout(r, 250));
+    await onVote(track.id, "approved", true);
+  }, [track.id, onVote]);
 
   // Touch swipe handlers
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -116,7 +132,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
     if (!touchRef.current) return;
     const threshold = 80;
     if (touchRef.current.swiping && Math.abs(swipeX) > threshold) {
-      handleVote(swipeX > 0 ? "approved" : "rejected");
+      handleVote(swipeX > 0 ? "approved" : "rejected", true);
     }
     setSwipeX(0);
     touchRef.current = null;
@@ -349,11 +365,11 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
               </div>
             </div>
 
-            {/* Vote buttons — clean 2-button layout */}
+            {/* Vote buttons */}
             <div className="flex items-center justify-center gap-8 pt-2">
               {/* Skip (reject) */}
               <button
-                onClick={() => handleVote("rejected")}
+                onClick={() => handleVote("rejected", true)}
                 disabled={voting}
                 className="flex items-center justify-center w-16 h-16 rounded-full bg-black/40 backdrop-blur-md border-2 border-red-400/30 text-red-400/80 hover:bg-red-950/50 hover:border-red-400/60 hover:text-red-400 transition-all active:scale-90 disabled:opacity-50"
               >
@@ -378,17 +394,39 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
                 <span className="text-sm">{seeded ? "🌿" : "🌱"}</span>
               </button>
 
-              {/* Keep (approve) */}
-              <button
-                onClick={() => handleVote("approved")}
-                disabled={voting}
-                className="flex items-center justify-center w-16 h-16 rounded-full bg-black/40 backdrop-blur-md border-2 border-green-400/30 text-green-400/80 hover:bg-green-950/50 hover:border-green-400/60 hover:text-green-400 transition-all active:scale-90 disabled:opacity-50"
-              >
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-                </svg>
-              </button>
+              {/* Keep (approve) — tap keeps without advancing; after kept, becomes Next */}
+              {kept ? (
+                <button
+                  onClick={handleAdvance}
+                  disabled={voting}
+                  className="flex items-center justify-center w-16 h-16 rounded-full bg-green-500/20 backdrop-blur-md border-2 border-green-400 text-green-400 transition-all active:scale-90 disabled:opacity-50 kept-pop"
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleVote("approved", false)}
+                  disabled={voting}
+                  className="flex items-center justify-center w-16 h-16 rounded-full bg-black/40 backdrop-blur-md border-2 border-green-400/30 text-green-400/80 hover:bg-green-950/50 hover:border-green-400/60 hover:text-green-400 transition-all active:scale-90 disabled:opacity-50"
+                >
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                  </svg>
+                </button>
+              )}
             </div>
+
+            {/* Kept confirmation banner */}
+            {kept && (
+              <div className="flex items-center justify-center gap-2 text-green-400 text-sm font-medium kept-pop">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                Kept — swipe or tap → to continue
+              </div>
+            )}
           </div>
         </div>
       </div>
