@@ -403,8 +403,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
   );
 
   const voteButtons = (
-    <div className="flex items-center justify-center gap-8">
-      {/* Skip (reject) */}
+    <div className="flex items-center justify-center gap-6">
+      {/* Reject (X) */}
       <button
         onClick={() => handleVote("rejected", true)}
         disabled={voting}
@@ -412,6 +412,18 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
       >
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+
+      {/* Skip (neutral) */}
+      <button
+        onClick={() => handleVote("skipped", true)}
+        disabled={voting}
+        className="flex items-center justify-center w-11 h-11 md:w-12 md:h-12 rounded-full bg-surface-2 md:bg-black/40 md:backdrop-blur-md border-2 border-amber-400/30 text-amber-400/80 hover:bg-amber-950/50 hover:border-amber-400/60 hover:text-amber-400 transition-all active:scale-90 disabled:opacity-50"
+        title="Skip — no opinion"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
         </svg>
       </button>
 
@@ -769,22 +781,6 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
         <div className="mb-8">
           {voteButtons}
         </div>
-
-        {/* Skip track button — prominent when no audio */}
-        {!hasPlayableSource && (
-          <div className="mb-4">
-            <button
-              onClick={() => handleVote("skipped", true)}
-              disabled={voting}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500/10 border border-amber-400/20 text-amber-400 hover:bg-amber-500/20 hover:border-amber-400/40 transition-all active:scale-95 disabled:opacity-50 text-sm"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
-              </svg>
-              Skip — no audio available
-            </button>
-          </div>
-        )}
 
         {/* Secondary actions */}
         <div className="flex items-center gap-3 pt-4 border-t border-surface-2">
