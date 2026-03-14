@@ -214,10 +214,10 @@ function MobileTabBar({ pathname }: { pathname: string }) {
                 <img
                   src={coverArt}
                   alt=""
-                  className={`w-5 h-5 rounded object-cover ${isActive ? "ring-1 ring-accent" : ""}`}
+                  className={`w-[22px] h-[22px] rounded-[4px] object-cover ${isActive ? "ring-1 ring-accent" : ""}`}
                 />
               ) : (
-                <span className="text-lg">{link.icon}</span>
+                <span className="text-lg leading-[22px]">{link.icon}</span>
               )}
               <span>{link.label}</span>
             </Link>

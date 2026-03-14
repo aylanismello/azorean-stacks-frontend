@@ -202,8 +202,24 @@ export function EpisodeTracklist(props: TracklistProps) {
                   {/* Status dot */}
                   <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(t.status)}`} />
 
-                  {/* Now playing indicator */}
-                  {isPlaying ? (
+                  {/* Cover art + now playing indicator */}
+                  {isPlaying && globalPlayer.currentTrack?.coverArtUrl ? (
+                    <span className="relative w-8 h-8 flex-shrink-0 rounded overflow-hidden">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={globalPlayer.currentTrack.coverArtUrl}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                      <span className="absolute inset-0 flex items-center justify-center bg-black/30">
+                        <span className="flex gap-0.5 items-end h-3">
+                          <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "40%", animationDelay: "0ms" }} />
+                          <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "70%", animationDelay: "150ms" }} />
+                          <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "50%", animationDelay: "300ms" }} />
+                        </span>
+                      </span>
+                    </span>
+                  ) : isPlaying ? (
                     <span className="flex gap-0.5 items-end h-3 w-3 flex-shrink-0">
                       <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "40%", animationDelay: "0ms" }} />
                       <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "70%", animationDelay: "150ms" }} />
