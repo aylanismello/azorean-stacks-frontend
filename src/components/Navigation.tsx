@@ -6,6 +6,7 @@ import { useState, useRef, useEffect } from "react";
 import { useAuth } from "./AuthProvider";
 import { useSpotify } from "./SpotifyProvider";
 import { useTheme } from "./ThemeProvider";
+import { useGlobalPlayer } from "./GlobalPlayerProvider";
 
 const links = [
   { href: "/stacks", label: "Stacks", icon: "◉" },
@@ -16,10 +17,10 @@ const links = [
   { href: "/stats", label: "Stats", icon: "▤" },
 ];
 
-// Fewer tabs on mobile — Episodes + Stats move into More sheet
+// Fewer tabs on mobile — Playing first, Episodes + Stats in More sheet
 const mobileLinks = [
-  { href: "/stacks", label: "Stacks", icon: "◉" },
   { href: "/", label: "Playing", icon: "▶" },
+  { href: "/stacks", label: "Stacks", icon: "◉" },
   { href: "/approved", label: "Tracks", icon: "✓" },
   { href: "/seeds", label: "Seeds", icon: "◎" },
 ];
@@ -180,6 +181,16 @@ export function Navigation() {
       </nav>
 
       {/* Mobile: bottom tab bar — sits below global player */}
+      <MobileTabBar pathname={pathname} />
+    </>
+  );
+}
+
+function MobileTabBar({ pathname }: { pathname: string }) {
+  const globalPlayer = useGlobalPlayer();
+  const coverArt = globalPlayer.currentTrack?.coverArtUrl;
+
+  return (
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-surface-1/95 backdrop-blur-md border-t border-surface-3 flex justify-around py-1.5 px-1 safe-area-bottom">
         {mobileLinks.map((link) => {
           const isActive = link.href === "/stacks"
@@ -187,6 +198,7 @@ export function Navigation() {
             : link.href === "/"
             ? pathname === "/"
             : pathname === link.href;
+          const isPlaying = link.href === "/";
           return (
             <Link
               key={link.href}
@@ -197,7 +209,16 @@ export function Navigation() {
                   : "text-muted"
               }`}
             >
-              <span className="text-lg">{link.icon}</span>
+              {isPlaying && coverArt ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={coverArt}
+                  alt=""
+                  className={`w-5 h-5 rounded object-cover ${isActive ? "ring-1 ring-accent" : ""}`}
+                />
+              ) : (
+                <span className="text-lg">{link.icon}</span>
+              )}
               <span>{link.label}</span>
             </Link>
           );
@@ -205,7 +226,6 @@ export function Navigation() {
         {/* Mobile account/more button */}
         <MobileAccountButton />
       </nav>
-    </>
   );
 }
 

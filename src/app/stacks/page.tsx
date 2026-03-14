@@ -115,23 +115,7 @@ export default function StacksPage() {
       </button>
 
       {/* ─── GENRES ──────────────────────────── */}
-      {genres.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-sm font-semibold text-muted uppercase tracking-wider mb-3">Genres</h2>
-          <div className="flex flex-wrap gap-2">
-            {genres.map((g) => (
-              <button
-                key={g.genre}
-                onClick={() => router.push(`/?source=genre&genre=${encodeURIComponent(g.genre)}`)}
-                className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-foreground/5 hover:bg-foreground/10 border border-foreground/10 hover:border-accent/30 transition-all duration-150 active:scale-95"
-              >
-                <span className="text-xs text-foreground/80 group-hover:text-foreground">{g.genre}</span>
-                <span className="text-[10px] font-mono text-foreground/30">{g.pending}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {genres.length > 0 && <GenreSection genres={genres} router={router} />}
 
       {/* ─── SEEDS ───────────────────────────── */}
       <div>
@@ -149,6 +133,42 @@ export default function StacksPage() {
             }} />
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+const GENRES_COLLAPSED = 8;
+
+function GenreSection({ genres, router }: { genres: GenreEntry[]; router: ReturnType<typeof useRouter> }) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? genres : genres.slice(0, GENRES_COLLAPSED);
+  const hasMore = genres.length > GENRES_COLLAPSED;
+
+  return (
+    <div className="mb-8">
+      <h2 className="text-sm font-semibold text-muted uppercase tracking-wider mb-3">Genres</h2>
+      <div className="flex flex-wrap gap-2">
+        {visible.map((g) => (
+          <button
+            key={g.genre}
+            onClick={() => router.push(`/?source=genre&genre=${encodeURIComponent(g.genre)}`)}
+            className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-foreground/5 hover:bg-foreground/10 border border-foreground/10 hover:border-accent/30 transition-all duration-150 active:scale-95"
+          >
+            <span className="text-xs text-foreground/80 group-hover:text-foreground">{g.genre}</span>
+            <span className="text-[10px] font-mono text-foreground/30">{g.pending}</span>
+          </button>
+        ))}
+        {hasMore && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-accent/10 hover:bg-accent/20 border border-accent/20 hover:border-accent/40 transition-all duration-150 active:scale-95"
+          >
+            <span className="text-xs text-accent">
+              {expanded ? "Show less" : `+${genres.length - GENRES_COLLAPSED} more`}
+            </span>
+          </button>
+        )}
       </div>
     </div>
   );
