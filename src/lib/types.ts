@@ -32,6 +32,9 @@ export interface Track {
   audio_url?: string | null;
   episode_id: string | null;
 
+  // Seed status — null if not seeded, seed UUID if this track is a seed
+  seed_id?: string | null;
+
   // Joined from user_tracks when querying for a specific user
   user_track?: UserTrack | null;
 }
@@ -105,6 +108,24 @@ export interface Seed {
   episodes?: Array<{ id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[] }>;
   curated_count?: number;
   last_run?: { tracks_found: number; tracks_added: number; started_at: string } | null;
+}
+
+export interface Curator {
+  id: string;
+  name: string;
+  slug: string;
+  source: string;
+  source_url: string | null;
+  avatar_url: string | null;
+  description: string | null;
+  location: string | null;
+  genres: string[];
+  external_links: Array<{ name: string; url: string }>;
+  enriched_at: string | null;
+  created_at: string;
+  // Computed
+  episode_count: number;
+  matched_episodes: number;
 }
 
 export interface DiscoveryRun {

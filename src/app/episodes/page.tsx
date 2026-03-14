@@ -290,6 +290,8 @@ function TrackRow({
   const [copied, setCopied] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [localTrack, setLocalTrack] = useState(t);
+  const [seeded, setSeeded] = useState(false);
+  const [seeding, setSeeding] = useState(false);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(`${t.artist} - ${t.title}`);
@@ -314,6 +316,24 @@ function TrackRow({
       }
     } catch {} finally {
       setFetching(false);
+    }
+  };
+
+  const handleToggleSeed = async () => {
+    if (seeding) return;
+    setSeeding(true);
+    try {
+      const res = await fetch("/api/seeds/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ track_id: t.id, artist: t.artist, title: t.title }),
+      });
+      if (res.ok) {
+        const { action } = await res.json();
+        setSeeded(action === "created");
+      }
+    } catch {} finally {
+      setSeeding(false);
     }
   };
 
@@ -361,6 +381,18 @@ function TrackRow({
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
             </svg>
           )}
+        </button>
+        <button
+          onClick={handleToggleSeed}
+          disabled={seeding}
+          className={`text-[10px] transition-colors ${
+            seeded
+              ? "text-emerald-400 hover:text-emerald-300"
+              : "text-muted/40 hover:text-emerald-400"
+          } disabled:opacity-50`}
+          title={seeded ? "Remove seed" : "Plant as seed"}
+        >
+          {seeding ? "·" : "SD"}
         </button>
         {t.spotify_url && (
           <a href={t.spotify_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-green-400/60 hover:text-green-400">

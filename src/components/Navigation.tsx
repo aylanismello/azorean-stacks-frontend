@@ -7,16 +7,17 @@ import { useAuth } from "./AuthProvider";
 import { useSpotify } from "./SpotifyProvider";
 
 const links = [
-  { href: "/", label: "Stack", icon: "◉" },
+  { href: "/stacks", label: "Stacks", icon: "◉" },
   { href: "/approved", label: "Tracks", icon: "✓" },
   { href: "/seeds", label: "Seeds", icon: "◎" },
   { href: "/episodes", label: "Episodes", icon: "▶" },
+  { href: "/curators", label: "Curators", icon: "♫" },
   { href: "/stats", label: "Stats", icon: "▤" },
 ];
 
 // Fewer tabs on mobile — Stats moves into More sheet
 const mobileLinks = [
-  { href: "/", label: "Stack", icon: "◉" },
+  { href: "/stacks", label: "Stacks", icon: "◉" },
   { href: "/approved", label: "Tracks", icon: "✓" },
   { href: "/seeds", label: "Seeds", icon: "◎" },
   { href: "/episodes", label: "Episodes", icon: "▶" },
@@ -123,19 +124,24 @@ export function Navigation() {
           <span className="text-accent">the</span> stacks
         </Link>
         <div className="flex items-center gap-1">
-          {links.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                pathname === link.href
-                  ? "bg-surface-2 text-white"
-                  : "text-muted hover:text-white hover:bg-surface-1"
-              }`}
-            >
-              {link.label}
-            </Link>
-          ))}
+          {links.map((link) => {
+            const isActive = link.href === "/stacks"
+              ? pathname.startsWith("/stacks")
+              : pathname === link.href;
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  isActive
+                    ? "bg-surface-2 text-white"
+                    : "text-muted hover:text-white hover:bg-surface-1"
+                }`}
+              >
+                {link.label}
+              </Link>
+            );
+          })}
           <div className="ml-3 border-l border-surface-3 pl-3">
             <AccountMenu />
           </div>
@@ -144,20 +150,25 @@ export function Navigation() {
 
       {/* Mobile: bottom tab bar — sits below global player */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-surface-1/95 backdrop-blur-md border-t border-surface-3 flex justify-around py-1.5 px-1 safe-area-bottom">
-        {mobileLinks.map((link) => (
-          <Link
-            key={link.href}
-            href={link.href}
-            className={`flex flex-col items-center gap-0.5 px-4 py-1 rounded-lg text-[11px] transition-colors ${
-              pathname === link.href
-                ? "text-accent"
-                : "text-muted"
-            }`}
-          >
-            <span className="text-lg">{link.icon}</span>
-            <span>{link.label}</span>
-          </Link>
-        ))}
+        {mobileLinks.map((link) => {
+          const isActive = link.href === "/stacks"
+            ? pathname.startsWith("/stacks")
+            : pathname === link.href;
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={`flex flex-col items-center gap-0.5 px-4 py-1 rounded-lg text-[11px] transition-colors ${
+                isActive
+                  ? "text-accent"
+                  : "text-muted"
+              }`}
+            >
+              <span className="text-lg">{link.icon}</span>
+              <span>{link.label}</span>
+            </Link>
+          );
+        })}
         {/* Mobile account/more button */}
         <MobileAccountButton />
       </nav>
@@ -218,7 +229,15 @@ function MobileAccountButton() {
             </div>
 
             <div className="px-4 pb-6 space-y-2">
-              {/* Stats — only in mobile More sheet */}
+              {/* Extra pages — only in mobile More sheet */}
+              <Link
+                href="/curators"
+                onClick={() => setOpen(false)}
+                className="w-full flex items-center gap-3 px-4 py-3 bg-surface-2 rounded-xl text-sm text-white/80 hover:bg-surface-3 transition-colors"
+              >
+                <span className="text-base">♫</span>
+                Curators
+              </Link>
               <Link
                 href="/stats"
                 onClick={() => setOpen(false)}

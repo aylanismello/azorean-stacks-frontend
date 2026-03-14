@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 const PLAYLIST_NAME = "My Seeds \u2014 Azorean Stacks";
 
 async function getSpotifyToken(request: NextRequest): Promise<string | null> {

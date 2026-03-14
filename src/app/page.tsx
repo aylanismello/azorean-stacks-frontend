@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Track } from "@/lib/types";
 import { TrackCard } from "@/components/TrackCard";
-import { StackBrowser } from "@/components/StackBrowser";
 import { EpisodeTracklist, TracklistSheet } from "@/components/EpisodeTracklist";
 import { useGlobalPlayer } from "@/components/GlobalPlayerProvider";
 
@@ -30,8 +29,15 @@ function StackPageContent() {
   // URL-driven state
   const episodeId = searchParams.get("episode_id");
   const episodeTitle = searchParams.get("episode_title");
-  const browsing = searchParams.get("view") === "stacks";
+  const fromStacks = searchParams.get("from") === "stacks";
+  const fromSeedId = searchParams.get("seed_id");
   const fromEpisodes = searchParams.get("from") === "episodes";
+
+  // Stack source: "taste" (For You), "genre", "episode" (legacy)
+  // Default to taste mode when no source/episode params are set
+  const stackSource = searchParams.get("source");
+  const genreFilter = searchParams.get("genre");
+  const isTasteMode = stackSource === "taste" || stackSource === "genre" || (!stackSource && !episodeId);
 
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,48 +46,109 @@ function StackPageContent() {
   const [skippingEpisode, setSkippingEpisode] = useState(false);
   const [tracklistOpen, setTracklistOpen] = useState(false);
   const [voteCount, setVoteCount] = useState(0);
+  const [advancingEpisode, setAdvancingEpisode] = useState(false);
 
-  // Track which episode was last selected, so StackBrowser can scroll to it
+  // Don't auto-play until the user has interacted (vote, skip, click track, etc.)
+  const userHasInteracted = useRef(false);
+
+  // Position index into the tracks array (used when we have an episode context)
+  const [episodePos, setEpisodePos] = useState(0);
+  const prevEpisodeId = useRef(episodeId);
+  if (episodeId !== prevEpisodeId.current) {
+    prevEpisodeId.current = episodeId;
+    setEpisodePos(0);
+    setAdvancingEpisode(false);
+  }
+
+  // Whether we're operating in "episode mode" (full episode tracks + position index)
+  // This is true both for URL-driven episodes AND derived episodes in all-pending
+  const [hasEpisodeTracks, setHasEpisodeTracks] = useState(!!episodeId);
+
+  // The track currently shown on the card
+  const safeEpisodePos = Math.min(episodePos, Math.max(tracks.length - 1, 0));
+  const currentTrack = hasEpisodeTracks
+    ? tracks[safeEpisodePos] ?? null
+    : tracks[0] ?? null;
+
   const lastEpisodeIdRef = useRef<string | null>(episodeId);
 
-  const setBrowsing = useCallback((val: boolean) => {
-    if (val) {
-      const params = new URLSearchParams(window.location.search);
-      params.set("view", "stacks");
-      router.push(`/?${params.toString()}`);
-    } else {
-      // Just go back if we can, otherwise go home
-      router.back();
-    }
-  }, [router]);
-
   const buildUrl = useCallback((extra?: string) => {
+    // Episode mode: fetch ALL tracks in episode order (not just pending)
+    if (episodeId) {
+      let url = `/api/tracks?episode_id=${encodeURIComponent(episodeId)}&limit=100`;
+      if (extra) url += extra;
+      return url;
+    }
+    // Taste/genre mode: fetch pending tracks ranked by taste_score
     let url = `/api/tracks?status=pending&limit=20`;
-    if (episodeId) url += `&episode_id=${encodeURIComponent(episodeId)}`;
+    if (isTasteMode) {
+      url += `&order_by=taste_score`;
+    }
+    if (genreFilter) {
+      url += `&genre=${encodeURIComponent(genreFilter)}`;
+    }
     if (extra) url += extra;
     return url;
-  }, [episodeId]);
+  }, [episodeId, isTasteMode, genreFilter]);
 
   const fetchTracks = useCallback(async () => {
     try {
       const res = await fetch(buildUrl());
       if (!res.ok) throw new Error(`Failed to load tracks (${res.status})`);
       const data = await res.json();
-      setTracks(data.tracks || []);
+      const newTracks: Track[] = data.tracks || [];
+      setTracks(newTracks);
       setTotal(data.total || 0);
       setError(null);
+      setAdvancingEpisode(false);
+
+      // In episode mode, start at the first pending track
+      if (episodeId && newTracks.length > 0) {
+        const firstPending = newTracks.findIndex((t) => t.status === "pending");
+        setEpisodePos(firstPending >= 0 ? firstPending : 0);
+        setHasEpisodeTracks(true);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load tracks");
     } finally {
       setLoading(false);
     }
-  }, [buildUrl]);
+  }, [buildUrl, episodeId]);
 
   useEffect(() => {
-    if (!browsing) fetchTracks();
-  }, [fetchTracks, browsing]);
+    fetchTracks();
+  }, [fetchTracks]);
+
+  const advanceToNextEpisode = useCallback(async () => {
+    setAdvancingEpisode(true);
+    try {
+      // Fetch pending tracks — find one from a different episode
+      const res = await fetch("/api/tracks?status=pending&limit=20");
+      if (!res.ok) throw new Error("Failed to fetch next episode");
+      const data = await res.json();
+      const curEpId = derivedEpisodeRef.current.id || episodeId;
+      const nextTrack = (data.tracks || []).find(
+        (t: Track) => t.episode_id && t.episode_id !== curEpId
+      ) || data.tracks?.[0];
+
+      if (nextTrack?.episode_id) {
+        const params = new URLSearchParams();
+        params.set("episode_id", nextTrack.episode_id);
+        if (nextTrack.episode?.title) params.set("episode_title", nextTrack.episode.title);
+        router.push(`/?${params.toString()}`);
+      } else {
+        // No more pending tracks at all
+        setAdvancingEpisode(false);
+        router.push("/");
+      }
+    } catch {
+      setAdvancingEpisode(false);
+      router.push("/");
+    }
+  }, [router, episodeId]);
 
   const handleVote = async (id: string, status: "approved" | "rejected", advance: boolean = true) => {
+    userHasInteracted.current = true;
     try {
       const res = await fetch(`/api/tracks/${id}`, {
         method: "PATCH",
@@ -90,45 +157,137 @@ function StackPageContent() {
       });
       if (!res.ok) throw new Error(`Vote failed (${res.status})`);
 
+      // Update the track's status locally so the UI reflects the vote
+      setTracks((prev) =>
+        prev.map((t) => t.id === id ? { ...t, status, voted_at: new Date().toISOString() } : t)
+      );
+
       setVoteCount((c) => c + 1);
 
       if (!advance) return;
 
-      setTracks((prev) => {
-        const remaining = prev.filter((t) => t.id !== id);
-        if (remaining.length <= 3) {
-          const votedId = id;
-          const existingIds = new Set(remaining.map((t) => t.id));
-          fetch(buildUrl())
-            .then((r) => r.ok ? r.json() : null)
-            .then((data) => {
-              if (!data) return;
-              const newTracks = (data.tracks || []).filter(
-                (t: Track) => t.id !== votedId && !existingIds.has(t.id)
-              );
-              if (newTracks.length > 0) {
-                setTracks((curr) => {
-                  const currIds = new Set(curr.map((t: Track) => t.id));
-                  const fresh = newTracks.filter((t: Track) => !currIds.has(t.id));
-                  return [...curr, ...fresh];
-                });
-              }
-              setTotal(data.total || 0);
-            });
+      if (hasEpisodeTracks) {
+        // Episode mode: check if any pending tracks remain (excluding the one we just voted on)
+        const remainingPending = tracks.filter((t) => t.id !== id && t.status === "pending");
+        if (remainingPending.length === 0) {
+          // All tracks voted — advance to next episode
+          advanceToNextEpisode();
+          return;
         }
-        return remaining;
-      });
-      setTotal((prev) => prev - 1);
+        // Advance to next pending track
+        setEpisodePos((prev) => {
+          for (let i = prev + 1; i < tracks.length; i++) {
+            if (tracks[i].id !== id && tracks[i].status === "pending") return i;
+          }
+          // Wrap around — find first pending before current
+          for (let i = 0; i < prev; i++) {
+            if (tracks[i].id !== id && tracks[i].status === "pending") return i;
+          }
+          return prev;
+        });
+      } else {
+        // All-pending mode: remove voted track, refetch if running low
+        setTracks((prev) => {
+          const remaining = prev.filter((t) => t.id !== id);
+          if (remaining.length <= 3) {
+            const votedId = id;
+            const existingIds = new Set(remaining.map((t) => t.id));
+            fetch(buildUrl())
+              .then((r) => r.ok ? r.json() : null)
+              .then((data) => {
+                if (!data) return;
+                const newTracks = (data.tracks || []).filter(
+                  (t: Track) => t.id !== votedId && !existingIds.has(t.id)
+                );
+                if (newTracks.length > 0) {
+                  setTracks((curr) => {
+                    const currIds = new Set(curr.map((t: Track) => t.id));
+                    const fresh = newTracks.filter((t: Track) => !currIds.has(t.id));
+                    return [...curr, ...fresh];
+                  });
+                }
+                setTotal(data.total || 0);
+              });
+          }
+          return remaining;
+        });
+        setTotal((prev) => prev - 1);
+      }
     } catch (err) {
       console.error("Vote error:", err);
       setError("Failed to vote. Please try again.");
     }
   };
 
-  const currentEpisodeId = episodeId || (tracks.length > 0 ? tracks[0].episode_id : null);
-  const currentEpisodeTitle = episodeTitle || (tracks.length > 0 ? tracks[0].episode?.title : null);
+  // Stabilize episode: once we derive an episode from the top track, lock it
+  // so voting doesn't randomly switch the tracklist to a different episode.
+  // In taste/genre mode, skip episode derivation entirely — cards flow freely.
+  const derivedEpisodeRef = useRef<{ id: string | null; title: string | null }>({ id: null, title: null });
+  const topEpisodeId = currentTrack?.episode_id ?? null;
+  const topEpisodeTitle = currentTrack?.episode?.title ?? null;
+
+  if (episodeId) {
+    // URL-driven: always use URL value
+    derivedEpisodeRef.current = { id: episodeId, title: episodeTitle };
+  } else if (!isTasteMode) {
+    // Legacy all-pending mode (no source param): derive episode from top track
+    if (topEpisodeId && !derivedEpisodeRef.current.id) {
+      derivedEpisodeRef.current = { id: topEpisodeId, title: topEpisodeTitle };
+    } else if (topEpisodeId && derivedEpisodeRef.current.id) {
+      const hasLockedEpisodeTracks = tracks.some((t) => t.episode_id === derivedEpisodeRef.current.id);
+      if (!hasLockedEpisodeTracks) {
+        derivedEpisodeRef.current = { id: topEpisodeId, title: topEpisodeTitle };
+      }
+    }
+  }
+  // In taste/genre mode: no episode locking. derivedEpisodeRef stays null.
+
+  const currentEpisodeId = isTasteMode ? null : derivedEpisodeRef.current.id;
+  const currentEpisodeTitle = isTasteMode ? null : derivedEpisodeRef.current.title;
+
+  // When a derived episode is detected in legacy all-pending mode, re-fetch ALL tracks
+  // from that episode so we can navigate the full tracklist (not just pending)
+  const derivedFetchedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (episodeId) return;
+    if (isTasteMode) return; // Taste/genre mode: no episode fetching
+    if (!currentEpisodeId) return;
+    if (derivedFetchedRef.current === currentEpisodeId) return;
+    derivedFetchedRef.current = currentEpisodeId;
+
+    fetch(`/api/tracks?episode_id=${encodeURIComponent(currentEpisodeId)}&limit=100`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (!data?.tracks?.length) return;
+        setTracks(data.tracks);
+        setTotal(data.total || 0);
+        setHasEpisodeTracks(true);
+        const firstPending = data.tracks.findIndex((t: Track) => t.status === "pending");
+        setEpisodePos(firstPending >= 0 ? firstPending : 0);
+      });
+  }, [currentEpisodeId, episodeId, isTasteMode]);
+
+  // Sidebar/tracklist click → jump card to that track
+  const handleTrackSelect = useCallback((trackId: string) => {
+    userHasInteracted.current = true;
+    if (hasEpisodeTracks) {
+      const idx = tracks.findIndex((t) => t.id === trackId);
+      if (idx >= 0) setEpisodePos(idx);
+    } else {
+      // All-pending without episode context: move to front if found
+      setTracks((prev) => {
+        const idx = prev.findIndex((t) => t.id === trackId);
+        if (idx <= 0) return prev;
+        const reordered = [...prev];
+        const [selected] = reordered.splice(idx, 1);
+        reordered.unshift(selected);
+        return reordered;
+      });
+    }
+  }, [hasEpisodeTracks, tracks]);
 
   const handleSkipEpisode = async () => {
+    userHasInteracted.current = true;
     if (!currentEpisodeId || skippingEpisode) return;
     setSkippingEpisode(true);
     try {
@@ -142,11 +301,17 @@ function StackPageContent() {
       if (episodeId) {
         if (fromEpisodes) {
           router.push("/episodes");
+        } else if (fromSeedId) {
+          router.push(`/stacks/${fromSeedId}`);
         } else {
-          router.push("/?view=stacks");
+          router.push("/stacks");
         }
       } else {
-        setTracks((prev) => prev.filter((t) => t.episode_id !== currentEpisodeId));
+        // Reset derived episode state so we pick up the next episode
+        derivedEpisodeRef.current = { id: null, title: null };
+        derivedFetchedRef.current = null;
+        setHasEpisodeTracks(false);
+        setEpisodePos(0);
         fetchTracks();
         setSkippingEpisode(false);
       }
@@ -156,26 +321,13 @@ function StackPageContent() {
     }
   };
 
-  const handleSelectStack = (stackEpisodeId: string | null, stackEpisodeTitle: string | null) => {
-    if (stackEpisodeId) {
-      lastEpisodeIdRef.current = stackEpisodeId;
-      const params = new URLSearchParams();
-      params.set("episode_id", stackEpisodeId);
-      if (stackEpisodeTitle) params.set("episode_title", stackEpisodeTitle);
-      router.push(`/?${params.toString()}`);
-    } else {
-      router.push("/");
-    }
-  };
-
   const handleGoToStacks = useCallback(() => {
-    const params = new URLSearchParams();
-    params.set("view", "stacks");
-    if (lastEpisodeIdRef.current) {
-      params.set("scroll_to", lastEpisodeIdRef.current);
+    if (fromSeedId) {
+      router.push(`/stacks/${fromSeedId}`);
+    } else {
+      router.push("/stacks");
     }
-    router.push(`/?${params.toString()}`);
-  }, [router]);
+  }, [router, fromSeedId]);
 
   const handleGoBack = useCallback(() => {
     if (fromEpisodes) {
@@ -183,58 +335,85 @@ function StackPageContent() {
     } else {
       handleGoToStacks();
     }
-  }, [fromEpisodes, router, handleGoToStacks]);
+  }, [fromEpisodes, handleGoToStacks]);
 
-  // Auto-play next track when top card changes
-  const currentTopTrackId = tracks.length > 0 ? tracks[0].id : null;
+  // Card → Player sync: when the card track changes, play it
+  // Only auto-play after the user has interacted (not on initial page load)
+  const currentTrackId = currentTrack?.id ?? null;
   useEffect(() => {
-    if (!currentTopTrackId || browsing) return;
-    const t = tracks.find((t) => t.id === currentTopTrackId);
-    if (!t) return;
-    const hasPlayable = !!(t.audio_url || t.preview_url || t.spotify_url);
-    if (!hasPlayable) return;
-    if (globalPlayer.currentTrack?.id === currentTopTrackId) return;
+    if (!currentTrack) return;
+    if (!userHasInteracted.current) return;
+
+    const playerTrackId = globalPlayer.currentTrack?.id ?? null;
+
+    // Already playing this track
+    if (playerTrackId === currentTrack.id) return;
+
+    // Skip unplayable tracks (advance past them)
+    const hasPlayable = !!(currentTrack.audio_url || currentTrack.preview_url || currentTrack.spotify_url);
+    if (!hasPlayable) {
+      if (hasEpisodeTracks) {
+        // Episode mode: skip to next track
+        setEpisodePos((prev) => {
+          if (prev + 1 < tracks.length) return prev + 1;
+          return prev;
+        });
+      } else {
+        // All-pending: drop unplayable track
+        setTracks((prev) => prev.length < 2 ? prev : prev.slice(1));
+      }
+      return;
+    }
+
+    // Play the card track
     globalPlayer.play({
-      id: t.id,
-      artist: t.artist,
-      title: t.title,
-      coverArtUrl: t.cover_art_url,
-      spotifyUrl: t.spotify_url,
-      audioUrl: t.audio_url || t.preview_url || null,
-      episodeId: t.episode_id,
-      episodeTitle: t.episode?.title,
-      youtubeUrl: t.youtube_url,
+      id: currentTrack.id,
+      artist: currentTrack.artist,
+      title: currentTrack.title,
+      coverArtUrl: currentTrack.cover_art_url,
+      spotifyUrl: currentTrack.spotify_url,
+      audioUrl: currentTrack.audio_url || currentTrack.preview_url || null,
+      episodeId: currentTrack.episode_id,
+      episodeTitle: currentTrack.episode?.title,
+      youtubeUrl: currentTrack.youtube_url,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTopTrackId, browsing]);
+  }, [currentTrackId]);
 
-  // Sync tracks order when a track is selected from the tracklist
-  useEffect(() => {
-    if (!globalPlayer.currentTrack) return;
-    setTracks((prev) => {
-      const idx = prev.findIndex((t) => t.id === globalPlayer.currentTrack!.id);
-      if (idx <= 0) return prev;
-      const reordered = [...prev];
-      const [selected] = reordered.splice(idx, 1);
-      reordered.unshift(selected);
-      return reordered;
-    });
-  }, [globalPlayer.currentTrack?.id]);
-
-  // Auto-advance on song end — drop the finished track instead of rotating
-  // If the track was voted on (kept/skipped), it won't reappear in refetch.
-  // If unvoted, it stays pending in DB and will return on next refetch.
+  // Auto-advance on song end — move to next track in order
   const lastEndedCount = useRef(globalPlayer.trackEndedCount);
   useEffect(() => {
     if (globalPlayer.trackEndedCount === lastEndedCount.current) return;
     lastEndedCount.current = globalPlayer.trackEndedCount;
-    if (browsing || tracks.length < 2) return;
+
+    if (hasEpisodeTracks) {
+      // Episode mode: advance to next pending track
+      const hasPending = tracks.some((t) => t.status === "pending" && t.id !== globalPlayer.currentTrack?.id);
+      if (!hasPending) {
+        // No more pending — advance to next episode
+        advanceToNextEpisode();
+        return;
+      }
+      setEpisodePos((prev) => {
+        for (let i = prev + 1; i < tracks.length; i++) {
+          if (tracks[i].status === "pending") return i;
+        }
+        // Wrap around
+        for (let i = 0; i < prev; i++) {
+          if (tracks[i].status === "pending") return i;
+        }
+        return prev;
+      });
+      return;
+    }
+
+    // All-pending mode: drop finished track, refetch if low
+    if (tracks.length < 2) return;
     const currentId = tracks[0].id;
     if (globalPlayer.currentTrack?.id !== currentId) return;
     setTracks((prev) => {
       if (prev.length < 2) return prev;
       const remaining = prev.slice(1);
-      // Refetch if running low
       if (remaining.length <= 3) {
         const existingIds = new Set(remaining.map((t) => t.id));
         fetch(buildUrl())
@@ -256,7 +435,7 @@ function StackPageContent() {
       }
       return remaining;
     });
-  }, [globalPlayer.trackEndedCount, browsing, tracks, globalPlayer.currentTrack?.id, buildUrl]);
+  }, [globalPlayer.trackEndedCount, tracks, globalPlayer.currentTrack?.id, buildUrl, hasEpisodeTracks]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -269,16 +448,16 @@ function StackPageContent() {
         }
         return;
       }
-      if (browsing || tracks.length === 0) return;
+      if (!currentTrack) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (e.key === " ") {
         e.preventDefault();
         globalPlayer.togglePlayPause();
       } else if (e.key === "ArrowLeft" || e.key === "j") {
-        handleVote(tracks[0].id, "rejected");
+        handleVote(currentTrack.id, "rejected");
       } else if (e.key === "ArrowRight" || e.key === "k") {
-        handleVote(tracks[0].id, "approved");
+        handleVote(currentTrack.id, "approved");
       } else if (e.key === "l" || e.key === "t") {
         setTracklistOpen((prev) => !prev);
       }
@@ -286,16 +465,18 @@ function StackPageContent() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tracks, browsing, tracklistOpen, globalPlayer]);
+  }, [tracks, tracklistOpen, globalPlayer]);
 
-  // ── Browse mode ──
-  if (browsing) {
+  // ── Advancing to next episode ──
+  if (advancingEpisode) {
     return (
-      <StackBrowser
-        onSelectStack={handleSelectStack}
-        onClose={() => router.back()}
-        scrollToEpisodeId={searchParams.get("scroll_to")}
-      />
+      <div className="flex flex-col items-center justify-center min-h-[80vh] px-6 text-center gap-4">
+        <div className="w-8 h-8 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+        <div>
+          <h2 className="text-lg font-medium text-white/80">Episode complete</h2>
+          <p className="text-sm text-muted mt-1">Loading next episode...</p>
+        </div>
+      </div>
     );
   }
 
@@ -324,7 +505,7 @@ function StackPageContent() {
   }
 
   // ── Empty ──
-  if (tracks.length === 0) {
+  if (!currentTrack) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[80vh] px-6 text-center">
         {episodeId ? (
@@ -335,7 +516,7 @@ function StackPageContent() {
             </p>
             <div className="flex gap-3 mt-6">
               <button
-                onClick={handleGoToStacks}
+                onClick={() => router.push("/stacks")}
                 className="px-5 py-2 text-sm bg-accent/20 hover:bg-accent/30 text-accent rounded-lg transition-colors"
               >
                 Browse Stacks
@@ -378,7 +559,7 @@ function StackPageContent() {
 
   // ── Main stack view ──
   return (
-    <div className="px-4 pt-2 pb-0 h-[calc(100dvh-3.5rem-env(safe-area-inset-bottom,0px))] flex flex-col overflow-hidden md:h-[calc(100dvh-120px)] md:pb-4">
+    <div className="px-4 pt-2 pb-0 h-[calc(100dvh-3.5rem-env(safe-area-inset-bottom,0px))] flex flex-col overflow-hidden md:h-[calc(100dvh-100px)] md:pb-4">
       {/* Top bar — clean, readable */}
       <div className="flex items-center justify-between mb-3 md:mb-2 md:max-w-6xl md:mx-auto md:w-full md:flex-shrink-0">
         {/* Left: back to stacks */}
@@ -404,8 +585,16 @@ function StackPageContent() {
           </span>
         </button>
 
-        {/* Center: pending count */}
-        <span className="text-[11px] font-mono text-muted/50">{total} pending</span>
+        {/* Center: context label + count */}
+        <span className="text-[11px] font-mono text-muted/50">
+          {hasEpisodeTracks
+            ? `${safeEpisodePos + 1} / ${total}`
+            : genreFilter
+              ? `${genreFilter} · ${total}`
+              : isTasteMode
+                ? `for you · ${total} pending`
+                : `${total} pending`}
+        </span>
 
         {/* Right: episode tracklist button (mobile only — desktop always shows it) */}
         {currentEpisodeId && (
@@ -434,11 +623,12 @@ function StackPageContent() {
       <div className="flex-1 min-h-0 flex flex-col md:flex-row md:gap-6 md:max-w-6xl md:mx-auto md:w-full">
         {/* Desktop tracklist sidebar — always visible */}
         {currentEpisodeId && (
-          <div className="hidden md:flex md:w-80 md:flex-shrink-0 md:self-stretch">
+          <div className="hidden md:block md:w-80 md:min-w-[20rem] md:max-w-[20rem] md:flex-shrink-0 md:self-stretch">
             <EpisodeTracklist
               episodeId={currentEpisodeId}
               episodeTitle={currentEpisodeTitle}
               refreshKey={voteCount}
+              onTrackSelect={handleTrackSelect}
             />
           </div>
         )}
@@ -446,8 +636,8 @@ function StackPageContent() {
         {/* Track card — fills remaining space on mobile, centered on desktop */}
         <div className="flex-1 min-h-0 md:flex md:items-center md:justify-center">
           <TrackCard
-            key={tracks[0].id}
-            track={tracks[0]}
+            key={currentTrack.id}
+            track={currentTrack}
             onVote={handleVote}
             onSkipEpisode={currentEpisodeId ? handleSkipEpisode : undefined}
             skippingEpisode={skippingEpisode}
@@ -463,6 +653,7 @@ function StackPageContent() {
           refreshKey={voteCount}
           open={tracklistOpen}
           onClose={() => setTracklistOpen(false)}
+          onTrackSelect={handleTrackSelect}
         />
       )}
 

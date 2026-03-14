@@ -22,7 +22,7 @@ function generateGradient(artist: string, title: string): string {
 }
 
 export function GlobalPlayer() {
-  const { currentTrack, playing, loading, progress, duration, source, togglePlayPause, seek, stop } = useGlobalPlayer();
+  const { currentTrack, playing, loading, progress, duration, source, noSource, togglePlayPause, seek, stop } = useGlobalPlayer();
   const router = useRouter();
   const progressRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -71,29 +71,31 @@ export function GlobalPlayer() {
 
   return (
     <div className="global-player fixed left-0 right-0 z-40 hidden md:block md:bottom-0">
-      {/* Progress bar — full width at top of player, tall hit area, thin visual */}
-      <div
-        ref={progressRef}
-        className="group relative h-5 cursor-pointer touch-none flex items-end"
-        onMouseDown={handleSeekStart}
-        onTouchStart={handleTouchSeek}
-      >
-        <div className="relative w-full h-1 bg-surface-3 group-hover:h-1.5 transition-all">
-          <div
-            className="absolute inset-y-0 left-0 bg-accent transition-[width] duration-75"
-            style={{ width: `${pct}%` }}
-          />
-          <div
-            className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 bg-accent rounded-full shadow-lg shadow-black/50 transition-all ${
-              dragging ? "scale-125 opacity-100" : "scale-0 group-hover:scale-100 opacity-0 group-hover:opacity-100"
-            }`}
-            style={{ left: `${pct}%` }}
-          />
-        </div>
-      </div>
-
       {/* Player bar */}
-      <div className="bg-surface-1/95 backdrop-blur-xl border-t border-surface-2 px-3 py-2 flex items-center gap-3">
+      <div className="bg-surface-1/95 backdrop-blur-xl border-t border-surface-2 px-3 py-1.5 flex flex-col gap-0">
+        {/* Progress bar — full width, compact hit area */}
+        <div
+          ref={progressRef}
+          className="group relative z-10 h-3 cursor-pointer touch-none flex items-center -mx-3"
+          onMouseDown={handleSeekStart}
+          onTouchStart={handleTouchSeek}
+        >
+          <div className="relative w-full h-[3px] bg-surface-3 group-hover:h-1 transition-all overflow-visible">
+            <div
+              className="absolute inset-y-0 left-0 bg-accent transition-[width] duration-75"
+              style={{ width: `${pct}%` }}
+            />
+            <div
+              className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 bg-accent rounded-full shadow-lg shadow-black/50 transition-all ${
+                dragging ? "scale-125 opacity-100" : "scale-0 group-hover:scale-100 opacity-0 group-hover:opacity-100"
+              }`}
+              style={{ left: `${pct}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Controls row */}
+        <div className="flex items-center gap-3">
         {/* Album art / gradient — click to navigate to playing track */}
         <button
           onClick={() => {
@@ -149,56 +151,69 @@ export function GlobalPlayer() {
           </button>
         )}
 
-        {/* Time */}
-        <span className="text-[10px] text-muted font-mono flex-shrink-0 hidden sm:block">
-          {duration > 0 ? `${fmt(progress)} / ${fmt(duration)}` : ""}
-        </span>
-
-        {/* Restart */}
-        <button
-          onClick={() => seek(0)}
-          className="w-7 h-7 flex items-center justify-center rounded-full text-muted hover:text-white hover:bg-surface-3 transition-all flex-shrink-0"
-          title="Restart track"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="4" y="5" width="3" height="14" rx="1" />
-            <path d="M20 5v14l-11-7z" />
-          </svg>
-        </button>
-
-        {/* Play/pause */}
-        <button
-          onClick={togglePlayPause}
-          className="w-9 h-9 flex items-center justify-center rounded-full bg-white text-black hover:scale-105 transition-transform active:scale-95 flex-shrink-0"
-        >
-          {loading ? (
-            <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+        {noSource ? (
+          <span className="flex items-center gap-1.5 text-xs text-white/30 flex-shrink-0 px-2">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+              <line x1="23" y1="9" x2="17" y2="15" />
+              <line x1="17" y1="9" x2="23" y2="15" />
             </svg>
-          ) : playing ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="6" y="4" width="4" height="16" rx="1" />
-              <rect x="14" y="4" width="4" height="16" rx="1" />
-            </svg>
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          )}
-        </button>
+            No audio source
+          </span>
+        ) : (
+          <>
+            {/* Time */}
+            <span className="text-[10px] text-muted font-mono flex-shrink-0 hidden sm:block">
+              {duration > 0 ? `${fmt(progress)} / ${fmt(duration)}` : ""}
+            </span>
 
-        {/* Skip 30s */}
-        <button
-          onClick={() => seek(progress + 30)}
-          className="w-7 h-7 flex items-center justify-center rounded-full text-muted hover:text-white hover:bg-surface-3 transition-all flex-shrink-0"
-          title="Skip ahead 30 seconds"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M13 4l5 4-5 4" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M18 8H8a5 5 0 0 0 0 10h2" strokeLinecap="round" />
-            <text x="9" y="18" fontSize="7" fontWeight="bold" fill="currentColor" stroke="none" fontFamily="sans-serif">30</text>
-          </svg>
-        </button>
+            {/* Restart */}
+            <button
+              onClick={() => seek(0)}
+              className="w-7 h-7 flex items-center justify-center rounded-full text-muted hover:text-white hover:bg-surface-3 transition-all flex-shrink-0"
+              title="Restart track"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="4" y="5" width="3" height="14" rx="1" />
+                <path d="M20 5v14l-11-7z" />
+              </svg>
+            </button>
+
+            {/* Play/pause */}
+            <button
+              onClick={togglePlayPause}
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-white text-black hover:scale-105 transition-transform active:scale-95 flex-shrink-0"
+            >
+              {loading ? (
+                <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+                </svg>
+              ) : playing ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="4" width="4" height="16" rx="1" />
+                  <rect x="14" y="4" width="4" height="16" rx="1" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              )}
+            </button>
+
+            {/* Skip 30s */}
+            <button
+              onClick={() => seek(progress + 30)}
+              className="w-7 h-7 flex items-center justify-center rounded-full text-muted hover:text-white hover:bg-surface-3 transition-all flex-shrink-0"
+              title="Skip ahead 30 seconds"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M13 4l5 4-5 4" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M18 8H8a5 5 0 0 0 0 10h2" strokeLinecap="round" />
+                <text x="9" y="18" fontSize="7" fontWeight="bold" fill="currentColor" stroke="none" fontFamily="sans-serif">30</text>
+              </svg>
+            </button>
+          </>
+        )}
 
         {/* Close */}
         <button
@@ -211,6 +226,7 @@ export function GlobalPlayer() {
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </button>
+        </div>
       </div>
     </div>
   );

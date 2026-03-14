@@ -18,6 +18,12 @@ export function getServiceClient(): UntypedClient {
   if (!serviceRoleKey) {
     throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set");
   }
-  _serviceClient = createClient(supabaseUrl, serviceRoleKey);
+  _serviceClient = createClient(supabaseUrl, serviceRoleKey, {
+    global: {
+      fetch: (url, options = {}) => {
+        return fetch(url, { ...options, cache: "no-store" as RequestCache });
+      },
+    },
+  });
   return _serviceClient;
 }

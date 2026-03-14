@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const TOKEN_URL = "https://accounts.spotify.com/api/token";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   const refreshToken = request.cookies.get("spotify_refresh_token")?.value;
 

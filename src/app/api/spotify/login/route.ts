@@ -10,14 +10,16 @@ const SCOPES = [
   "user-read-currently-playing",
 ].join(" ");
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: Request) {
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   if (!clientId) {
     return NextResponse.json({ error: "Spotify not configured" }, { status: 500 });
   }
 
-  const { origin } = new URL(request.url);
-  const redirectUri = `${origin}/api/spotify/callback`;
+  const redirectUri = process.env.SPOTIFY_REDIRECT_URI
+    || `${new URL(request.url).origin}/api/spotify/callback`;
 
   const state = crypto.randomUUID();
 

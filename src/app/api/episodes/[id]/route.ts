@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 // PATCH /api/episodes/[id] — update episode (e.g. mark as skipped)
 export async function PATCH(
   req: NextRequest,

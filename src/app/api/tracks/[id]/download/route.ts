@@ -3,6 +3,8 @@ import { getServiceClient } from "@/lib/supabase";
 import { execFile } from "child_process";
 import { readFileSync, unlinkSync, existsSync, mkdirSync, readdirSync } from "fs";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/tracks/[id]/download — get download URL
 export async function GET(
   _req: NextRequest,

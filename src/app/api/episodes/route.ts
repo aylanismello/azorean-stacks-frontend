@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/episodes?limit=30&offset=0&source=nts
 export async function GET(req: NextRequest) {
   const supabase = getServiceClient();

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Track } from "@/lib/types";
 import { openYouTube } from "@/lib/youtube";
 import { useGlobalPlayer } from "@/components/GlobalPlayerProvider";
@@ -121,9 +122,38 @@ export default function TracksPage() {
   }, [debouncedSearch, tab]);
 
   const globalPlayer = useGlobalPlayer();
+  const router = useRouter();
   const [expandedTrack, setExpandedTrack] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
   const [updating, setUpdating] = useState<Set<string>>(new Set());
+  const [seeding, setSeeding] = useState<Set<string>>(new Set());
+
+  const handleToggleSeed = async (track: Track) => {
+    if (seeding.has(track.id)) return;
+    setSeeding((prev) => new Set(prev).add(track.id));
+    try {
+      const res = await fetch("/api/seeds/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ track_id: track.id, artist: track.artist, title: track.title }),
+      });
+      if (!res.ok) return;
+      const { action } = await res.json();
+      setTracks((prev) =>
+        prev.map((t) =>
+          t.id === track.id
+            ? { ...t, seed_id: action === "created" ? "pending" : null }
+            : t
+        )
+      );
+    } catch {} finally {
+      setSeeding((prev) => {
+        const next = new Set(prev);
+        next.delete(track.id);
+        return next;
+      });
+    }
+  };
 
   const handlePlay = useCallback((track: Track) => {
     if (globalPlayer.currentTrack?.id === track.id) {
@@ -222,6 +252,28 @@ export default function TracksPage() {
     if (tab !== "rejected") opts.push({ label: "Skip", status: "rejected", color: "text-red-400/70 hover:bg-red-400/10" });
     return opts;
   };
+
+  // Space to toggle play/pause
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === " ") {
+        e.preventDefault();
+        globalPlayer.togglePlayPause();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [globalPlayer]);
+
+  const handleGoToStack = useCallback((track: Track) => {
+    if (!track.episode_id) return;
+    const params = new URLSearchParams();
+    params.set("episode_id", track.episode_id);
+    if (track.episode?.title) params.set("episode_title", track.episode.title);
+    router.push(`/?${params.toString()}`);
+  }, [router]);
 
   return (
     <div className="px-4 md:px-6 pt-4 md:pt-8 max-w-4xl mx-auto pb-32 md:pb-8">
@@ -347,7 +399,15 @@ export default function TracksPage() {
                             <span className="truncate">{track.artist}</span>
                           </div>
                           <div className="py-3 pr-4 text-white/70 text-sm flex-[2] truncate">
-                            {track.title}
+                            {track.episode_id ? (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleGoToStack(track); }}
+                                className="hover:text-accent hover:underline underline-offset-2 transition-colors truncate text-left"
+                                title={track.episode?.title ? `Go to ${track.episode.title}` : "Go to stack"}
+                              >
+                                {track.title}
+                              </button>
+                            ) : track.title}
                           </div>
                           <div className="py-3 pr-4 text-muted/50 text-xs font-mono flex-1">
                             {formatDate(track.voted_at || track.created_at)}
@@ -411,6 +471,18 @@ export default function TracksPage() {
                               {isPlaying && globalPlayer.playing ? "Pause" : "Play"}
                               {isPlaying && globalPlayer.source === "spotify" && " via Spotify"}
                               {isPlaying && globalPlayer.source === "audio" && " via Audio"}
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleToggleSeed(track); }}
+                              disabled={seeding.has(track.id)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                track.seed_id
+                                  ? "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25"
+                                  : "text-muted hover:text-emerald-400 hover:bg-emerald-500/10"
+                              } disabled:opacity-50`}
+                              title={track.seed_id ? "Remove seed" : "Plant as seed"}
+                            >
+                              {seeding.has(track.id) ? "..." : track.seed_id ? "Seeded" : "Seed"}
                             </button>
                             <div className="flex-1" />
                             {moveOptions(track.id).map((opt) => (
@@ -483,7 +555,16 @@ export default function TracksPage() {
                     </button>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-white truncate">{track.artist}</p>
-                      <p className="text-xs text-white/50 truncate">{track.title}</p>
+                      {track.episode_id ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleGoToStack(track); }}
+                          className="text-xs text-white/50 truncate hover:text-accent transition-colors text-left w-full"
+                        >
+                          {track.title}
+                        </button>
+                      ) : (
+                        <p className="text-xs text-white/50 truncate">{track.title}</p>
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <span className="text-[10px] text-muted/40 font-mono">
@@ -512,6 +593,18 @@ export default function TracksPage() {
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
                         </button>
                       )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleToggleSeed(track); }}
+                        disabled={seeding.has(track.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                          track.seed_id
+                            ? "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25"
+                            : "text-muted hover:text-emerald-400 hover:bg-emerald-500/10"
+                        } disabled:opacity-50`}
+                        title={track.seed_id ? "Remove seed" : "Plant as seed"}
+                      >
+                        {seeding.has(track.id) ? "..." : track.seed_id ? "Seeded" : "Seed"}
+                      </button>
                       <div className="flex-1" />
                       {moveOptions(track.id).map((opt) => (
                         <button

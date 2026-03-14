@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useGlobalPlayer } from "./GlobalPlayerProvider";
 
 interface TrackListItem {
@@ -21,6 +21,7 @@ interface EpisodeTracklistProps {
   episodeTitle?: string | null;
   refreshKey?: number;
   onClose?: () => void;
+  onTrackSelect?: (trackId: string) => void;
   variant?: "sidebar" | "sheet";
 }
 
@@ -38,17 +39,25 @@ export function EpisodeTracklist({
   episodeTitle,
   refreshKey = 0,
   onClose,
+  onTrackSelect,
   variant = "sidebar",
 }: EpisodeTracklistProps) {
   const [tracks, setTracks] = useState<TrackListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const globalPlayer = useGlobalPlayer();
+  const playingRef = useRef<HTMLButtonElement>(null);
+  const prevEpisodeIdRef = useRef(episodeId);
 
   useEffect(() => {
-    setLoading(true);
+    // Show loading spinner only on initial load or episode change, not on vote refreshes
+    const isNewEpisode = prevEpisodeIdRef.current !== episodeId;
+    prevEpisodeIdRef.current = episodeId;
+    if (isNewEpisode || tracks.length === 0) {
+      setLoading(true);
+    }
     setError(null);
-    fetch(`/api/episodes/${episodeId}/tracks`)
+    fetch(`/api/episodes/${episodeId}/tracks?_t=${Date.now()}`)
       .then((r) => {
         if (!r.ok) throw new Error(`Failed to load tracks (${r.status})`);
         return r.json();
@@ -59,7 +68,15 @@ export function EpisodeTracklist({
         setError(err instanceof Error ? err.message : "Failed to load tracklist");
       })
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodeId, refreshKey]);
+
+  // Auto-scroll to playing track when tracklist loads or track changes
+  useEffect(() => {
+    if (!loading && playingRef.current) {
+      playingRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [loading, globalPlayer.currentTrack?.id]);
 
   const handlePlay = (t: TrackListItem) => {
     const audioUrl = t.audio_url || t.preview_url || null;
@@ -101,12 +118,14 @@ export function EpisodeTracklist({
             <h3 className="text-sm font-medium text-white truncate">
               {episodeTitle || "Episode tracklist"}
             </h3>
-            <div className="flex items-center gap-3 mt-1 text-[10px] font-mono text-muted">
-              <span>{tracks.length} tracks</span>
-              {approved > 0 && <span className="text-green-400/70">{approved} kept</span>}
-              {rejected > 0 && <span className="text-red-400/50">{rejected} skipped</span>}
-              {pending > 0 && <span className="text-white/40">{pending} pending</span>}
-            </div>
+            {!loading && (
+              <div className="flex items-center gap-3 mt-1 text-[10px] font-mono text-muted">
+                <span>{tracks.length} tracks</span>
+                {approved > 0 && <span className="text-green-400/70">{approved} kept</span>}
+                {rejected > 0 && <span className="text-red-400/50">{rejected} skipped</span>}
+                {pending > 0 && <span className="text-white/40">{pending} pending</span>}
+              </div>
+            )}
           </div>
           {onClose && (
             <button
@@ -139,8 +158,12 @@ export function EpisodeTracklist({
               return (
                 <button
                   key={t.id}
-                  onClick={() => hasAudio && handlePlay(t)}
-                  disabled={!hasAudio}
+                  ref={isPlaying ? playingRef : undefined}
+                  onClick={() => {
+                    onTrackSelect?.(t.id);
+                    if (hasAudio) handlePlay(t);
+                  }}
+                  disabled={false}
                   className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-2.5 transition-colors group ${
                     isPlaying
                       ? "bg-accent/10 border border-accent/20"
@@ -182,7 +205,7 @@ export function EpisodeTracklist({
   }
 
   return (
-    <div className="h-full bg-surface-1 rounded-xl border border-surface-3 overflow-hidden">
+    <div className="h-full w-full bg-surface-1 rounded-xl border border-surface-3 overflow-hidden">
       {content}
     </div>
   );
@@ -195,18 +218,20 @@ export function TracklistSheet({
   refreshKey,
   open,
   onClose,
+  onTrackSelect,
 }: {
   episodeId: string;
   episodeTitle?: string | null;
   refreshKey?: number;
   open: boolean;
   onClose: () => void;
+  onTrackSelect?: (trackId: string) => void;
 }) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 top-[3rem] z-50 md:hidden sheet-enter">
-      {/* Liquid glass sheet — full coverage below top bar */}
+    <div className="fixed inset-0 z-50 md:hidden sheet-enter">
+      {/* Liquid glass sheet — full page coverage */}
       <div className="absolute inset-0 liquid-glass flex flex-col overflow-hidden">
         {/* Drag handle */}
         <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
@@ -217,6 +242,7 @@ export function TracklistSheet({
           episodeTitle={episodeTitle}
           refreshKey={refreshKey}
           onClose={onClose}
+          onTrackSelect={onTrackSelect}
           variant="sheet"
         />
       </div>

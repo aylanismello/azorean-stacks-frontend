@@ -276,18 +276,64 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
     </div>
   );
 
-  const playbackSourceName = globalPlayer.source === "spotify" ? "Spotify" : "(Audio)";
-  const playingIndicator = isCurrentTrack && (
-    <div className="flex items-center gap-1.5 text-[11px]">
-      <span className="flex gap-0.5 items-end h-2.5">
-        <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "40%", animationDelay: "0ms" }} />
-        <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "70%", animationDelay: "150ms" }} />
-        <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "50%", animationDelay: "300ms" }} />
-      </span>
-      <span className={globalPlayer.source === "spotify" ? "text-[#1DB954]" : "text-accent"}>
-        {playbackSourceName}
-      </span>
+  const noSourceIndicator = isCurrentTrack && globalPlayer.noSource && (
+    <div className="flex items-center gap-1.5 text-[11px] text-white/40">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+        <line x1="23" y1="9" x2="17" y2="15" />
+        <line x1="17" y1="9" x2="23" y2="15" />
+      </svg>
+      No audio source
     </div>
+  );
+
+  // Equalizer bars shown next to active source
+  const eqBars = (
+    <span className="flex gap-0.5 items-end h-2.5">
+      <span className={`w-0.5 bg-current rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "40%", animationDelay: "0ms" }} />
+      <span className={`w-0.5 bg-current rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "70%", animationDelay: "150ms" }} />
+      <span className={`w-0.5 bg-current rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "50%", animationDelay: "300ms" }} />
+    </span>
+  );
+
+  const playingIndicator = isCurrentTrack && !globalPlayer.noSource && (
+    globalPlayer.canSwitchSource ? (
+      // Switchable tabs when both sources available
+      <div className="flex items-center bg-surface-2 rounded-lg overflow-hidden text-[11px]">
+        <button
+          onClick={() => globalPlayer.switchSource("audio")}
+          className={`flex items-center gap-1.5 px-2.5 py-1 transition-colors ${
+            globalPlayer.source === "audio"
+              ? "bg-accent/20 text-accent"
+              : "text-white/40 hover:text-white/60"
+          }`}
+        >
+          {globalPlayer.source === "audio" && eqBars}
+          Audio
+        </button>
+        <button
+          onClick={() => globalPlayer.switchSource("spotify")}
+          className={`flex items-center gap-1.5 px-2.5 py-1 transition-colors ${
+            globalPlayer.source === "spotify"
+              ? "bg-[#1DB954]/20 text-[#1DB954]"
+              : "text-white/40 hover:text-white/60"
+          }`}
+        >
+          {globalPlayer.source === "spotify" && eqBars}
+          Spotify
+        </button>
+      </div>
+    ) : (
+      // Single source label
+      <div className="flex items-center gap-1.5 text-[11px]">
+        <span className={globalPlayer.source === "spotify" ? "text-[#1DB954]" : "text-accent"}>
+          {eqBars}
+        </span>
+        <span className={globalPlayer.source === "spotify" ? "text-[#1DB954]" : "text-accent"}>
+          {globalPlayer.source === "spotify" ? "Spotify" : "Audio"}
+        </span>
+      </div>
+    )
   );
 
   const seedArtist = track.seed_track?.artist || (track.metadata as any)?.seed_artist;
@@ -620,6 +666,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
             </span>
           )}
           {playingIndicator}
+          {noSourceIndicator}
         </div>
 
         {/* Vote buttons */}

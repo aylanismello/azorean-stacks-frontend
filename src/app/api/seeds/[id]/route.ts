@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 // PATCH /api/seeds/[id] — toggle active
 export async function PATCH(
   req: NextRequest,

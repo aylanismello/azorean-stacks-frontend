@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/stacks — seeds with their episodes and per-episode track stats
 export async function GET() {
   const supabase = getServiceClient();
@@ -125,6 +127,9 @@ export async function GET() {
     const total = eps.reduce((s, e) => s + e.total, 0);
     globalPending += totalPending;
 
+    // Pick first non-null cover_art_url from episodes
+    const cover_art_url = eps.find((e) => e.cover_art_url)?.cover_art_url ?? null;
+
     return {
       id: seed.id,
       artist: seed.artist,
@@ -135,6 +140,7 @@ export async function GET() {
       total_approved: totalApproved,
       total_rejected: totalRejected,
       total,
+      cover_art_url,
     };
   })
     .filter((s) => s.episodes.length > 0) // Only seeds with episodes

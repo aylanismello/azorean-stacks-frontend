@@ -1,16 +1,18 @@
-## Browser Testing (Playwright WebKit)
+## Browser Testing (Playwright MCP)
 
-Use Playwright with WebKit for visual testing — NOT agent-browser.
+Use the Playwright MCP server for visual testing — NOT agent-browser.
 
-### Setup
-- Already installed: `@playwright/test` + webkit browser
-- MCP server available for screenshots
+### How to use Playwright MCP
+1. If browser not installed, call `mcp__playwright__browser_install` first
+2. Navigate to the app: `mcp__playwright__browser_navigate` → `http://localhost:3002`
+3. Take screenshots: `mcp__playwright__browser_take_screenshot`
+4. Use `mcp__playwright__browser_snapshot` to get the accessibility tree for interacting with elements
+5. Dev server runs on **port 3002**
 
-### How to test
-1. Take a screenshot of the running dev server to see current state
-2. Use webkit browser (not chromium) — this matches iOS Safari rendering
-3. Always test at iPhone viewport: 390x844 (iPhone 14) or 375x812 (iPhone 13)
-4. Enable touch emulation and proper deviceScaleFactor (3x for retina)
+### Viewport & device settings
+- Test at iPhone viewport: 390x844 (iPhone 14) or 375x812 (iPhone 13)
+- Use webkit browser when available — matches iOS Safari rendering
+- Enable touch emulation and proper deviceScaleFactor (3x for retina)
 
 ### When to screenshot
 - After any UI/layout change

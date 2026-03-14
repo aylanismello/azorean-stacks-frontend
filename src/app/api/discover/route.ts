@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 const NTS_API = "https://www.nts.live/api/v2";
 const NTS_SEARCH_LIMIT = 30;
 const NTS_MAX_EPISODES = 3; // Keep low for Vercel timeout
@@ -120,11 +122,11 @@ export async function POST(req: NextRequest) {
   let existingTrackIds: string[] = [];
 
   if (episodeIds.length > 0) {
-    const { data: tracks } = await db
-      .from("tracks")
-      .select("id")
+    const { data: etLinks } = await db
+      .from("episode_tracks")
+      .select("track_id")
       .in("episode_id", episodeIds);
-    existingTrackIds = (tracks || []).map((t: { id: string }) => t.id);
+    existingTrackIds = (etLinks || []).map((t: { track_id: string }) => t.track_id);
   }
 
   // Also check tracks linked via seed_track_id
@@ -203,9 +205,39 @@ async function crawlNTS(
 
     let episodeId: string;
 
+    // Extract show slug for curator linkage
+    const showSlug = ep.path.match(/^\/shows\/([^/]+)\//)?.[1] || null;
+
     if (existingEp) {
       episodeId = existingEp.id;
     } else {
+      // Find or create curator from show slug
+      let curatorId: string | null = null;
+      if (showSlug) {
+        const { data: existingCurator } = await db
+          .from("curators")
+          .select("id")
+          .eq("slug", showSlug)
+          .limit(1)
+          .maybeSingle();
+
+        if (existingCurator) {
+          curatorId = existingCurator.id;
+        } else {
+          const { data: newCurator } = await db
+            .from("curators")
+            .insert({
+              name: showSlug.replace(/-/g, " "),
+              slug: showSlug,
+              source: "nts",
+              source_url: `https://www.nts.live/shows/${showSlug}`,
+            })
+            .select("id")
+            .single();
+          if (newCurator) curatorId = newCurator.id;
+        }
+      }
+
       const { data: newEp, error: epErr } = await db
         .from("episodes")
         .insert({
@@ -213,6 +245,7 @@ async function crawlNTS(
           title: ep.title || null,
           source: "nts",
           aired_date: airedDate,
+          curator_id: curatorId,
         })
         .select("id")
         .single();
@@ -229,15 +262,15 @@ async function crawlNTS(
         { onConflict: "episode_id,seed_id" }
       );
 
-    // If episode already has tracks, collect them instead of re-crawling
+    // If episode already has tracks in junction table, collect them instead of re-crawling
     const { data: epTracks, count: trackCount } = await db
-      .from("tracks")
-      .select("id", { count: "exact" })
+      .from("episode_tracks")
+      .select("track_id", { count: "exact" })
       .eq("episode_id", episodeId);
 
     if (trackCount && trackCount > 0) {
       for (const t of epTracks || []) {
-        existingTrackIds.push(t.id);
+        existingTrackIds.push(t.track_id);
       }
       continue;
     }
@@ -266,7 +299,8 @@ async function crawlNTS(
       );
 
     // Insert tracks
-    for (const track of tracks) {
+    for (let pos = 0; pos < tracks.length; pos++) {
+      const track = tracks[pos];
       if (isSameTrack(track, { artist: seedArtist, title: seedTitle }))
         continue;
 
@@ -285,7 +319,14 @@ async function crawlNTS(
         .limit(1);
 
       if (existing && existing.length > 0) {
+        // Track exists — link it to this episode (it may have been discovered via another)
         existingTrackIds.push(existing[0].id);
+        await db
+          .from("episode_tracks")
+          .upsert(
+            { episode_id: episodeId, track_id: existing[0].id, position: pos },
+            { onConflict: "episode_id,track_id" }
+          );
         continue;
       }
 
@@ -307,6 +348,13 @@ async function crawlNTS(
 
       if (inserted && !insertErr) {
         newTrackIds.push(inserted.id);
+        // Link new track to this episode
+        await db
+          .from("episode_tracks")
+          .upsert(
+            { episode_id: episodeId, track_id: inserted.id, position: pos },
+            { onConflict: "episode_id,track_id" }
+          );
       }
     }
   }

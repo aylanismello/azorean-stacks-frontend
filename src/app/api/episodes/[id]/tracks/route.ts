@@ -1,17 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase, getServiceClient } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/episodes/[id]/tracks
 export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const db = getServiceClient();
-  const { data, error } = await db
-    .from("tracks")
-    .select("id, artist, title, status, spotify_url, youtube_url, storage_path, cover_art_url, preview_url, dl_attempts, dl_failed_at")
+  // Query through episode_tracks junction table, order by tracklist position
+  const { data: junctionRows, error } = await db
+    .from("episode_tracks")
+    .select("position, tracks(id, artist, title, status, spotify_url, youtube_url, storage_path, cover_art_url, preview_url, dl_attempts, dl_failed_at)")
     .eq("episode_id", params.id)
-    .order("created_at", { ascending: true });
+    .order("position", { ascending: true, nullsFirst: false });
+
+  // Flatten: extract the nested track object from each junction row
+  const data = (junctionRows || [])
+    .map((row: any) => row.tracks)
+    .filter(Boolean);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

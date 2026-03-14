@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Seed } from "@/lib/types";
+import { Seed, EpisodeTrack } from "@/lib/types";
 import { SeedForm } from "@/components/SeedForm";
 import { useSpotify } from "@/components/SpotifyProvider";
 import { useAuth } from "@/components/AuthProvider";
+import { openYouTube } from "@/lib/youtube";
 
 // Decode common HTML entities that may be stored in DB from NTS/external APIs
 function decodeEntities(s: string): string {
@@ -328,58 +329,14 @@ function SeedCard({
 
       {/* Expanded: related episodes */}
       {expanded && episodes.length > 0 && (
-        <div className="border-t border-surface-3 px-4 py-3 space-y-1">
+        <div className="border-t border-surface-3 px-4 py-3 space-y-0">
           <p className="text-[10px] text-muted uppercase tracking-wider mb-2">Related Episodes</p>
           {[...episodes].sort((a, b) => {
             if (a.match_type === "full" && b.match_type !== "full") return -1;
             if (a.match_type !== "full" && b.match_type === "full") return 1;
             return 0;
           }).map((ep) => (
-            <div
-              key={ep.id}
-              className="py-2 space-y-1"
-            >
-              {/* Top row: badges + swipe button */}
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-muted uppercase tracking-wider flex-shrink-0">
-                  {ep.source}
-                </span>
-                <span className={`text-[9px] px-1 py-0.5 rounded flex-shrink-0 ${
-                  ep.match_type === "full"
-                    ? "bg-accent/15 text-accent"
-                    : "bg-amber-500/15 text-amber-400"
-                }`}>
-                  {ep.match_type === "full" ? "exact" : "artist only"}
-                </span>
-                {ep.aired_date && (
-                  <span className="text-[10px] text-muted flex-shrink-0">
-                    {ep.aired_date}
-                  </span>
-                )}
-                <div className="flex-1" />
-                <a
-                  href={`/?episode_id=${ep.id}&episode_title=${encodeURIComponent(ep.title || ep.url)}`}
-                  className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent hover:bg-accent/20 transition-colors flex-shrink-0"
-                >
-                  Swipe →
-                </a>
-              </div>
-              {/* Episode title — full width, no truncation on mobile */}
-              <a
-                href={ep.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block text-sm text-white/80 hover:text-white transition-colors leading-snug"
-              >
-                {ep.title || ep.url}
-              </a>
-              {/* For artist-only matches, show which tracks by this artist are in the episode */}
-              {ep.match_type !== "full" && ep.matched_tracks && ep.matched_tracks.length > 0 && (
-                <p className="text-[10px] text-amber-400/60 mt-0.5 truncate">
-                  found: {ep.matched_tracks.map((t) => t.title).join(", ")}
-                </p>
-              )}
-            </div>
+            <SeedEpisodeRow key={ep.id} episode={ep} seedArtist={seed.artist} seedTitle={seed.title} />
           ))}
         </div>
       )}
@@ -397,6 +354,246 @@ function SeedCard({
           <p className="text-[11px] text-muted/50">No episodes linked to this seed yet</p>
         </div>
       )}
+    </div>
+  );
+}
+
+function SeedEpisodeRow({ episode: ep, seedArtist, seedTitle }: {
+  episode: { id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[] };
+  seedArtist?: string;
+  seedTitle?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [tracks, setTracks] = useState<EpisodeTrack[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const handleToggle = async () => {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    if (tracks.length > 0) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/episodes/${ep.id}/tracks`);
+      if (res.ok) setTracks(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const statusDot = (s: string) => {
+    if (s === "approved" || s === "downloaded") return "bg-green-500";
+    if (s === "rejected") return "bg-red-500";
+    return "bg-surface-4";
+  };
+
+  const statusColor = (s: string) => {
+    if (s === "approved" || s === "downloaded") return "text-green-400";
+    if (s === "rejected") return "text-red-400";
+    return "text-muted";
+  };
+
+  return (
+    <div className="border-b border-surface-3/50 last:border-b-0">
+      <button
+        onClick={handleToggle}
+        className="w-full text-left py-2.5 hover:bg-surface-2/30 transition-colors rounded-lg px-1 -mx-1"
+      >
+        {/* Badges row */}
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-muted uppercase tracking-wider flex-shrink-0">
+            {ep.source}
+          </span>
+          <span className={`text-[9px] px-1 py-0.5 rounded flex-shrink-0 ${
+            ep.match_type === "full"
+              ? "bg-accent/15 text-accent"
+              : "bg-amber-500/15 text-amber-400"
+          }`}>
+            {ep.match_type === "full" ? "exact" : seedTitle ? `via ${decodeEntities(seedTitle)}` : "artist only"}
+          </span>
+          {ep.aired_date && (
+            <span className="text-[10px] text-muted flex-shrink-0">
+              {ep.aired_date}
+            </span>
+          )}
+          <div className="flex-1" />
+          <span className="text-muted text-xs">{open ? "▾" : "▸"}</span>
+        </div>
+        {/* Title */}
+        <p className="text-sm text-white/80 leading-snug">
+          {ep.title || ep.url}
+        </p>
+        {ep.match_type !== "full" && ep.matched_tracks && ep.matched_tracks.length > 0 && (
+          <p className="text-[10px] text-amber-400/60 mt-0.5 truncate">
+            found: {ep.matched_tracks.map((t) => t.title).join(", ")}
+          </p>
+        )}
+      </button>
+
+      {/* Expanded: track list */}
+      {open && (
+        <div className="pl-2 pr-1 pb-3">
+          {/* Action buttons */}
+          <div className="flex items-center gap-2 mb-2">
+            <a
+              href={ep.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] px-2.5 py-1 rounded-full bg-surface-2 text-accent hover:bg-surface-3 transition-colors"
+            >
+              Open on {ep.source === "nts" ? "NTS" : ep.source} ↗
+            </a>
+            <a
+              href={`/?episode_id=${ep.id}&episode_title=${encodeURIComponent(ep.title || ep.url)}`}
+              className="text-[10px] px-2.5 py-1 rounded-full bg-accent/15 text-accent hover:bg-accent/25 transition-colors font-medium"
+            >
+              Swipe →
+            </a>
+          </div>
+
+          {loading ? (
+            <div className="flex justify-center py-3">
+              <div className="w-3.5 h-3.5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+            </div>
+          ) : tracks.length === 0 ? (
+            <p className="text-[10px] text-muted/50 py-1">No tracks</p>
+          ) : (
+            <div className="space-y-0.5">
+              {tracks.map((t) => (
+                <SeedTrackRow key={t.id} track={t} statusDot={statusDot} statusColor={statusColor} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SeedTrackRow({
+  track: t,
+  statusDot,
+  statusColor,
+}: {
+  track: EpisodeTrack;
+  statusDot: (s: string) => string;
+  statusColor: (s: string) => string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [local, setLocal] = useState(t);
+  const [seeded, setSeeded] = useState(false);
+  const [seeding, setSeeding] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(`${t.artist} - ${t.title}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const handleFetchAudio = async () => {
+    if (fetching) return;
+    setFetching(true);
+    try {
+      const res = await fetch(`/api/tracks/${local.id}/download`, { method: "POST" });
+      if (!res.ok) {
+        setLocal({ ...local, dl_failed_at: new Date().toISOString(), dl_attempts: (local.dl_attempts || 0) + 1 });
+      } else {
+        const data = await res.json();
+        setLocal({ ...local, storage_path: data.storage_path || "downloaded", dl_failed_at: null, dl_attempts: 0 });
+      }
+    } catch {} finally {
+      setFetching(false);
+    }
+  };
+
+  const handleToggleSeed = async () => {
+    if (seeding) return;
+    setSeeding(true);
+    try {
+      const res = await fetch("/api/seeds/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ track_id: t.id, artist: t.artist, title: t.title }),
+      });
+      if (res.ok) {
+        const { action } = await res.json();
+        setSeeded(action === "created");
+      }
+    } catch {} finally {
+      setSeeding(false);
+    }
+  };
+
+  const showFetch = !local.storage_path && local.youtube_url;
+  const fetchFailed = !!local.dl_failed_at;
+
+  return (
+    <div className="flex items-center gap-2 py-1 text-[13px]">
+      {local.cover_art_url ? (
+        <img src={local.cover_art_url} alt="" className="w-5 h-5 rounded flex-shrink-0 object-cover" />
+      ) : (
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(local.status)}`} />
+      )}
+      <span className={`flex-1 min-w-0 truncate ${statusColor(local.status)}`}>
+        {local.artist} — {local.title}
+      </span>
+      <div className="flex gap-1.5 flex-shrink-0 items-center">
+        {showFetch && (
+          <button
+            onClick={handleFetchAudio}
+            disabled={fetching || fetchFailed}
+            className={`p-0.5 rounded transition-all ${
+              fetchFailed ? "text-muted/20 cursor-not-allowed"
+                : fetching ? "text-muted/50 animate-pulse"
+                : "text-muted/50 hover:text-accent hover:bg-surface-3"
+            }`}
+            title={fetchFailed ? "Audio not found" : "Fetch audio"}
+          >
+            {fetching ? (
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+            ) : (
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+            )}
+          </button>
+        )}
+        <button
+          onClick={handleCopy}
+          className="p-0.5 rounded hover:bg-surface-3 active:scale-90 transition-all"
+          title="Copy artist - title"
+        >
+          {copied ? (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          ) : (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted/50 hover:text-muted">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+          )}
+        </button>
+        <button
+          onClick={handleToggleSeed}
+          disabled={seeding}
+          className={`text-[9px] transition-colors ${
+            seeded
+              ? "text-emerald-400 hover:text-emerald-300"
+              : "text-muted/40 hover:text-emerald-400"
+          } disabled:opacity-50`}
+          title={seeded ? "Remove seed" : "Plant as seed"}
+        >
+          {seeding ? "·" : "SD"}
+        </button>
+        {t.spotify_url && (
+          <a href={t.spotify_url} target="_blank" rel="noopener noreferrer" className="text-[9px] text-green-400/60 hover:text-green-400">
+            SP
+          </a>
+        )}
+        {t.youtube_url && (
+          <button onClick={() => openYouTube(t.youtube_url!)} className="text-[9px] text-red-400/60 hover:text-red-400">
+            YT
+          </button>
+        )}
+      </div>
     </div>
   );
 }

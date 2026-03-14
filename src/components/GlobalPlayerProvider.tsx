@@ -24,8 +24,12 @@ interface GlobalPlayerContextType {
   progress: number; // seconds
   duration: number; // seconds
   source: PlaybackSource;
+  /** True when the current track has no playable audio source */
+  noSource: boolean;
   /** Increments each time the current track finishes playing */
   trackEndedCount: number;
+  /** Whether both audio and spotify sources are available for the current track */
+  canSwitchSource: boolean;
   /** Load a track into the player without starting playback */
   loadTrack: (track: PlayerTrack) => void;
   /** Load a track and immediately start playing */
@@ -33,6 +37,8 @@ interface GlobalPlayerContextType {
   togglePlayPause: () => void;
   seek: (seconds: number) => void;
   stop: () => void;
+  /** Switch playback source (audio <-> spotify) while keeping playback going */
+  switchSource: (to: "audio" | "spotify") => void;
 }
 
 const GlobalPlayerContext = createContext<GlobalPlayerContextType>({
@@ -42,12 +48,15 @@ const GlobalPlayerContext = createContext<GlobalPlayerContextType>({
   progress: 0,
   duration: 0,
   source: null,
+  noSource: false,
   trackEndedCount: 0,
+  canSwitchSource: false,
   loadTrack: () => {},
   play: () => {},
   togglePlayPause: () => {},
   seek: () => {},
   stop: () => {},
+  switchSource: () => {},
 });
 
 export function useGlobalPlayer() {
@@ -64,6 +73,7 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
   const [duration, setDuration] = useState(0);
   const [source, setSource] = useState<PlaybackSource>(null);
   const [trackEndedCount, setTrackEndedCount] = useState(0);
+  const [noSource, setNoSource] = useState(false);
 
   // Create a persistent audio element
   useEffect(() => {
@@ -110,6 +120,7 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     const pos = (spotify.playerState.position || 0) / 1000;
     const dur = (spotify.playerState.duration || 0) / 1000;
     setPlaying(!spotify.playerState.paused);
+    setLoading(false);
     setProgress(pos);
     setDuration(dur);
 
@@ -157,19 +168,21 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     setPlaying(false);
     setLoading(false);
 
-    // Determine source but don't start playback
-    const canSpotify = spotify.connected && spotify.deviceId && track.spotifyUrl;
-    if (canSpotify) {
-      setSource("spotify");
-    } else if (track.audioUrl) {
+    // Determine source but don't start playback — prefer downloaded audio over Spotify
+    if (track.audioUrl) {
       setSource("audio");
+      setNoSource(false);
       // Preload metadata so we have duration
       const audio = audioRef.current;
       if (audio) {
         audio.src = track.audioUrl;
       }
+    } else if (spotify.connected && spotify.deviceId && track.spotifyUrl) {
+      setSource("spotify");
+      setNoSource(false);
     } else {
       setSource(null);
+      setNoSource(true);
     }
   }, [spotify, stopAudio, stopSpotify]);
 
@@ -181,36 +194,26 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     setCurrentTrack(track);
     setProgress(0);
     setDuration(0);
+    setNoSource(false);
     setLoading(true);
 
-    // Decide source: prefer Spotify if connected and track has a Spotify URL
-    if (spotify.connected && spotify.deviceId && track.spotifyUrl) {
-      setSource("spotify");
-      spotify.playUri(track.spotifyUrl).catch(() => {
-        // Fallback to audio if Spotify fails
-        if (track.audioUrl) {
-          setSource("audio");
-          const audio = audioRef.current;
-          if (audio) {
-            audio.src = track.audioUrl;
-            audio.play().catch(() => setLoading(false));
-          }
-        } else {
-          setLoading(false);
-        }
-      });
-    } else if (track.audioUrl) {
+    // Decide source: prefer downloaded audio over Spotify
+    if (track.audioUrl) {
       setSource("audio");
       const audio = audioRef.current;
       if (audio) {
         audio.src = track.audioUrl;
         audio.play().catch(() => setLoading(false));
       }
-    } else if (track.spotifyUrl && spotify.connected && spotify.deviceId) {
+    } else if (spotify.connected && spotify.deviceId && track.spotifyUrl) {
       setSource("spotify");
-      spotify.playUri(track.spotifyUrl).catch(() => setLoading(false));
+      spotify.playUri(track.spotifyUrl).catch(() => {
+        setLoading(false);
+        setNoSource(true);
+      });
     } else {
       setLoading(false);
+      setNoSource(true);
     }
   }, [spotify, stopAudio, stopSpotify]);
 
@@ -261,6 +264,43 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     }
   }, [source, spotify]);
 
+  // Whether both sources are available for the current track
+  const canSwitchSource = !!(
+    currentTrack?.audioUrl &&
+    currentTrack?.spotifyUrl &&
+    spotify.connected &&
+    spotify.deviceId
+  );
+
+  const switchSource = useCallback((to: "audio" | "spotify") => {
+    if (!currentTrack || source === to) return;
+    const wasPlaying = playing;
+
+    if (to === "audio" && currentTrack.audioUrl) {
+      stopSpotify();
+      setSource("audio");
+      setProgress(0);
+      setDuration(0);
+      const audio = audioRef.current;
+      if (audio) {
+        audio.src = currentTrack.audioUrl;
+        if (wasPlaying) {
+          setLoading(true);
+          audio.play().catch(() => setLoading(false));
+        }
+      }
+    } else if (to === "spotify" && currentTrack.spotifyUrl && spotify.connected && spotify.deviceId) {
+      stopAudio();
+      setSource("spotify");
+      setProgress(0);
+      setDuration(0);
+      if (wasPlaying) {
+        setLoading(true);
+        spotify.playUri(currentTrack.spotifyUrl).catch(() => setLoading(false));
+      }
+    }
+  }, [currentTrack, source, playing, spotify, stopAudio, stopSpotify]);
+
   const stop = useCallback(() => {
     stopAudio();
     stopSpotify();
@@ -270,6 +310,7 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     setProgress(0);
     setDuration(0);
     setSource(null);
+    setNoSource(false);
   }, [stopAudio, stopSpotify]);
 
   return (
@@ -281,12 +322,15 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
         progress,
         duration,
         source,
+        noSource,
         trackEndedCount,
+        canSwitchSource,
         loadTrack,
         play,
         togglePlayPause,
         seek,
         stop,
+        switchSource,
       }}
     >
       {children}

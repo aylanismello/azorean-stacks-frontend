@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceClient } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/seeds
 export async function GET() {
   const supabase = getServiceClient();
@@ -58,11 +60,19 @@ export async function GET() {
   const artistTracksByEpisode: Record<string, { artist: string; title: string }[]> = {};
 
   if (allEpisodeIds.length > 0) {
-    // Get tracks for these episodes
-    const { data: epTracks } = await supabase
-      .from("tracks")
-      .select("episode_id, status, artist, title")
+    // Get tracks for these episodes via junction table
+    const { data: etLinks } = await supabase
+      .from("episode_tracks")
+      .select("episode_id, tracks(status, artist, title)")
       .in("episode_id", allEpisodeIds);
+
+    // Flatten junction rows into a tracks-like array
+    const epTracks = (etLinks || []).map((row: any) => ({
+      episode_id: row.episode_id,
+      status: row.tracks?.status,
+      artist: row.tracks?.artist,
+      title: row.tracks?.title,
+    })).filter((t: any) => t.status);
 
     const episodesWithPending = new Set<string>();
     for (const t of (epTracks || []) as any[]) {
