@@ -173,9 +173,38 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
     opacity: Math.max(0.5, 1 - Math.abs(swipeX) / 300),
   } : undefined;
 
+  // Rewind 30s handler
+  const handleRewind = useCallback(() => {
+    if (!isCurrentTrack) return;
+    globalPlayer.seek(Math.max(0, globalPlayer.progress - 30));
+  }, [isCurrentTrack, globalPlayer]);
+
+  // Forward 30s handler
+  const handleForward = useCallback(() => {
+    if (!isCurrentTrack) return;
+    globalPlayer.seek(globalPlayer.progress + 30);
+  }, [isCurrentTrack, globalPlayer]);
+
   // -- Shared sub-components --
 
-  // Desktop artwork block (center play button only)
+  // Shared skip icons — clean circular arrow with integrated "30"
+  const rewindIcon = (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 5V1L7 5l5 4V5" />
+      <path d="M19.07 6.93A10 10 0 1 1 5.93 6.93" />
+      <text x="12" y="15.5" textAnchor="middle" fill="currentColor" stroke="none" fontSize="7" fontWeight="700" fontFamily="system-ui">30</text>
+    </svg>
+  );
+
+  const forwardIcon = (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 5V1l5 4-5 4V5" />
+      <path d="M4.93 6.93A10 10 0 1 0 18.07 6.93" />
+      <text x="12" y="15.5" textAnchor="middle" fill="currentColor" stroke="none" fontSize="7" fontWeight="700" fontFamily="system-ui">30</text>
+    </svg>
+  );
+
+  // Desktop artwork block (rewind | play/pause | forward)
   const artworkBlockDesktop = (
     <div
       className="relative w-full h-full flex items-center justify-center"
@@ -197,35 +226,54 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
         </div>
       )}
 
-      {hasPlayableSource && (
+      <div className="relative z-10 flex items-center gap-5">
+        {/* Rewind 30s */}
         <button
-          onClick={handleArtworkPlay}
-          className="relative z-10 group/play"
+          onClick={handleRewind}
+          className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/50 active:scale-90 transition-all"
         >
-          <span
-            className={`flex items-center justify-center w-16 h-16 rounded-full backdrop-blur-md transition-all active:scale-90 ${
-              isCurrentTrack && globalPlayer.playing
-                ? "bg-black/40 opacity-0 group-hover/play:opacity-100"
-                : "bg-black/30 opacity-100"
-            } ${isCurrentTrack && globalPlayer.loading ? "opacity-100" : ""}`}
-          >
-            {isCurrentTrack && globalPlayer.loading ? (
-              <svg className="animate-spin" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-                <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
-              </svg>
-            ) : isCurrentTrack && globalPlayer.playing ? (
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="white">
-                <rect x="6" y="4" width="4" height="16" rx="1" />
-                <rect x="14" y="4" width="4" height="16" rx="1" />
-              </svg>
-            ) : (
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            )}
-          </span>
+          {rewindIcon}
         </button>
-      )}
+
+        {/* Play/pause */}
+        {hasPlayableSource && (
+          <button
+            onClick={handleArtworkPlay}
+            className="group/play"
+          >
+            <span
+              className={`flex items-center justify-center w-16 h-16 rounded-full backdrop-blur-md transition-all active:scale-90 ${
+                isCurrentTrack && globalPlayer.playing
+                  ? "bg-black/40 opacity-0 group-hover/play:opacity-100"
+                  : "bg-black/30 opacity-100"
+              } ${isCurrentTrack && globalPlayer.loading ? "opacity-100" : ""}`}
+            >
+              {isCurrentTrack && globalPlayer.loading ? (
+                <svg className="animate-spin" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+                  <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+                </svg>
+              ) : isCurrentTrack && globalPlayer.playing ? (
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="white">
+                  <rect x="6" y="4" width="4" height="16" rx="1" />
+                  <rect x="14" y="4" width="4" height="16" rx="1" />
+                </svg>
+              ) : (
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              )}
+            </span>
+          </button>
+        )}
+
+        {/* Forward 30s */}
+        <button
+          onClick={handleForward}
+          className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/50 active:scale-90 transition-all"
+        >
+          {forwardIcon}
+        </button>
+      </div>
     </div>
   );
 
@@ -362,18 +410,6 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
     </div>
   );
 
-  // Rewind 30s handler
-  const handleRewind = useCallback(() => {
-    if (!isCurrentTrack) return;
-    globalPlayer.seek(Math.max(0, globalPlayer.progress - 30));
-  }, [isCurrentTrack, globalPlayer]);
-
-  // Forward 30s handler
-  const handleForward = useCallback(() => {
-    if (!isCurrentTrack) return;
-    globalPlayer.seek(globalPlayer.progress + 30);
-  }, [isCurrentTrack, globalPlayer]);
-
   // ── MOBILE LAYOUT ──
   // Full-bleed artwork filling the viewport, all controls overlaid
   const mobileLayout = (
@@ -411,13 +447,9 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
             {/* Rewind 30s */}
             <button
               onClick={handleRewind}
-              className="relative w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 active:scale-90 transition-all"
+              className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 active:scale-90 transition-all"
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M11 4l-5 4 5 4" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M6 8h10a5 5 0 0 1 0 10h-2" strokeLinecap="round" />
-              </svg>
-              <span className="absolute -bottom-0.5 text-[8px] font-bold text-white/70">30</span>
+              {rewindIcon}
             </button>
 
             {/* Play/pause */}
@@ -452,13 +484,9 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
             {/* Forward 30s */}
             <button
               onClick={handleForward}
-              className="relative w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 active:scale-90 transition-all"
+              className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 active:scale-90 transition-all"
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M13 4l5 4-5 4" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M18 8H8a5 5 0 0 0 0 10h2" strokeLinecap="round" />
-              </svg>
-              <span className="absolute -bottom-0.5 text-[8px] font-bold text-white/70">30</span>
+              {forwardIcon}
             </button>
           </div>
         </div>
