@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Seed } from "@/lib/types";
 import { SeedForm } from "@/components/SeedForm";
 import { useSpotify } from "@/components/SpotifyProvider";
+import { useAuth } from "@/components/AuthProvider";
 
 export default function SeedsPage() {
   const [seeds, setSeeds] = useState<Seed[]>([]);
@@ -11,7 +12,10 @@ export default function SeedsPage() {
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<{ synced: number; playlist_url: string | null } | null>(null);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoverResult, setDiscoverResult] = useState<{ tracks_found: number; tracks_new: number } | null>(null);
   const { connected: spotifyConnected } = useSpotify();
+  const { user } = useAuth();
 
   const fetchSeeds = useCallback(async () => {
     try {
@@ -42,7 +46,32 @@ export default function SeedsPage() {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || "Failed to add seed");
       }
+      const seed = await res.json();
       fetchSeeds();
+
+      // Trigger on-demand discovery in the background
+      if (user?.id && seed?.id) {
+        setDiscovering(true);
+        setDiscoverResult(null);
+        try {
+          const discoverRes = await fetch("/api/discover", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ seed_id: seed.id, user_id: user.id }),
+          });
+          if (discoverRes.ok) {
+            const result = await discoverRes.json();
+            if (result.tracks_found > 0) {
+              setDiscoverResult({ tracks_found: result.tracks_found, tracks_new: result.tracks_new });
+            }
+            fetchSeeds(); // Refresh to show updated discovery counts
+          }
+        } catch {
+          // Discovery failure is non-blocking — the background engine will pick it up
+        } finally {
+          setDiscovering(false);
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add seed");
     }
@@ -136,6 +165,25 @@ export default function SeedsPage() {
               ✕
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Discovering banner */}
+      {discovering && (
+        <div className="mb-4 p-3 bg-accent/10 border border-accent/20 rounded-lg text-sm text-accent flex items-center gap-2">
+          <span className="w-3.5 h-3.5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+          Discovering tracks...
+        </div>
+      )}
+
+      {discoverResult && (
+        <div className="mb-4 p-3 bg-accent/10 border border-accent/20 rounded-lg text-sm text-accent flex items-center justify-between">
+          <span>
+            Found {discoverResult.tracks_found} tracks ({discoverResult.tracks_new} new)
+          </span>
+          <button onClick={() => setDiscoverResult(null)} className="text-accent/60 hover:text-accent">
+            ✕
+          </button>
         </div>
       )}
 
