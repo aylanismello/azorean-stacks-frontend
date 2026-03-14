@@ -153,54 +153,95 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      <div className="rounded-2xl overflow-hidden bg-surface-1 shadow-2xl shadow-black/40 relative">
-        {/* Swipe direction indicator */}
-        {Math.abs(swipeX) > 30 && (
-          <div className={`absolute top-6 z-30 px-4 py-2 rounded-xl text-sm font-bold border-2 ${
-            swipeX > 0
-              ? "right-6 bg-green-500/20 border-green-400 text-green-400 rotate-12"
-              : "left-6 bg-red-500/20 border-red-400 text-red-400 -rotate-12"
-          }`}>
-            {swipeX > 0 ? "KEEP" : "SKIP"}
-          </div>
-        )}
-
-        {/* Cover art / gradient */}
+      <div className="rounded-2xl overflow-hidden shadow-2xl shadow-black/40 relative">
+        {/* Full-bleed artwork card — everything overlaid */}
         <div
-          className="relative aspect-square w-full flex items-end"
+          className="relative aspect-[3/4] w-full flex flex-col"
           style={
             coverUrl
               ? { backgroundImage: `url(${coverUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
               : { background: gradient }
           }
         >
-          {/* Gradient overlay for text readability */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+          {/* Full gradient overlay for readability */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/40" />
 
-          {/* Play/pause overlay on artwork */}
+          {/* Swipe direction indicator */}
+          {Math.abs(swipeX) > 30 && (
+            <div className={`absolute top-6 z-30 px-4 py-2 rounded-xl text-sm font-bold border-2 ${
+              swipeX > 0
+                ? "right-6 bg-green-500/20 border-green-400 text-green-400 rotate-12"
+                : "left-6 bg-red-500/20 border-red-400 text-red-400 -rotate-12"
+            }`}>
+              {swipeX > 0 ? "KEEP" : "SKIP"}
+            </div>
+          )}
+
+          {/* Top bar: skip episode + YouTube + source context */}
+          <div className="relative z-20 flex items-center justify-between p-4">
+            {/* Skip episode — top left, subtle */}
+            {onSkipEpisode ? (
+              <button
+                onClick={onSkipEpisode}
+                disabled={skippingEpisode}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-black/30 backdrop-blur-md text-[11px] text-white/50 hover:text-red-400 hover:bg-red-950/40 transition-all active:scale-95 disabled:opacity-50"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M15 3h6v6" /><path d="M9 21H3v-6" /><path d="M21 3l-7 7" /><path d="M3 21l7-7" />
+                </svg>
+                {skippingEpisode ? "Skipping..." : "Skip ep"}
+              </button>
+            ) : <div />}
+
+            {/* Right side: YouTube + now playing */}
+            <div className="flex items-center gap-2">
+              {isCurrentTrack && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-black/30 backdrop-blur-md text-[11px]">
+                  <span className="flex gap-0.5 items-end h-2.5">
+                    <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "40%", animationDelay: "0ms" }} />
+                    <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "70%", animationDelay: "150ms" }} />
+                    <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "50%", animationDelay: "300ms" }} />
+                  </span>
+                  <span className="text-accent">
+                    {globalPlayer.playing ? "Playing" : "Paused"}
+                  </span>
+                </div>
+              )}
+              {track.youtube_url && (
+                <button
+                  onClick={() => openYouTube(track.youtube_url!)}
+                  className="flex items-center justify-center w-8 h-8 rounded-full bg-black/30 backdrop-blur-md text-red-400/70 hover:text-red-400 hover:bg-black/50 transition-all active:scale-90"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Center play/pause button */}
           {hasPlayableSource && (
             <button
               onClick={handleArtworkPlay}
-              className="absolute inset-0 z-10 flex items-center justify-center group/play"
+              className="relative z-10 flex-1 flex items-center justify-center group/play"
             >
               <span
-                className={`flex items-center justify-center w-14 h-14 rounded-full backdrop-blur-md transition-all active:scale-90 ${
+                className={`flex items-center justify-center w-16 h-16 rounded-full backdrop-blur-md transition-all active:scale-90 ${
                   isCurrentTrack && globalPlayer.playing
-                    ? "bg-black/50 opacity-0 group-hover/play:opacity-100"
-                    : "bg-black/40 opacity-100"
+                    ? "bg-black/40 opacity-0 group-hover/play:opacity-100"
+                    : "bg-black/30 opacity-100"
                 } ${isCurrentTrack && globalPlayer.loading ? "opacity-100" : ""}`}
               >
                 {isCurrentTrack && globalPlayer.loading ? (
-                  <svg className="animate-spin" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+                  <svg className="animate-spin" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
                     <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
                   </svg>
                 ) : isCurrentTrack && globalPlayer.playing ? (
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="white">
                     <rect x="6" y="4" width="4" height="16" rx="1" />
                     <rect x="14" y="4" width="4" height="16" rx="1" />
                   </svg>
                 ) : (
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
                     <path d="M8 5v14l11-7z" />
                   </svg>
                 )}
@@ -208,164 +249,143 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
             </button>
           )}
 
-          {/* Track info overlay */}
-          <div className="relative z-20 p-5 w-full pointer-events-none">
-            <h2 className="text-2xl font-bold text-white leading-tight truncate">
-              {track.title}
-            </h2>
-            <div className="flex items-center gap-2 mt-0.5">
-              <p className="text-lg text-white/80 truncate">{track.artist}</p>
-              <button
-                onClick={handleCopy}
-                className="pointer-events-auto flex-shrink-0 p-1 rounded-md hover:bg-white/10 active:scale-90 transition-all"
-                title="Copy artist - title"
-              >
-                {copied ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
+          {/* If no playable source, just fill space */}
+          {!hasPlayableSource && <div className="flex-1" />}
+
+          {/* Bottom section: track info + vote buttons */}
+          <div className="relative z-20 p-5 pt-0 space-y-4">
+            {/* Discovery context */}
+            {(track.seed_track?.artist || (track.metadata as any)?.seed_artist) && (
+              <p className="text-xs text-white/50 leading-relaxed truncate">
+                via{" "}
+                {track.seed_track ? (
+                  <>
+                    <span className="text-white/70">{track.seed_track.artist}</span>
+                    {" — "}
+                    <span className="text-white/60">{track.seed_track.title}</span>
+                  </>
                 ) : (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                  </svg>
+                  (track.metadata as any).seed_artist
                 )}
-              </button>
-            </div>
-            <div className="flex items-center gap-2 mt-2">
-              <span className="px-2 py-0.5 bg-white/10 backdrop-blur-sm rounded text-xs text-white/70">
-                {sourceLabel(track.source)}
-              </span>
-              {meta.genre && (
-                <span className="px-2 py-0.5 bg-white/10 backdrop-blur-sm rounded text-xs text-white/70">
-                  {meta.genre}
-                </span>
-              )}
-              {meta.bpm && (
-                <span className="px-2 py-0.5 bg-white/10 backdrop-blur-sm rounded text-xs text-white/70">
-                  {meta.bpm} BPM
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
+                {(track.metadata as any)?.co_occurrence > 1 && ` · ${(track.metadata as any).co_occurrence} sets`}
+              </p>
+            )}
 
-        {/* Details section */}
-        <div className="p-5 space-y-4">
-          {/* Discovery context — seed track info */}
-          {(track.seed_track?.artist || (track.metadata as any)?.seed_artist) && (
-            <p className="text-sm text-white/60 leading-relaxed">
-              via{" "}
-              {track.seed_track ? (
-                <>
-                  <span className="text-white/80">{track.seed_track.artist}</span>
-                  {" — "}
-                  <span className="text-white/70">{track.seed_track.title}</span>
-                </>
+            {/* Source context */}
+            {track.source_context && (
+              track.source_url ? (
+                <a
+                  href={track.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-[11px] text-white/40 hover:text-accent transition-colors group truncate"
+                >
+                  <span className="text-accent">◉</span>
+                  <span className="truncate underline underline-offset-2 decoration-white/15 group-hover:decoration-accent">
+                    {track.source_context}
+                  </span>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 opacity-40 group-hover:opacity-100">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+                  </svg>
+                </a>
               ) : (
-                (track.metadata as any).seed_artist
-              )}
-              {(track.metadata as any)?.co_occurrence > 1 && ` · ${(track.metadata as any).co_occurrence} sets`}
-            </p>
-          )}
+                <div className="flex items-center gap-1.5 text-[11px] text-white/40 truncate">
+                  <span className="text-accent">◉</span>
+                  <span className="truncate">{track.source_context}</span>
+                </div>
+              )
+            )}
 
-          {/* Source context — link to episode/mix when URL available */}
-          {track.source_context && (
-            track.source_url ? (
-              <a
-                href={track.source_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-start gap-2 text-xs text-muted hover:text-accent transition-colors group"
-              >
-                <span className="text-accent mt-0.5">◉</span>
-                <span className="underline underline-offset-2 decoration-white/20 group-hover:decoration-accent">
-                  {track.source_context}
-                </span>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 opacity-40 group-hover:opacity-100">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
-                </svg>
-              </a>
-            ) : (
-              <div className="flex items-start gap-2 text-xs text-muted">
-                <span className="text-accent mt-0.5">◉</span>
-                <span>{track.source_context}</span>
+            {/* Track info */}
+            <div className="pointer-events-none">
+              <h2 className="text-2xl font-bold text-white leading-tight truncate">
+                {track.title}
+              </h2>
+              <div className="flex items-center gap-2 mt-0.5">
+                <p className="text-lg text-white/80 truncate">{track.artist}</p>
+                <button
+                  onClick={handleCopy}
+                  className="pointer-events-auto flex-shrink-0 p-1 rounded-md hover:bg-white/10 active:scale-90 transition-all"
+                  title="Copy artist - title"
+                >
+                  {copied ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  )}
+                </button>
               </div>
-            )
-          )}
-
-          {/* Now playing indicator — playback is in global player */}
-          {isCurrentTrack && (
-            <div className="flex items-center gap-2 py-2 px-3 bg-surface-2 rounded-xl text-xs">
-              <span className="flex gap-0.5 items-end h-3">
-                <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "40%", animationDelay: "0ms" }} />
-                <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "70%", animationDelay: "150ms" }} />
-                <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "50%", animationDelay: "300ms" }} />
-              </span>
-              <span className="text-accent">
-                {globalPlayer.playing ? "Now playing" : "Paused"}
-                {globalPlayer.source === "spotify" && " via Spotify"}
-              </span>
+              <div className="flex items-center gap-2 mt-2">
+                <span className="px-2 py-0.5 bg-white/10 backdrop-blur-sm rounded text-xs text-white/70">
+                  {sourceLabel(track.source)}
+                </span>
+                {meta.genre && (
+                  <span className="px-2 py-0.5 bg-white/10 backdrop-blur-sm rounded text-xs text-white/70">
+                    {meta.genre}
+                  </span>
+                )}
+                {meta.bpm && (
+                  <span className="px-2 py-0.5 bg-white/10 backdrop-blur-sm rounded text-xs text-white/70">
+                    {meta.bpm} BPM
+                  </span>
+                )}
+              </div>
             </div>
-          )}
 
-          {/* YouTube link — shown separately if available */}
-          {track.youtube_url && (
-            <button
-              onClick={() => openYouTube(track.youtube_url!)}
-              className="flex items-center justify-center gap-2 py-2.5 bg-surface-2 hover:bg-surface-3 rounded-xl text-sm text-red-400/80 hover:text-red-400 transition-colors w-full"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-              YouTube
-            </button>
-          )}
+            {/* Vote buttons — Tinder-style circular buttons */}
+            <div className="flex items-center justify-center gap-5 pt-2">
+              {/* Skip (reject) */}
+              <button
+                onClick={() => handleVote("rejected")}
+                disabled={voting}
+                className="flex items-center justify-center w-14 h-14 rounded-full bg-black/40 backdrop-blur-md border border-red-400/30 text-red-400/80 hover:bg-red-950/50 hover:border-red-400/60 hover:text-red-400 transition-all active:scale-90 disabled:opacity-50"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
 
-          {/* Vote buttons */}
-          <div className="flex gap-2 pt-1">
-            <button
-              onClick={() => handleVote("rejected")}
-              disabled={voting}
-              className="flex-1 py-3 rounded-xl bg-surface-3 hover:bg-red-950/40 text-white/70 hover:text-red-400 text-sm font-medium transition-all active:scale-95 disabled:opacity-50"
-            >
-              Skip
-            </button>
-            <div className={`flex-1 flex rounded-xl overflow-hidden transition-all ${
-              approved ? "bg-green-500/20" : "bg-accent/15"
-            } ${voting ? "opacity-50" : ""}`}>
+              {/* Keep (approve without advancing) */}
               <button
                 onClick={() => handleVote("approved", false)}
                 disabled={voting || approved}
-                className={`flex-[4] py-3 text-sm font-medium transition-all active:scale-[0.97] disabled:cursor-default ${
+                className={`flex items-center justify-center w-10 h-10 rounded-full backdrop-blur-md border transition-all active:scale-90 disabled:cursor-default ${
                   approved
-                    ? "text-green-400"
-                    : "text-accent hover:bg-accent/10"
+                    ? "bg-green-500/30 border-green-400/50 text-green-400"
+                    : "bg-black/40 border-accent/30 text-accent/70 hover:bg-accent/20 hover:border-accent/60 hover:text-accent"
                 }`}
               >
-                {approved ? "Kept ✓" : "Keep"}
+                {approved ? (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                  </svg>
+                )}
               </button>
+
+              {/* Keep & Next (approve and advance) */}
               <button
                 onClick={() => handleVote("approved", true)}
                 disabled={voting}
-                className={`flex-[1] py-3 border-l text-sm transition-all active:scale-[0.97] flex items-center justify-center ${
+                className={`flex items-center justify-center w-14 h-14 rounded-full backdrop-blur-md border transition-all active:scale-90 disabled:opacity-50 ${
                   approved
-                    ? "border-green-400/20 text-green-400 hover:bg-green-500/10"
-                    : "border-accent/20 text-accent/60 hover:text-accent hover:bg-accent/10"
+                    ? "bg-green-500/30 border-green-400/50 text-green-400 hover:bg-green-500/40"
+                    : "bg-black/40 border-green-400/30 text-green-400/80 hover:bg-green-950/50 hover:border-green-400/60 hover:text-green-400"
                 }`}
               >
-                →
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                </svg>
               </button>
             </div>
           </div>
-
-          {/* Skip episode */}
-          {onSkipEpisode && (
-            <button
-              onClick={onSkipEpisode}
-              disabled={skippingEpisode}
-              className="w-full mt-2 py-2.5 rounded-xl border border-surface-3 bg-surface-2/50 hover:bg-red-950/30 hover:border-red-400/20 text-xs text-muted hover:text-red-400 font-medium transition-all active:scale-[0.98] disabled:opacity-50"
-            >
-              {skippingEpisode ? "Skipping episode..." : "Skip entire episode ×"}
-            </button>
-          )}
         </div>
       </div>
     </div>
