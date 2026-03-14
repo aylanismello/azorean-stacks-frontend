@@ -22,8 +22,8 @@ export default function SeedsPage() {
   const [seeds, setSeeds] = useState<Seed[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [discovering, setDiscovering] = useState(false);
-  const [discoverResult, setDiscoverResult] = useState<{ tracks_found: number; tracks_new: number } | null>(null);
+  const [enriching, setEnriching] = useState(false);
+  const [discoverResult, setDiscoverResult] = useState<{ tracks_found: number } | null>(null);
   const [tab, setTab] = useState<"all" | "reseeds">("all");
   const { user } = useAuth();
 
@@ -59,9 +59,9 @@ export default function SeedsPage() {
       const seed = await res.json();
       fetchSeeds();
 
-      // Trigger on-demand discovery in the background
+      // Trigger fast NTS track discovery, then engine enriches in background
       if (user?.id && seed?.id) {
-        setDiscovering(true);
+        setEnriching(true);
         setDiscoverResult(null);
         try {
           const discoverRes = await fetch("/api/discover", {
@@ -71,15 +71,13 @@ export default function SeedsPage() {
           });
           if (discoverRes.ok) {
             const result = await discoverRes.json();
-            if (result.tracks_found > 0) {
-              setDiscoverResult({ tracks_found: result.tracks_found, tracks_new: result.tracks_new });
-            }
-            fetchSeeds(); // Refresh to show updated discovery counts
+            setDiscoverResult({ tracks_found: result.tracks_found });
+            fetchSeeds();
           }
         } catch {
-          // Discovery failure is non-blocking — the background engine will pick it up
+          // Discovery failure is non-blocking — the engine will pick it up
         } finally {
-          setDiscovering(false);
+          setEnriching(false);
         }
       }
     } catch (err) {
@@ -142,18 +140,20 @@ export default function SeedsPage() {
         </button>
       </div>
 
-      {/* Discovering banner */}
-      {discovering && (
+      {/* Enriching banner */}
+      {enriching && (
         <div className="mb-4 p-3 bg-accent/10 border border-accent/20 rounded-lg text-sm text-accent flex items-center gap-2">
           <span className="w-3.5 h-3.5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-          Discovering tracks...
+          Finding tracks...
         </div>
       )}
 
       {discoverResult && (
         <div className="mb-4 p-3 bg-accent/10 border border-accent/20 rounded-lg text-sm text-accent flex items-center justify-between">
           <span>
-            Found {discoverResult.tracks_found} tracks ({discoverResult.tracks_new} new)
+            {discoverResult.tracks_found > 0
+              ? `Found ${discoverResult.tracks_found} tracks — Pico is enriching them in the background`
+              : "No tracks found yet — engine will pick this up shortly"}
           </span>
           <button onClick={() => setDiscoverResult(null)} className="text-accent/60 hover:text-accent">
             ✕
@@ -216,6 +216,9 @@ function SeedCard({
   const lastRun = seed.last_run;
   const totalFound = (seed.discovery_count || 0) + episodes.length;
   const noMatches = lastRun && lastRun.tracks_found === 0 && episodes.length === 0;
+  const isEnriching = seed.created_at &&
+    (Date.now() - new Date(seed.created_at).getTime()) < 2 * 60 * 60 * 1000 &&
+    totalFound === 0;
 
   return (
     <div
@@ -246,6 +249,12 @@ function SeedCard({
             {seed.source === "re-seed" && (
               <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" title="Planted from discovery">
                 🌱 re-seed
+              </span>
+            )}
+            {isEnriching && (
+              <span className="flex-shrink-0 flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20" title="Pico is enriching this seed">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                enriching
               </span>
             )}
           </div>
