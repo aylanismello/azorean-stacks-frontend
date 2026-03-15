@@ -63,23 +63,23 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
   }, [track.artist, track.title]);
 
   const handlePlantSeed = useCallback(async () => {
-    if (seeding || seeded) return;
+    if (seeding) return;
     setSeeding(true);
     try {
-      const res = await fetch("/api/seeds", {
+      const res = await fetch("/api/seeds/toggle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ artist: track.artist, title: track.title, source: "re-seed" }),
+        body: JSON.stringify({ track_id: track.id, artist: track.artist, title: track.title }),
       });
-      if (res.ok || res.status === 409) {
-        setSeeded(true);
-      }
+      if (!res.ok) return;
+      const data = await res.json();
+      setSeeded(data.action === "created");
     } catch {
       // silently fail
     } finally {
       setSeeding(false);
     }
-  }, [track.artist, track.title, seeding, seeded]);
+  }, [track.id, track.artist, track.title, seeding]);
 
   const handleVote = useCallback(
     async (status: "approved" | "rejected" | "skipped", advance: boolean = true) => {
@@ -430,7 +430,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
       {/* Re-seed */}
       <button
         onClick={handlePlantSeed}
-        disabled={seeding || seeded}
+        disabled={seeding}
         className={`flex items-center justify-center w-10 h-10 rounded-full border transition-all active:scale-90 ${
           seeded
             ? "bg-emerald-500/30 border-emerald-400/50 text-emerald-400"
@@ -438,7 +438,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
             ? "bg-surface-2 border-emerald-400/30 text-emerald-400/50 animate-pulse"
             : "bg-surface-2 md:bg-black/40 border-foreground/10 text-foreground/40 hover:border-emerald-400/40 hover:text-emerald-400/70"
         }`}
-        title={seeded ? "Planted as seed!" : "Plant as seed for future discovery"}
+        title={seeded ? "Remove re-seed" : "Plant as re-seed for future discovery"}
       >
         <span className={`text-sm ${seeded ? "seed-sprout" : ""}`}>{seeded ? "🌿" : "🌱"}</span>
       </button>
@@ -670,7 +670,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
             {/* Re-seed */}
             <button
               onClick={handlePlantSeed}
-              disabled={seeding || seeded}
+              disabled={seeding}
               className={`flex items-center justify-center w-9 h-9 rounded-full border backdrop-blur-md transition-all active:scale-90 ${
                 seeded
                   ? "bg-emerald-500/30 border-emerald-400/50 text-emerald-400"
@@ -678,7 +678,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
                   ? "bg-black/40 border-emerald-400/30 text-emerald-400/50 animate-pulse"
                   : "bg-black/40 border-white/20 text-white/50"
               }`}
-              title={seeded ? "Planted as seed!" : "Plant as seed"}
+              title={seeded ? "Remove re-seed" : "Plant as re-seed"}
             >
               <span className={`text-xs ${seeded ? "seed-sprout" : ""}`}>{seeded ? "🌿" : "🌱"}</span>
             </button>

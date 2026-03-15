@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 import { getServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -7,18 +8,40 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   const db = getServiceClient();
   const { track_id, artist, title } = await req.json();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return req.cookies.getAll();
+        },
+        setAll() {
+          // Route only needs read access to auth cookies here.
+        },
+      },
+    }
+  );
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   if (!artist || !title) {
     return NextResponse.json({ error: "artist and title required" }, { status: 400 });
   }
 
-  // Check if seed already exists — by track_id first, then artist+title
+  // Re-seeds are stored as user-owned seed rows so they don't collide with shared base seeds.
   let existingSeed: { id: string } | null = null;
 
   if (track_id) {
     const { data } = await db
       .from("seeds")
       .select("id")
+      .eq("user_id", user.id)
       .eq("track_id", track_id)
       .limit(1)
       .maybeSingle();
@@ -31,6 +54,7 @@ export async function POST(req: NextRequest) {
     const { data } = await db
       .from("seeds")
       .select("id")
+      .eq("user_id", user.id)
       .ilike("artist", escArtist)
       .ilike("title", escTitle)
       .limit(1)
@@ -51,7 +75,7 @@ export async function POST(req: NextRequest) {
       artist: artist.trim(),
       title: title.trim(),
       track_id: track_id || null,
-      source: "re-seed",
+      user_id: user.id,
     })
     .select("id")
     .single();

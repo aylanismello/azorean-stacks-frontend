@@ -6,6 +6,7 @@ import { Track } from "@/lib/types";
 import { TrackCard } from "@/components/TrackCard";
 import { EpisodeTracklist, TracklistSheet } from "@/components/EpisodeTracklist";
 import { useGlobalPlayer } from "@/components/GlobalPlayerProvider";
+import { useSpotify } from "@/components/SpotifyProvider";
 
 export default function StackPage() {
   return (
@@ -25,6 +26,7 @@ function StackPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const globalPlayer = useGlobalPlayer();
+  const { connected: spotifyConnected } = useSpotify();
 
   // URL-driven state
   const episodeId = searchParams.get("episode_id");
@@ -227,7 +229,7 @@ function StackPageContent() {
       if (!res.ok) throw new Error(`Vote failed (${res.status})`);
 
       // Auto-sync Spotify playlist when a track is approved
-      if (status === "approved") {
+      if (status === "approved" && spotifyConnected) {
         fetch("/api/spotify/sync-seeds", { method: "POST" }).catch(() => {});
       }
 

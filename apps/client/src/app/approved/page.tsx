@@ -258,7 +258,7 @@ export default function TracksPage() {
         [newStatus]: (prev[newStatus as Tab] ?? 0) + 1,
       }));
       // Auto-sync Spotify playlist when approved list changes
-      if (tab === "approved" || newStatus === "approved") {
+      if (spotifyConnected && (tab === "approved" || newStatus === "approved")) {
         fetch("/api/spotify/sync-seeds", { method: "POST" }).catch(() => {});
       }
     } catch (err) {

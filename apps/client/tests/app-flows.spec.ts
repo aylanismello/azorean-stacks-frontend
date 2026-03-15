@@ -149,8 +149,8 @@ test.describe("authenticated app flows", () => {
     await expect(newSeedRow.getByTitle(/activate/i)).toBeVisible();
     await newSeedRow.getByTitle(/activate/i).click();
     await expect(newSeedRow.getByTitle(/deactivate/i)).toBeVisible();
-    await newSeedRow.getByTitle("Remove seed").click();
-    await expect(newSeedRow).toHaveCount(0);
+    await newSeedRow.getByRole("button", { name: "✕" }).click();
+    await expect(page.getByText(seedTitle)).toHaveCount(0);
     await page.getByRole("button", { name: /Re-seeds/i }).click();
 
     expect(failures.pageErrors, `page errors: ${failures.pageErrors.join("\n")}`).toEqual([]);
@@ -188,5 +188,76 @@ test.describe("authenticated app flows", () => {
     expect(failures.consoleErrors, `console errors: ${failures.consoleErrors.join("\n")}`).toEqual([]);
 
     await context.close();
+  });
+
+  test("desktop re-seeds created from the card show up in Seeds", async ({ page }) => {
+    test.skip(
+      test.info().project.name !== "desktop",
+      "Desktop-only re-seed coverage runs in the desktop project"
+    );
+    test.setTimeout(60000);
+
+    const failures = trackClientFailures(page);
+
+    await login(page);
+    await page.request.get("/api/tracks?status=pending&limit=20&order_by=taste_score");
+
+    await page.goto("/?source=taste", { waitUntil: "networkidle" });
+    await expectAfterReload(page, () => page.getByTitle("All stacks"), 30000);
+
+    const reseedButton = page.getByTitle(/Plant as re-seed|Remove re-seed/).last();
+    await expect(reseedButton).toBeVisible();
+    if ((await reseedButton.getAttribute("title"))?.includes("Remove")) {
+      await reseedButton.click();
+      await expect(reseedButton).toHaveAttribute("title", /Plant as re-seed/);
+    }
+    await reseedButton.click();
+    await expect(reseedButton).toHaveAttribute("title", /Remove re-seed/);
+
+    await page.getByRole("link", { name: "Seeds", exact: true }).click();
+    await expect(page).toHaveURL(/\/seeds$/);
+    const reseedsTab = page.getByRole("button", { name: /Re-seeds \(/ });
+    await expect(reseedsTab).toBeVisible();
+    await reseedsTab.click();
+    await expect(page.getByText(/re-seed/i).first()).toBeVisible({ timeout: 15000 });
+
+    expect(failures.pageErrors, `page errors: ${failures.pageErrors.join("\n")}`).toEqual([]);
+    expect(failures.requestFailures, `server failures: ${failures.requestFailures.join("\n")}`).toEqual([]);
+    expect(failures.consoleErrors, `console errors: ${failures.consoleErrors.join("\n")}`).toEqual([]);
+  });
+
+  test("desktop For You can advance through multiple tracks without breaking the UI", async ({ page }) => {
+    test.skip(
+      test.info().project.name !== "desktop",
+      "Desktop-only For You progression coverage runs in the desktop project"
+    );
+    test.setTimeout(60000);
+
+    const failures = trackClientFailures(page);
+
+    await login(page);
+    await page.request.get("/api/tracks?status=pending&limit=20&order_by=taste_score");
+
+    await page.goto("/?source=taste", { waitUntil: "networkidle" });
+    await expectAfterReload(page, () => page.getByTitle("All stacks"), 30000);
+
+    const title = page.getByRole("heading", { level: 2 }).first();
+    await expect(title).toBeVisible();
+    const seenTitles = new Set<string>();
+
+    for (let i = 0; i < 3; i++) {
+      const currentTitle = (await title.textContent())?.trim() || "";
+      seenTitles.add(currentTitle);
+      await page.keyboard.press("k");
+      await expect.poll(async () => ((await title.textContent()) || "").trim(), {
+        timeout: 15000,
+      }).not.toBe(currentTitle);
+      await expect(page.getByTitle("All stacks")).toBeVisible();
+    }
+
+    expect(seenTitles.size).toBeGreaterThan(1);
+    expect(failures.pageErrors, `page errors: ${failures.pageErrors.join("\n")}`).toEqual([]);
+    expect(failures.requestFailures, `server failures: ${failures.requestFailures.join("\n")}`).toEqual([]);
+    expect(failures.consoleErrors, `console errors: ${failures.consoleErrors.join("\n")}`).toEqual([]);
   });
 });

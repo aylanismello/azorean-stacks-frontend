@@ -18,6 +18,10 @@ function decodeEntities(s: string): string {
     .replace(/&#x27;/g, "'");
 }
 
+function isReseed(seed: Seed): boolean {
+  return seed.source === "re-seed" || !!seed.user_id;
+}
+
 export default function SeedsPage() {
   const [seeds, setSeeds] = useState<Seed[]>([]);
   const [loading, setLoading] = useState(true);
@@ -111,7 +115,7 @@ export default function SeedsPage() {
     }
   };
 
-  const reseeds = seeds.filter((s) => s.source === "re-seed");
+  const reseeds = seeds.filter(isReseed);
   const displaySeeds = tab === "reseeds" ? reseeds : seeds;
 
   return (
@@ -246,7 +250,7 @@ function SeedCard({
             <p className="text-sm font-medium text-foreground truncate">
               {decodeEntities(seed.artist)}
             </p>
-            {seed.source === "re-seed" && (
+            {isReseed(seed) && (
               <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" title="Planted from discovery">
                 🌱 re-seed
               </span>
@@ -311,7 +315,7 @@ function SeedCard({
         </div>
       )}
 
-      {expanded && seed.source === "re-seed" && (
+      {expanded && isReseed(seed) && (
         <div className="border-t border-surface-3 px-4 py-3">
           <p className="text-[10px] text-emerald-400/60 italic">
             🌱 Planted from discovery — exploration begets exploration
