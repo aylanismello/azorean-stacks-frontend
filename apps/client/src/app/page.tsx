@@ -59,12 +59,10 @@ function StackPageContent() {
 
   // Position index into the tracks array (used when we have an episode context)
   const [episodePos, setEpisodePos] = useState(0);
-  const prevEpisodeId = useRef(episodeId);
-  if (episodeId !== prevEpisodeId.current) {
-    prevEpisodeId.current = episodeId;
+  useEffect(() => {
     setEpisodePos(0);
     setAdvancingEpisode(false);
-  }
+  }, [episodeId]);
 
   // Whether we're operating in "episode mode" (full episode tracks + position index)
   // This is true both for URL-driven episodes AND derived episodes in all-pending

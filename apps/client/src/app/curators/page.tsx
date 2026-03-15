@@ -250,6 +250,17 @@ function CuratorDetail({ curator, onClose }: { curator: Curator; onClose: () => 
       .finally(() => setLoading(false));
   }, [curator.id]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   return (
     <>
       {/* Backdrop */}

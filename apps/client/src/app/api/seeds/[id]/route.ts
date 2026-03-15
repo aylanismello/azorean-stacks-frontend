@@ -40,6 +40,17 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   const supabase = getServiceClient();
+
+  // discovery_runs.seed_id does not cascade on delete, so clean up history first
+  const { error: runsError } = await supabase
+    .from("discovery_runs")
+    .delete()
+    .eq("seed_id", params.id);
+
+  if (runsError) {
+    return NextResponse.json({ error: runsError.message }, { status: 500 });
+  }
+
   const { error } = await supabase
     .from("seeds")
     .delete()

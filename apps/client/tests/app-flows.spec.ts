@@ -1,0 +1,192 @@
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+const TEST_EMAIL = process.env.E2E_EMAIL;
+const TEST_PASSWORD = process.env.E2E_PASSWORD;
+
+function trackClientFailures(page: Page) {
+  const pageErrors: string[] = [];
+  const requestFailures: string[] = [];
+  const consoleErrors: string[] = [];
+
+  page.on("pageerror", (error) => {
+    pageErrors.push(error.message);
+  });
+
+  page.on("console", (message) => {
+    if (message.type() !== "error") return;
+    consoleErrors.push(message.text());
+  });
+
+  page.on("response", async (response) => {
+    const url = response.url();
+    if (!url.includes("/api/")) return;
+    if (response.status() < 500) return;
+    requestFailures.push(`${response.status()} ${url}`);
+  });
+
+  return { pageErrors, requestFailures, consoleErrors };
+}
+
+async function login(page: Page) {
+  if (!TEST_EMAIL || !TEST_PASSWORD) {
+    test.skip(true, "E2E_EMAIL and E2E_PASSWORD are required");
+  }
+
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(TEST_EMAIL!);
+  await page.getByLabel("Password").fill(TEST_PASSWORD!);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForURL((url) => !url.pathname.startsWith("/login"), {
+    timeout: 15000,
+  });
+}
+
+async function gotoAndWaitFor(page: Page, path: string, visibleText: RegExp | string) {
+  await page.goto(path, { waitUntil: "networkidle" });
+  const marker = page.getByText(visibleText).first();
+  try {
+    await expect(marker).toBeVisible({ timeout: 15000 });
+  } catch {
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(marker).toBeVisible({ timeout: 15000 });
+  }
+}
+
+async function expectAfterReload(
+  page: Page,
+  locatorFactory: () => Locator,
+  timeout = 15000
+) {
+  try {
+    await expect(locatorFactory()).toBeVisible({ timeout });
+  } catch {
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(locatorFactory()).toBeVisible({ timeout });
+  }
+}
+
+test.describe("authenticated app flows", () => {
+  test("desktop main flows stay usable", async ({ page }) => {
+    test.skip(
+      test.info().project.name !== "desktop",
+      "Desktop-only flow coverage runs in the desktop project"
+    );
+    test.setTimeout(60000);
+
+    const failures = trackClientFailures(page);
+
+    await login(page);
+    await expect(page).toHaveURL(/\/$/);
+    await page.request.get("/api/tracks?status=pending&limit=20&order_by=taste_score");
+    await page.request.get("/api/stacks");
+    await page.request.get("/api/seeds");
+
+    await page.getByRole("link", { name: "Stacks", exact: true }).click();
+    await expect(page).toHaveURL(/\/stacks$/);
+    await expect(page.getByText("For You")).toBeVisible({ timeout: 30000 });
+
+    const tasteButton = page.getByRole("button", { name: /For You/i });
+    await expect(tasteButton).toBeVisible();
+    await tasteButton.click();
+    await expect(page).toHaveURL(/source=taste/);
+    const backToStacks = page.getByTitle("All stacks");
+    await expectAfterReload(page, () => backToStacks, 30000);
+    await backToStacks.click();
+    await expect(page).toHaveURL(/\/stacks$/);
+
+    const firstStackTile = page.locator("button.group.relative.aspect-square").first();
+    await expect(firstStackTile).toBeVisible();
+    await firstStackTile.click();
+    await expect(page).toHaveURL(/source=seed/);
+    await page.getByTitle("All stacks").click();
+    await expect(page).toHaveURL(/\/stacks\/.+/);
+    await expectAfterReload(page, () => page.getByText(/Pending \(|Done \(/).first(), 30000);
+    await page.getByRole("button", { name: "Stacks" }).click();
+    await expect(page).toHaveURL(/\/stacks$/);
+
+    await page.getByRole("link", { name: "Tracks", exact: true }).click();
+    await expect(page).toHaveURL(/\/approved$/);
+    await expect(page.getByText(/Unlistened|Kept|Skipped|Nope/).first()).toBeVisible({ timeout: 30000 });
+    await page.getByPlaceholder("Search artist or title...").fill("James");
+    await page.waitForTimeout(500);
+    await page.getByRole("button", { name: /Nope/i }).click();
+    await expect(page.getByRole("button", { name: /Nope/i })).toHaveAttribute("class", /ring-red-400/);
+
+    await page.getByRole("link", { name: "Episodes", exact: true }).click();
+    await expect(page).toHaveURL(/\/episodes$/);
+    await expect(page.getByRole("heading", { name: "Episodes" })).toBeVisible({ timeout: 30000 });
+    const firstEpisode = page.locator("button.w-full.text-left").first();
+    if (await firstEpisode.isVisible()) {
+      await firstEpisode.click();
+      await expect(page.getByRole("link", { name: /Open on/i }).first()).toBeVisible();
+    }
+
+    await page.getByRole("link", { name: "Curators", exact: true }).click();
+    await expect(page).toHaveURL(/\/curators$/);
+    await expect(page.getByRole("heading", { name: "Curators" })).toBeVisible({ timeout: 30000 });
+    const firstCurator = page.locator("button.group.relative.aspect-square").first();
+    if (await firstCurator.isVisible()) {
+      await firstCurator.click();
+      await expect(page.getByText(/Matched Episodes|Recent Matches|No matched episodes|Loading episodes/i).first()).toBeVisible({ timeout: 15000 });
+      await page.keyboard.press("Escape");
+    }
+
+    await page.getByRole("link", { name: "Stats", exact: true }).click();
+    await expect(page).toHaveURL(/\/stats$/);
+    await expect(page.getByRole("heading", { name: "Taste Dashboard" })).toBeVisible({ timeout: 30000 });
+
+    await page.getByRole("link", { name: "Seeds", exact: true }).click();
+    await expect(page).toHaveURL(/\/seeds$/);
+    await expect(page.getByText("Add tracks as seeds")).toBeVisible({ timeout: 30000 });
+    const seedTitle = `PW Title ${Date.now()}`;
+    const seedArtist = "PW Artist";
+    await page.getByPlaceholder("Title").fill(seedTitle);
+    await page.getByPlaceholder("Artist").fill(seedArtist);
+    await page.getByRole("button", { name: "Add" }).click();
+    const newSeedRow = page.locator("div.rounded-xl").filter({ hasText: seedTitle }).first();
+    await expect(newSeedRow).toBeVisible({ timeout: 15000 });
+    await newSeedRow.getByTitle(/deactivate/i).click();
+    await expect(newSeedRow.getByTitle(/activate/i)).toBeVisible();
+    await newSeedRow.getByTitle(/activate/i).click();
+    await expect(newSeedRow.getByTitle(/deactivate/i)).toBeVisible();
+    await newSeedRow.getByTitle("Remove seed").click();
+    await expect(newSeedRow).toHaveCount(0);
+    await page.getByRole("button", { name: /Re-seeds/i }).click();
+
+    expect(failures.pageErrors, `page errors: ${failures.pageErrors.join("\n")}`).toEqual([]);
+    expect(failures.requestFailures, `server failures: ${failures.requestFailures.join("\n")}`).toEqual([]);
+    expect(failures.consoleErrors, `console errors: ${failures.consoleErrors.join("\n")}`).toEqual([]);
+  });
+
+  test("mobile navigation loads primary tabs", async ({ browser }) => {
+    test.skip(
+      test.info().project.name !== "mobile",
+      "Mobile-only flow coverage runs in the mobile project"
+    );
+
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      userAgent:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+      isMobile: true,
+      hasTouch: true,
+    });
+    const page = await context.newPage();
+    const failures = trackClientFailures(page);
+
+    await login(page);
+    await page.goto("/stacks");
+    await page.getByRole("link", { name: "Tracks" }).click();
+    await expect(page).toHaveURL(/\/approved$/);
+    await page.getByRole("link", { name: "Seeds" }).click();
+    await expect(page).toHaveURL(/\/seeds$/);
+    await page.getByRole("button", { name: /⚙|Connected/i }).click();
+    await expect(page.getByText(/Theme|Spotify|Sign out/i).first()).toBeVisible();
+
+    expect(failures.pageErrors, `page errors: ${failures.pageErrors.join("\n")}`).toEqual([]);
+    expect(failures.requestFailures, `server failures: ${failures.requestFailures.join("\n")}`).toEqual([]);
+    expect(failures.consoleErrors, `console errors: ${failures.consoleErrors.join("\n")}`).toEqual([]);
+
+    await context.close();
+  });
+});
