@@ -215,6 +215,24 @@ async function crawlEpisode(url: string, title: string, date: string | null, pre
 
   log("info", `  ${episodeTitle || url} — ${tracklist.length} tracks`);
 
+  // Skip episodes with no tracklist — they're useless for matching
+  if (tracklist.length === 0) {
+    // Mark as crawled so we don't re-visit, but don't store in episodes table
+    await db.from("episodes").upsert(
+      {
+        url,
+        title: episodeTitle,
+        source: "lotradio",
+        aired_date: date,
+        artwork_url: artwork,
+        skipped: true,
+        metadata: { tracklist_count: 0, crawled_at: new Date().toISOString(), no_tracklist: true },
+      },
+      { onConflict: "url" },
+    );
+    return true; // counted as success so we don't retry
+  }
+
   // Upsert episode record with tracklist in metadata
   const { error } = await db.from("episodes").upsert(
     {
@@ -223,6 +241,7 @@ async function crawlEpisode(url: string, title: string, date: string | null, pre
       source: "lotradio",
       aired_date: date,
       artwork_url: artwork,
+      skipped: false,
       metadata: {
         tracklist: tracklist.map((t) => ({
           artist: t.artist,
