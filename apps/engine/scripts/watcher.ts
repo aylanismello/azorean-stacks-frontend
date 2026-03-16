@@ -287,7 +287,6 @@ async function processSeed(seedId: string) {
 
 // ─── REALTIME SUBSCRIPTION ──────────────────────────────────
 
-let processing = false;
 const seedQueue: string[] = [];
 const trackQueue: string[] = [];
 
@@ -558,51 +557,70 @@ function enqueueSuperLike(trackId: string) {
   superLikeQueue.push(trackId);
 }
 
-async function processQueue() {
-  if (processing) return;
-  processing = true;
+// ─── INDEPENDENT QUEUE PROCESSORS ───────────────────────────
 
-  while (seedQueue.length > 0 || trackQueue.length > 0 || superLikeQueue.length > 0) {
+let seedProcessing = false;
+async function processSeedQueue() {
+  if (seedProcessing) return;
+  seedProcessing = true;
+  while (seedQueue.length > 0) {
     lastEventAt = new Date().toISOString();
     updateStatusFile();
-
-    if (seedQueue.length > 0) {
-      const seedId = seedQueue.shift()!;
-      try {
-        await processSeed(seedId);
-      } catch (err) {
-        log("fail", `Pipeline error for seed ${seedId}: ${err instanceof Error ? err.message : err}`);
-        await logEngineEvent("error", "failed", {
-          seedId,
-          message: `Pipeline error: ${err instanceof Error ? err.message : err}`,
-        });
-      }
-      continue;
-    }
-
-    if (superLikeQueue.length > 0) {
-      const trackId = superLikeQueue.shift()!;
-      try {
-        await processSuperLike(trackId);
-      } catch (err) {
-        log("fail", `Super Like error for track ${trackId}: ${err instanceof Error ? err.message : err}`);
-        await logEngineEvent("error", "failed", {
-          message: `Super Like error: ${err instanceof Error ? err.message : err}`,
-          metadata: { track_id: trackId },
-        });
-      }
-      continue;
-    }
-
-    const trackId = trackQueue.shift()!;
+    const seedId = seedQueue.shift()!;
     try {
-      await processTrack(trackId);
+      await processSeed(seedId);
     } catch (err) {
-      log("fail", `Repair error for track ${trackId}: ${err instanceof Error ? err.message : err}`);
+      log("fail", `Pipeline error for seed ${seedId}: ${err instanceof Error ? err.message : err}`);
+      await logEngineEvent("error", "failed", {
+        seedId,
+        message: `Pipeline error: ${err instanceof Error ? err.message : err}`,
+      });
     }
   }
+  seedProcessing = false;
+}
 
-  processing = false;
+let superLikeProcessing = false;
+async function processSuperLikeQueue() {
+  if (superLikeProcessing) return;
+  superLikeProcessing = true;
+  while (superLikeQueue.length > 0) {
+    lastEventAt = new Date().toISOString();
+    updateStatusFile();
+    const trackId = superLikeQueue.shift()!;
+    try {
+      await processSuperLike(trackId);
+    } catch (err) {
+      log("fail", `Super Like error for track ${trackId}: ${err instanceof Error ? err.message : err}`);
+      await logEngineEvent("error", "failed", {
+        message: `Super Like error: ${err instanceof Error ? err.message : err}`,
+        metadata: { track_id: trackId },
+      });
+    }
+  }
+  superLikeProcessing = false;
+}
+
+const REPAIR_CONCURRENCY = 3;
+let repairProcessing = false;
+async function processRepairQueue() {
+  if (repairProcessing) return;
+  repairProcessing = true;
+  while (trackQueue.length > 0) {
+    lastEventAt = new Date().toISOString();
+    updateStatusFile();
+    const batch = trackQueue.splice(0, REPAIR_CONCURRENCY);
+    await Promise.allSettled(
+      batch.map(async (trackId) => {
+        try {
+          await processTrack(trackId);
+        } catch (err) {
+          log("fail", `Repair error for track ${trackId}: ${err instanceof Error ? err.message : err}`);
+        }
+      }),
+    );
+  }
+  repairProcessing = false;
 }
 
 function startWatcher() {
@@ -620,7 +638,7 @@ function startWatcher() {
         }
         log("ok", `Seed INSERT detected: ${payload.new?.artist} – ${payload.new?.title} (${seedId})`);
         enqueueSeed(seedId);
-        processQueue();
+        processSeedQueue();
       },
     )
     .on(
@@ -634,7 +652,7 @@ function startWatcher() {
         }
         log("ok", `user_track INSERT detected for track ${trackId}`);
         enqueueTrack(trackId);
-        processQueue();
+        processRepairQueue();
       },
     )
     .on(
@@ -648,7 +666,7 @@ function startWatcher() {
         }
         log("ok", `Super Like detected for track ${trackId} — queuing local download`);
         enqueueSuperLike(trackId);
-        processQueue();
+        processSuperLikeQueue();
       },
     )
     .subscribe(async (status) => {
@@ -661,7 +679,8 @@ function startWatcher() {
         updateStatusFile();
         await enqueueBacklogSeeds();
         await enqueueBacklogTracks();
-        processQueue();
+        processSeedQueue();
+        processRepairQueue();
       } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
         log("warn", `Realtime channel ${status} — will attempt reconnect`);
         logEngineEvent("watcher_disconnected", "info", {
