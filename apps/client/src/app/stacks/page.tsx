@@ -14,6 +14,7 @@ interface StackSeed {
   total_rejected: number;
   total: number;
   cover_art_url: string | null;
+  has_exact_match: boolean;
 }
 
 interface GenreEntry {
@@ -292,6 +293,17 @@ function StackTile({ seed, onClick }: { seed: StackSeed; onClick: () => void }) 
           </span>
         </div>
       )}
+
+      {/* Match type indicator */}
+      <div className="absolute top-2 left-2">
+        {seed.has_exact_match ? (
+          <div className="w-2 h-2 rounded-full bg-green-400/80" title="Exact match found" />
+        ) : (
+          <div className="px-1.5 py-0.5 rounded bg-black/50 backdrop-blur-sm text-[8px] text-amber-400/80 leading-none" title="Artist-only match">
+            artist
+          </div>
+        )}
+      </div>
 
       <div className="absolute bottom-0 left-0 right-0 p-3">
         <p className="text-[13px] font-semibold text-white leading-tight line-clamp-2 drop-shadow-lg">

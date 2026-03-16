@@ -12,6 +12,7 @@ interface TrackCardProps {
   onSuperLike?: (id: string) => Promise<void>;
   onSkipEpisode?: () => void;
   skippingEpisode?: boolean;
+  onShowContext?: () => void;
 }
 
 // Generate a deterministic gradient from artist+title
@@ -46,7 +47,7 @@ function sourceLabel(source: string): string {
   return labels[source] || source;
 }
 
-export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingEpisode }: TrackCardProps) {
+export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingEpisode, onShowContext }: TrackCardProps) {
   const [exiting, setExiting] = useState<"left" | "right" | null>(null);
   const [voting, setVoting] = useState(false);
   const votingRef = useRef(false);
@@ -628,9 +629,21 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
         <div className="absolute bottom-0 left-0 right-0 z-10 px-4 pb-4">
           {/* Track info */}
           <div className="mb-2">
-            <h2 className="text-lg font-bold text-white leading-tight truncate drop-shadow-lg">
-              {track.title}
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-bold text-white leading-tight truncate drop-shadow-lg flex-1">
+                {track.title}
+              </h2>
+              {onShowContext && (
+                <button
+                  onClick={onShowContext}
+                  className="flex-shrink-0 w-5 h-5 rounded-full border border-white/20 text-white/30 flex items-center justify-center text-[10px] font-bold active:scale-90 transition-all"
+                  title="Why this track?"
+                  aria-label="Track context"
+                >
+                  ?
+                </button>
+              )}
+            </div>
             <p className="text-sm text-white/80 truncate drop-shadow-lg">{track.artist}</p>
           </div>
 
@@ -833,9 +846,21 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
 
         {/* Track title + artist */}
         <div className="mb-6">
-          <h2 className="text-3xl font-bold text-foreground leading-tight truncate">
-            {track.title}
-          </h2>
+          <div className="flex items-start gap-2">
+            <h2 className="text-3xl font-bold text-foreground leading-tight truncate flex-1">
+              {track.title}
+            </h2>
+            {onShowContext && (
+              <button
+                onClick={onShowContext}
+                className="flex-shrink-0 mt-1.5 w-5 h-5 rounded-full border border-foreground/20 text-foreground/30 hover:text-foreground/60 hover:border-foreground/40 transition-colors flex items-center justify-center text-[10px] font-bold"
+                title="Why this track?"
+                aria-label="Track context"
+              >
+                ?
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-2 mt-1">
             <p className="text-xl text-foreground/70 truncate">{track.artist}</p>
             <button
