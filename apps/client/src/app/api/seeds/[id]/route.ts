@@ -77,16 +77,85 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // discovery_runs.seed_id does not cascade on delete, so clean up history first
-  const { error: runsError } = await supabase
-    .from("discovery_runs")
-    .delete()
-    .eq("seed_id", params.id);
+  // ── Cascade cleanup ──
 
-  if (runsError) {
-    return NextResponse.json({ error: runsError.message }, { status: 500 });
+  // 1. Delete discovery_runs (no FK cascade)
+  await supabase.from("discovery_runs").delete().eq("seed_id", params.id);
+
+  // 2. Get the seed's track_id so we can find tracks discovered via this seed
+  const { data: seed } = await supabase
+    .from("seeds")
+    .select("track_id")
+    .eq("id", params.id)
+    .single();
+
+  const seedTrackId = seed?.track_id || null;
+
+  // 3. Delete pending tracks discovered by this seed (keep voted ones for taste signals)
+  if (seedTrackId) {
+    // Delete storage files for pending tracks before removing them
+    const { data: pendingTracks } = await supabase
+      .from("tracks")
+      .select("id, storage_path")
+      .eq("seed_track_id", seedTrackId)
+      .eq("status", "pending");
+
+    if (pendingTracks?.length) {
+      // Remove storage files
+      const storagePaths = pendingTracks
+        .map((t: any) => t.storage_path)
+        .filter(Boolean);
+      if (storagePaths.length > 0) {
+        await supabase.storage.from("tracks").remove(storagePaths);
+      }
+
+      // Delete the pending tracks
+      const pendingIds = pendingTracks.map((t: any) => t.id);
+      await supabase.from("episode_tracks").delete().in("track_id", pendingIds);
+      await supabase.from("user_tracks").delete().in("track_id", pendingIds);
+      await supabase.from("tracks").delete().in("id", pendingIds);
+    }
+
+    // Null out seed_track_id on remaining voted tracks (they keep metadata.seed_artist/title)
+    await supabase
+      .from("tracks")
+      .update({ seed_track_id: null })
+      .eq("seed_track_id", seedTrackId);
   }
 
+  // 4. Remove episode_seeds links for this seed
+  const { data: episodeLinks } = await supabase
+    .from("episode_seeds")
+    .select("episode_id")
+    .eq("seed_id", params.id);
+
+  await supabase.from("episode_seeds").delete().eq("seed_id", params.id);
+
+  // 5. Clean up orphaned episodes (no remaining seed links)
+  if (episodeLinks?.length) {
+    for (const link of episodeLinks) {
+      const { count } = await supabase
+        .from("episode_seeds")
+        .select("*", { count: "exact", head: true })
+        .eq("episode_id", link.episode_id);
+
+      if (count === 0) {
+        // Check if episode still has any tracks (voted ones we kept)
+        const { count: trackCount } = await supabase
+          .from("tracks")
+          .select("*", { count: "exact", head: true })
+          .eq("episode_id", link.episode_id);
+
+        if (trackCount === 0) {
+          // Fully orphaned — delete episode
+          await supabase.from("episode_tracks").delete().eq("episode_id", link.episode_id);
+          await supabase.from("episodes").delete().eq("id", link.episode_id);
+        }
+      }
+    }
+  }
+
+  // 6. Delete the seed itself
   const { error } = await supabase
     .from("seeds")
     .delete()
