@@ -88,6 +88,7 @@ function StackPageContent() {
   const [tracklistOpen, setTracklistOpen] = useState(false);
   const [voteCount, setVoteCount] = useState(0);
   const [advancingEpisode, setAdvancingEpisode] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
 
   // Don't auto-play until the user has interacted (vote, skip, click track, etc.)
   const userHasInteracted = useRef(false);
@@ -821,6 +822,7 @@ function StackPageContent() {
             onSuperLike={handleSuperLike}
             onSkipEpisode={currentEpisodeId ? handleSkipEpisode : undefined}
             skippingEpisode={skippingEpisode}
+            onShowContext={() => setContextOpen(true)}
           />
         </div>
       </div>
@@ -843,6 +845,142 @@ function StackPageContent() {
         <span>→ / k keep</span>
         <span>space play/pause</span>
         <span>esc stacks</span>
+      </div>
+
+      {/* Track context modal */}
+      {contextOpen && currentTrack && (
+        <TrackContextModal
+          track={currentTrack}
+          stackSource={stackSource}
+          genreFilter={genreFilter}
+          seedName={seedName}
+          episodeTitle={hasEpisodeTracks ? currentEpisodeTitle : null}
+          episodePos={hasEpisodeTracks ? safeEpisodePos + 1 : null}
+          episodeTotal={hasEpisodeTracks ? total : null}
+          onClose={() => setContextOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Track Context Modal ──────────────────────────────────────────────────────
+
+function TrackContextModal({
+  track,
+  stackSource,
+  genreFilter,
+  seedName,
+  episodeTitle,
+  episodePos,
+  episodeTotal,
+  onClose,
+}: {
+  track: Track;
+  stackSource: string | null;
+  genreFilter: string | null;
+  seedName: string | null;
+  episodeTitle: string | null;
+  episodePos: number | null;
+  episodeTotal: number | null;
+  onClose: () => void;
+}) {
+  const meta = (track.metadata ?? {}) as Record<string, unknown>;
+  const seedArtist = (track.seed_track?.artist || meta.seed_artist) as string | undefined;
+  const seedTitle = (track.seed_track?.title || meta.seed_title) as string | undefined;
+  const coOccurrence = meta.co_occurrence as number | undefined;
+  const genre = meta.genre as string | undefined;
+
+  const modeLabel = () => {
+    if (episodeTitle) return `Episode: ${episodeTitle}${episodePos && episodeTotal ? ` — track ${episodePos} of ${episodeTotal}` : ""}`;
+    if (stackSource === "seed" && seedName) return `Seed stack: ${seedName}`;
+    if (stackSource === "genre" && genreFilter) return `Genre filter: ${genreFilter}`;
+    return "For You — ranked by taste profile";
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div
+        className="relative w-full md:max-w-sm mx-auto bg-surface-1 border border-foreground/10 rounded-t-2xl md:rounded-2xl shadow-2xl p-5 space-y-4 md:mx-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-foreground">Why this track?</h3>
+          <button
+            onClick={onClose}
+            className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-foreground/10 text-foreground/40 hover:text-foreground transition-colors"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Source */}
+        {(track.source || track.source_context) && (
+          <div>
+            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Source</p>
+            {track.source_url ? (
+              <a
+                href={track.source_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-accent hover:text-accent-bright underline underline-offset-2 decoration-accent/30"
+              >
+                {track.source_context || track.source}
+              </a>
+            ) : (
+              <p className="text-sm text-foreground/80">{track.source_context || track.source}</p>
+            )}
+          </div>
+        )}
+
+        {/* Seed connection */}
+        {seedArtist && (
+          <div>
+            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Seed Connection</p>
+            <p className="text-sm text-foreground/80">
+              <span className="text-foreground">{seedArtist}</span>
+              {seedTitle && <span className="text-foreground/50"> — {seedTitle}</span>}
+            </p>
+          </div>
+        )}
+
+        {/* Mode context */}
+        <div>
+          <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Context</p>
+          <p className="text-sm text-foreground/80">{modeLabel()}</p>
+        </div>
+
+        {/* Taste signals */}
+        {(typeof track.taste_score === "number" || genre) && (
+          <div>
+            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Taste Signals</p>
+            <div className="flex flex-wrap gap-2">
+              {typeof track.taste_score === "number" && track.taste_score !== 0 && (
+                <span className={`text-xs font-mono px-2 py-0.5 rounded ${track.taste_score > 0 ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400"}`}>
+                  score {track.taste_score > 0 ? "+" : ""}{track.taste_score.toFixed(2)}
+                </span>
+              )}
+              {genre && (
+                <span className="text-xs px-2 py-0.5 rounded bg-surface-2 text-muted">{genre}</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Co-occurrence */}
+        {coOccurrence && coOccurrence > 1 && (
+          <div>
+            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Co-occurrence</p>
+            <p className="text-sm text-foreground/80">Appears in {coOccurrence} DJ sets with your seeds</p>
+          </div>
+        )}
       </div>
     </div>
   );

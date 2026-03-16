@@ -131,6 +131,8 @@ export async function GET() {
     // Fall back to episode track art only if seed has no cover art yet
     const cover_art_url = seed.cover_art_url || eps.find((e) => e.cover_art_url)?.cover_art_url || null;
 
+    const has_exact_match = eps.some((e) => e.match_type === "full");
+
     return {
       id: seed.id,
       artist: seed.artist,
@@ -142,6 +144,7 @@ export async function GET() {
       total_rejected: totalRejected,
       total,
       cover_art_url,
+      has_exact_match,
     };
   })
     .filter((s) => s.episodes.length > 0) // Only seeds with episodes
