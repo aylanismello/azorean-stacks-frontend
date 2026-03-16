@@ -201,8 +201,6 @@ function parseEpisodeMeta(html: string): { title: string | null; artwork: string
 }
 
 async function crawlEpisode(url: string, title: string, date: string | null, prefetchedArtwork?: string | null): Promise<boolean> {
-  await sleep(RATE_LIMIT_MS);
-
   const html = await fetchHtml(url);
   if (!html) {
     log("fail", `Could not fetch episode: ${url}`);
@@ -296,20 +294,33 @@ async function main() {
   let skipped = 0;
   let failed = 0;
 
-  for (const ep of allEpisodes) {
+  // Filter out already-crawled episodes
+  const toCrawl = allEpisodes.filter((ep) => {
     if (existingUrls.has(ep.url)) {
-      log("skip", `Already crawled: ${ep.title || ep.url}`);
       skipped++;
-      continue;
+      return false;
     }
+    return true;
+  });
 
-    const ok = await crawlEpisode(ep.url, ep.title, ep.date, ep.artwork);
-    if (ok) {
-      crawled++;
-      log("ok", `[${crawled}] ${ep.url}`);
-    } else {
-      failed++;
-    }
+  log("info", `Crawling ${toCrawl.length} new episodes with concurrency=10`);
+
+  // Process in concurrent batches of 10
+  const CRAWL_CONCURRENCY = 10;
+  for (let i = 0; i < toCrawl.length; i += CRAWL_CONCURRENCY) {
+    const batch = toCrawl.slice(i, i + CRAWL_CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map(async (ep) => {
+        const ok = await crawlEpisode(ep.url, ep.title, ep.date, ep.artwork);
+        if (ok) {
+          crawled++;
+          log("ok", `[${crawled}/${toCrawl.length}] ${ep.title || ep.url}`);
+        } else {
+          failed++;
+        }
+        return ok;
+      }),
+    );
   }
 
   console.log(`\n  ── Done ──`);
