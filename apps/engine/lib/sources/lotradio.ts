@@ -1,15 +1,15 @@
 /**
  * The Lot Radio discovery source.
  *
- * Two-phase approach:
- * 1. searchForSeed: Search by artist name at thelotradio.com/search to find
- *    episodes where the seed artist was the DJ/host.
- * 2. getTracklist: Fetch episode page HTML and parse tracklist from the DOM.
- * 3. getArtwork: Parse og:image meta tag from episode page HTML.
+ * Discovery is entirely tracklist-based: crawl-lotradio.ts indexes episode
+ * tracklists into our DB, and discover.ts/watcher.ts query the DB for
+ * episodes where metadata.tracklist contains the seed artist+title.
  *
- * For tracklist-based matching (finding episodes that PLAYED a seed track),
- * a separate crawl-lotradio.ts script indexes tracklists into our DB. At
- * discovery time, discover.ts queries the DB for those matches.
+ * searchForSeed is intentionally a no-op — the DB tracklist matching is done
+ * at the discover/watcher level, not here.
+ *
+ * getTracklist: Fetch episode page HTML and parse tracklist from the DOM.
+ * getArtwork: Parse og:image meta tag from episode page HTML.
  *
  * Episode URL pattern: https://www.thelotradio.com/shows/{show-slug}/{YYYY-MM-DD-HHMM}
  */
@@ -37,38 +37,6 @@ async function fetchHtml(url: string, timeoutMs = 15_000): Promise<string | null
     log("fail", `Lot Radio fetch error: ${url} — ${err instanceof Error ? err.message : err}`);
     return null;
   }
-}
-
-/**
- * Parse episode links from a Lot Radio search results page.
- * The search endpoint returns HTML with episode cards/links.
- */
-function parseSearchResults(html: string): SourceEpisode[] {
-  const $ = load(html);
-  const episodes: SourceEpisode[] = [];
-  const seen = new Set<string>();
-
-  // Look for links matching the episode URL pattern
-  $("a[href]").each((_, el) => {
-    const href = $(el).attr("href") || "";
-    // Episode URLs: /shows/{show-slug}/{YYYY-MM-DD-HHMM}
-    if (!/^\/shows\/[^/]+\/\d{4}-\d{2}-\d{2}/.test(href)) return;
-
-    const url = href.startsWith("http") ? href : `${LOT_BASE}${href}`;
-    if (seen.has(url)) return;
-    seen.add(url);
-
-    // Try to extract date from URL: YYYY-MM-DD
-    const dateMatch = href.match(/(\d{4}-\d{2}-\d{2})/);
-    const date = dateMatch ? dateMatch[1] : null;
-
-    // Try to get a title from nearby text or aria-label
-    const title = $(el).attr("aria-label") || $(el).text().trim() || href;
-
-    episodes.push({ url, title, date });
-  });
-
-  return episodes;
 }
 
 /**
@@ -139,17 +107,10 @@ function parseArtwork(html: string): string | null {
 export const lotRadioSource: DiscoverySource = {
   name: "lotradio",
 
-  async searchForSeed(artist: string, title: string): Promise<SourceEpisode[]> {
-    // Search by artist name — finds episodes where the artist was the DJ/host
-    const searchUrl = `${LOT_BASE}/search?q=${encodeURIComponent(artist)}&within=sessions`;
-    log("info", `Lot Radio search: "${artist}" → ${searchUrl}`);
-
-    const html = await fetchHtml(searchUrl);
-    if (!html) return [];
-
-    const episodes = parseSearchResults(html);
-    log("ok", `Lot Radio search returned ${episodes.length} episodes for "${artist}"`);
-    return episodes;
+  async searchForSeed(_artist: string, _title: string): Promise<SourceEpisode[]> {
+    // Lot Radio discovery uses DB tracklist matching (done in discover.ts/watcher.ts),
+    // not web search. The actual matching happens against pre-crawled episode metadata.
+    return [];
   },
 
   async getTracklist(episodeUrl: string): Promise<SourceTrack[]> {
