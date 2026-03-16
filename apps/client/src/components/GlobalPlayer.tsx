@@ -22,7 +22,7 @@ function generateGradient(artist: string, title: string): string {
 }
 
 export function GlobalPlayer() {
-  const { currentTrack, playing, loading, progress, duration, source, noSource, togglePlayPause, seek, stop } = useGlobalPlayer();
+  const { currentTrack, playing, loading, progress, duration, source, noSource, togglePlayPause, seek, stop, playbackOrigin } = useGlobalPlayer();
   const router = useRouter();
   const progressRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -96,10 +96,14 @@ export function GlobalPlayer() {
 
         {/* Controls row */}
         <div className="flex items-center gap-3">
-        {/* Album art / gradient — click to navigate to playing track */}
+        {/* Album art / gradient — click to return to where playback started */}
         <button
           onClick={() => {
-            if (currentTrack.episodeId) {
+            // Navigate back to the origin URL where the user started playing
+            // This preserves FYP, seed stack, genre, or episode context
+            if (playbackOrigin) {
+              router.push(playbackOrigin);
+            } else if (currentTrack.episodeId) {
               const params = new URLSearchParams();
               params.set("episode_id", currentTrack.episodeId);
               if (currentTrack.episodeTitle) params.set("episode_title", currentTrack.episodeTitle);
