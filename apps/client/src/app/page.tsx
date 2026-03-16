@@ -100,6 +100,9 @@ function StackPageContent() {
 
   // Track whether we've already reconciled player state after a fetch
   const reconciledTrackId = useRef<string | null>(null);
+  // Prevent reconciliation from firing on navigation to a new stack
+  const skipReconcileRef = useRef(false);
+  const stackIdentityRef = useRef<string>("");
 
   // Position index into the tracks array (used when we have an episode context)
   const [episodePos, setEpisodePos] = useState(0);
@@ -230,6 +233,16 @@ function StackPageContent() {
     recentApprovals.current = [];
   }, [episodeId, stackSource, genreFilter, seedFilter]);
 
+  // Track stack identity to skip reconciliation when navigating to a different stack
+  const stackIdentity = episodeId || `${stackSource}-${genreFilter}-${seedFilter}`;
+  useEffect(() => {
+    if (stackIdentityRef.current !== stackIdentity) {
+      stackIdentityRef.current = stackIdentity;
+      reconciledTrackId.current = null;
+      skipReconcileRef.current = true;
+    }
+  }, [stackIdentity]);
+
   // Reconcile tracks with globalPlayer.currentTrack after fetch completes.
   // When re-mounting (e.g. navigating back to Playing tab), fetchTracks gets fresh
   // data but globalPlayer still holds the previously-playing track. This syncs them.
@@ -264,6 +277,10 @@ function StackPageContent() {
       }
 
       // Not in list — prepend a synthetic track from player state
+      // Guard: in seed mode, only prepend if the player track is from this seed context.
+      // If it's not in the seed-filtered list, it belongs to a different stack.
+      if (isSeedMode) return prev;
+
       const synthetic: Track = {
         id: playerTrack.id,
         artist: playerTrack.artist,
@@ -279,6 +296,7 @@ function StackPageContent() {
 
     setSessionTracks((prev) => {
       if (prev.some((track) => track.id === playerTrack.id)) return prev;
+      if (isSeedMode) return prev;
 
       const synthetic: Track = {
         id: playerTrack.id,
@@ -298,13 +316,17 @@ function StackPageContent() {
     if (!episodeId && !hasEpisodeTracks) {
       userHasInteracted.current = true;
     }
-  }, [globalPlayer.currentTrack, episodeId, hasEpisodeTracks]);
+  }, [globalPlayer.currentTrack, episodeId, hasEpisodeTracks, isSeedMode]);
 
   // Fire reconciliation when tracks finish loading and player has a current track
   const playerTrackId = globalPlayer.currentTrack?.id ?? null;
   useEffect(() => {
     if (loading) return;
     if (!playerTrackId) return;
+    if (skipReconcileRef.current) {
+      skipReconcileRef.current = false;
+      return;
+    }
     reconcilePlayerWithTracks();
   }, [loading, playerTrackId, reconcilePlayerWithTracks]);
 
