@@ -90,6 +90,11 @@ function StackPageContent() {
   const [advancingEpisode, setAdvancingEpisode] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
 
+  // Session-level rejection/approval momentum (not persisted to DB)
+  const rejectionCounts = useRef<Map<string, number>>(new Map()); // episode_id → reject count
+  const seedRejections = useRef<Map<string, number>>(new Map());  // seed_artist → reject count
+  const recentApprovals = useRef<Array<{ genres: string[]; seedArtist: string | null }>>([]); // last 5
+
   // Don't auto-play until the user has interacted (vote, skip, click track, etc.)
   const userHasInteracted = useRef(false);
 
@@ -114,6 +119,47 @@ function StackPageContent() {
     : tracks[0] ?? null;
 
   const lastEpisodeIdRef = useRef<string | null>(episodeId);
+
+  // Push tracks from heavily-rejected episodes/seeds to the back of the queue
+  const reorderByMomentum = useCallback((trackList: Track[]): Track[] => {
+    const normal: Track[] = [];
+    const deprioritized: Track[] = [];
+    for (const track of trackList) {
+      const epId = track.episode_id || null;
+      const seedArtist = (track.metadata["seed_artist"] as string) || null;
+      const epCount = epId ? (rejectionCounts.current.get(epId) ?? 0) : 0;
+      const seedCount = seedArtist ? (seedRejections.current.get(seedArtist) ?? 0) : 0;
+      if (epCount >= 3 || seedCount >= 4) deprioritized.push(track);
+      else normal.push(track);
+    }
+    return [...normal, ...deprioritized];
+  }, []);
+
+  // Promote tracks matching recent approval genre/seed patterns to the front
+  const boostByChain = useCallback((trackList: Track[]): Track[] => {
+    if (recentApprovals.current.length < 2) return trackList;
+    const genreCounts = new Map<string, number>();
+    const seedCounts = new Map<string, number>();
+    for (const a of recentApprovals.current) {
+      for (const g of a.genres) genreCounts.set(g, (genreCounts.get(g) ?? 0) + 1);
+      if (a.seedArtist) seedCounts.set(a.seedArtist, (seedCounts.get(a.seedArtist) ?? 0) + 1);
+    }
+    const boostedGenres = new Set(Array.from(genreCounts.entries()).filter(([, c]) => c >= 2).map(([g]) => g));
+    const boostedSeeds = new Set(Array.from(seedCounts.entries()).filter(([, c]) => c >= 2).map(([s]) => s));
+    if (boostedGenres.size === 0 && boostedSeeds.size === 0) return trackList;
+    const front: Track[] = [];
+    const rest: Track[] = [];
+    for (const track of trackList) {
+      const genres = (track.metadata["genres"] as string[]) || [];
+      const seedArtist = (track.metadata["seed_artist"] as string) || null;
+      if (genres.some((g) => boostedGenres.has(g)) || (seedArtist && boostedSeeds.has(seedArtist))) {
+        front.push(track);
+      } else {
+        rest.push(track);
+      }
+    }
+    return [...front, ...rest];
+  }, []);
 
   const buildUrl = useCallback((extra?: string) => {
     // Episode mode: fetch ALL tracks in episode order (not just pending)
@@ -146,7 +192,12 @@ function StackPageContent() {
       const res = await fetch(buildUrl());
       if (!res.ok) throw new Error(`Failed to load tracks (${res.status})`);
       const data = await res.json();
-      const newTracks: Track[] = data.tracks || [];
+      let newTracks: Track[] = data.tracks || [];
+      // Client-side reordering in taste/genre/seed modes only
+      if (!episodeId && isTasteMode) {
+        newTracks = reorderByMomentum(newTracks);
+        newTracks = boostByChain(newTracks);
+      }
       setTracks(newTracks);
       setSessionTracks((prev) =>
         episodeId || !isTasteMode ? newTracks : mergeTrackSession(prev, newTracks)
@@ -166,7 +217,7 @@ function StackPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [buildUrl, episodeId]);
+  }, [buildUrl, episodeId, isTasteMode, reorderByMomentum, boostByChain]);
 
   useEffect(() => {
     fetchTracks();
@@ -174,6 +225,9 @@ function StackPageContent() {
 
   useEffect(() => {
     setSessionTracks([]);
+    rejectionCounts.current = new Map();
+    seedRejections.current = new Map();
+    recentApprovals.current = [];
   }, [episodeId, stackSource, genreFilter, seedFilter]);
 
   // Reconcile tracks with globalPlayer.currentTrack after fetch completes.
@@ -360,12 +414,32 @@ function StackPageContent() {
           return prev;
         });
       } else {
-        // All-pending mode: remove voted track, refetch if running low
+        // All-pending mode: update momentum refs then remove voted track + reorder
+        if (isTasteMode) {
+          const votedTrack = tracks.find((t) => t.id === id);
+          if (votedTrack) {
+            if (status === "rejected") {
+              const epId = votedTrack.episode_id;
+              const seedArtist = votedTrack.metadata["seed_artist"] as string | undefined;
+              if (epId) rejectionCounts.current.set(epId, (rejectionCounts.current.get(epId) ?? 0) + 1);
+              if (seedArtist) seedRejections.current.set(seedArtist, (seedRejections.current.get(seedArtist) ?? 0) + 1);
+            } else if (status === "approved") {
+              const genres = (votedTrack.metadata["genres"] as string[]) || [];
+              const seedArtist = (votedTrack.metadata["seed_artist"] as string) || null;
+              recentApprovals.current = [{ genres, seedArtist }, ...recentApprovals.current].slice(0, 5);
+            }
+          }
+        }
         setTracks((prev) => {
           const remaining = prev.filter((t) => t.id !== id);
-          if (remaining.length <= 3) {
+          let ordered = remaining;
+          if (isTasteMode) {
+            ordered = reorderByMomentum(ordered);
+            ordered = boostByChain(ordered);
+          }
+          if (ordered.length <= 3) {
             const votedId = id;
-            const existingIds = new Set(remaining.map((t) => t.id));
+            const existingIds = new Set(ordered.map((t) => t.id));
             fetch(buildUrl())
               .then((r) => r.ok ? r.json() : null)
               .then((data) => {
@@ -377,14 +451,19 @@ function StackPageContent() {
                   setTracks((curr) => {
                     const currIds = new Set(curr.map((t: Track) => t.id));
                     const fresh = newTracks.filter((t: Track) => !currIds.has(t.id));
-                    return [...curr, ...fresh];
+                    let combined = [...curr, ...fresh];
+                    if (isTasteMode) {
+                      combined = reorderByMomentum(combined);
+                      combined = boostByChain(combined);
+                    }
+                    return combined;
                   });
                   setSessionTracks((curr) => mergeTrackSession(curr, newTracks));
                 }
                 setTotal(data.total || 0);
               });
           }
-          return remaining;
+          return ordered;
         });
         setTotal((prev) => prev - 1);
       }
@@ -604,7 +683,12 @@ function StackPageContent() {
               setTracks((curr) => {
                 const currIds = new Set(curr.map((t: Track) => t.id));
                 const fresh = newTracks.filter((t: Track) => !currIds.has(t.id));
-                return [...curr, ...fresh];
+                let combined = [...curr, ...fresh];
+                if (isTasteMode) {
+                  combined = reorderByMomentum(combined);
+                  combined = boostByChain(combined);
+                }
+                return combined;
               });
               setSessionTracks((curr) => mergeTrackSession(curr, newTracks));
             }
