@@ -22,8 +22,16 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 const db = getSupabase();
 const STATUS_FILE = `${process.env.HOME}/.openclaw/data/azorean-engine-status.json`;
 
-const ENRICH_CONCURRENCY = 5;
-const NTS_MAX_EPISODES = 10;
+// ─── CONCURRENCY LIMITS ─────────────────────────────────────
+// Tuned for M4 Mac Mini — all bottlenecks are network I/O
+const CONCURRENCY = {
+  enrich: 8,          // Spotify + YouTube lookups per batch
+  download: 3,        // yt-dlp audio downloads per batch
+  repair: 5,          // Background track repair tasks
+  superLike: 2,       // Simultaneous super-like downloads
+  ntsMaxEpisodes: 10, // Max NTS episodes to check per seed
+} as const;
+
 const GARBAGE_TITLES = new Set(["unknown track", "untitled", "id", "?", "unknown", ""]);
 
 // ─── STATUS TRACKING ────────────────────────────────────────
@@ -102,7 +110,7 @@ async function processSeed(seedId: string) {
   let tracksAdded = 0;
   let episodeProcessed: string | null = null;
 
-  for (const ep of episodes.slice(0, NTS_MAX_EPISODES)) {
+  for (const ep of episodes.slice(0, CONCURRENCY.ntsMaxEpisodes)) {
     await sleep(1000); // NTS rate limit
 
     const episodeUrl = `https://www.nts.live${ep.path}`;
@@ -226,8 +234,8 @@ async function processSeed(seedId: string) {
       let enriched = 0;
       let enrichFailed = 0;
 
-      for (let i = 0; i < insertedTracks.length; i += ENRICH_CONCURRENCY) {
-        const batch = insertedTracks.slice(i, i + ENRICH_CONCURRENCY);
+      for (let i = 0; i < insertedTracks.length; i += CONCURRENCY.enrich) {
+        const batch = insertedTracks.slice(i, i + CONCURRENCY.enrich);
         const results = await Promise.allSettled(batch.map(enrichTrack));
         for (const r of results) {
           if (r.status === "fulfilled" && r.value) enriched++;
@@ -251,14 +259,14 @@ async function processSeed(seedId: string) {
       if (downloadable?.length) {
         log("info", `Downloading audio for ${downloadable.length} tracks...`);
         let downloaded = 0;
-        for (const track of downloadable) {
-          try {
+        for (let i = 0; i < downloadable.length; i += CONCURRENCY.download) {
+          const batch = downloadable.slice(i, i + CONCURRENCY.download);
+          const results = await Promise.allSettled(batch.map(async (track) => {
             const ok = await downloadTrack(track);
-            if (ok) downloaded++;
             log(ok ? "ok" : "fail", `DL: ${track.artist} – ${track.title}`);
-          } catch (err) {
-            log("fail", `DL error: ${track.artist} – ${track.title}: ${err instanceof Error ? err.message : err}`);
-          }
+            return ok;
+          }));
+          downloaded += results.filter(r => r.status === "fulfilled" && r.value).length;
         }
         log("info", `Downloaded ${downloaded}/${downloadable.length} tracks`);
       }
@@ -369,11 +377,10 @@ async function enqueueBacklogTracks() {
   log("info", `Recovered ${incomplete.length} incomplete track(s) for enrich/download repair`);
 }
 
-async function processTrack(trackId: string) {
-  const { data: track, error } = await db.from("tracks")
-    .select("*")
-    .eq("id", trackId)
-    .single();
+async function processTrack(trackId: string, prefetched?: any) {
+  const { data: track, error } = prefetched
+    ? { data: prefetched, error: null }
+    : await db.from("tracks").select("*").eq("id", trackId).single();
 
   if (error || !track) {
     log("fail", `Could not read track ${trackId}: ${error?.message ?? "not found"}`);
@@ -587,21 +594,24 @@ async function processSuperLikeQueue() {
   while (superLikeQueue.length > 0) {
     lastEventAt = new Date().toISOString();
     updateStatusFile();
-    const trackId = superLikeQueue.shift()!;
-    try {
-      await processSuperLike(trackId);
-    } catch (err) {
-      log("fail", `Super Like error for track ${trackId}: ${err instanceof Error ? err.message : err}`);
-      await logEngineEvent("error", "failed", {
-        message: `Super Like error: ${err instanceof Error ? err.message : err}`,
-        metadata: { track_id: trackId },
-      });
-    }
+    const batch = superLikeQueue.splice(0, CONCURRENCY.superLike);
+    await Promise.allSettled(
+      batch.map(async (trackId) => {
+        try {
+          await processSuperLike(trackId);
+        } catch (err) {
+          log("fail", `Super Like error for track ${trackId}: ${err instanceof Error ? err.message : err}`);
+          await logEngineEvent("error", "failed", {
+            message: `Super Like error: ${err instanceof Error ? err.message : err}`,
+            metadata: { track_id: trackId },
+          });
+        }
+      }),
+    );
   }
   superLikeProcessing = false;
 }
 
-const REPAIR_CONCURRENCY = 3;
 let repairProcessing = false;
 async function processRepairQueue() {
   if (repairProcessing) return;
@@ -609,11 +619,15 @@ async function processRepairQueue() {
   while (trackQueue.length > 0) {
     lastEventAt = new Date().toISOString();
     updateStatusFile();
-    const batch = trackQueue.splice(0, REPAIR_CONCURRENCY);
+    const batchIds = trackQueue.splice(0, CONCURRENCY.repair);
+    const { data: batchTracks } = await db.from("tracks")
+      .select("*")
+      .in("id", batchIds);
+    const trackMap = new Map((batchTracks || []).map((t: any) => [t.id, t]));
     await Promise.allSettled(
-      batch.map(async (trackId) => {
+      batchIds.map(async (trackId) => {
         try {
-          await processTrack(trackId);
+          await processTrack(trackId, trackMap.get(trackId));
         } catch (err) {
           log("fail", `Repair error for track ${trackId}: ${err instanceof Error ? err.message : err}`);
         }
