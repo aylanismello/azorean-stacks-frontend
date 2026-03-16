@@ -13,6 +13,7 @@ export async function GET(req: NextRequest) {
   const source = searchParams.get("source");
   const episodeId = searchParams.get("episode_id");
   const orderBy = searchParams.get("order_by"); // "taste_score" or default
+  const hideLow = searchParams.get("hide_low") === "true";
   const genre = searchParams.get("genre");
   const seedId = searchParams.get("seed_id");
   const seedArtist = searchParams.get("seed_artist");
@@ -159,6 +160,9 @@ export async function GET(req: NextRequest) {
   }
   if (seedArtist) {
     query = query.contains("metadata", { seed_artist: seedArtist });
+  }
+  if (hideLow && orderBy === "taste_score") {
+    query = query.gt("taste_score", -0.3);
   }
 
   const { data, error, count } = await query;

@@ -78,6 +78,12 @@ function StackPageContent() {
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [hideLowScored, setHideLowScored] = useState(false);
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem("stacks-hide-low-scored");
+    if (stored === "1") setHideLowScored(true);
+  }, []);
   const [skippingEpisode, setSkippingEpisode] = useState(false);
   const [tracklistOpen, setTracklistOpen] = useState(false);
   const [voteCount, setVoteCount] = useState(0);
@@ -120,6 +126,9 @@ function StackPageContent() {
     if (isTasteMode) {
       url += `&order_by=taste_score`;
     }
+    if (isTasteMode && hideLowScored) {
+      url += `&hide_low=true`;
+    }
     if (genreFilter) {
       url += `&genre=${encodeURIComponent(genreFilter)}`;
     }
@@ -128,7 +137,7 @@ function StackPageContent() {
     }
     if (extra) url += extra;
     return url;
-  }, [episodeId, isTasteMode, genreFilter, seedFilter]);
+  }, [episodeId, isTasteMode, hideLowScored, genreFilter, seedFilter]);
 
   const fetchTracks = useCallback(async () => {
     reconciledTrackId.current = null;

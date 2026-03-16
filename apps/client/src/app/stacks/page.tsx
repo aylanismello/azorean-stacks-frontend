@@ -49,8 +49,12 @@ export default function StacksPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [trackStats, setTrackStats] = useState<TrackStats | null>(null);
-  const [autoSkipping, setAutoSkipping] = useState(false);
-  const [autoSkipResult, setAutoSkipResult] = useState<string | null>(null);
+  const [hideLow, setHideLow] = useState(false);
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem("stacks-hide-low-scored");
+    if (stored === "1") setHideLow(true);
+  }, []);
 
   const fetchData = () => {
     Promise.all([
@@ -82,28 +86,6 @@ export default function StacksPage() {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const handleAutoSkip = async () => {
-    if (autoSkipping) return;
-    setAutoSkipping(true);
-    setAutoSkipResult(null);
-    try {
-      const res = await fetch("/api/tracks/auto-skip", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Auto-skip failed");
-      setAutoSkipResult(`Skipped ${data.skipped} low-scored tracks`);
-      // Refresh stats after auto-skip
-      const statsRes = await fetch("/api/tracks/stats");
-      if (statsRes.ok) {
-        const stats = await statsRes.json();
-        if (!stats.error) setTrackStats(stats);
-      }
-    } catch (err) {
-      setAutoSkipResult(err instanceof Error ? err.message : "Auto-skip failed");
-    } finally {
-      setAutoSkipping(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -165,35 +147,28 @@ export default function StacksPage() {
         </div>
       </button>
 
-      {/* ─── AUTO-SKIP + FEEDBACK ─────────────── */}
-      <div className="flex items-center gap-3 mb-8 px-1">
+      {/* ─── HIDE LOW-SCORED TOGGLE ───────────── */}
+      <div className="flex items-center gap-2.5 mb-8 px-1">
         <button
-          onClick={handleAutoSkip}
-          disabled={autoSkipping}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/5 hover:bg-red-500/10 border border-foreground/10 hover:border-red-400/30 text-xs text-foreground/50 hover:text-red-400 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={() => {
+            const next = !hideLow;
+            setHideLow(next);
+            sessionStorage.setItem("stacks-hide-low-scored", next ? "1" : "0");
+          }}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+            hideLow ? "bg-accent" : "bg-foreground/20"
+          }`}
         >
-          {autoSkipping ? (
-            <>
-              <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
-              </svg>
-              Skipping...
-            </>
-          ) : (
-            <>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="17 1 21 5 17 9" />
-                <path d="M3 11V9a4 4 0 0 1 4-4h14" />
-                <polyline points="7 23 3 19 7 15" />
-                <path d="M21 13v2a4 4 0 0 1-4 4H3" />
-              </svg>
-              Auto-skip low-scored tracks
-            </>
-          )}
+          <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+            hideLow ? "translate-x-4.5" : "translate-x-0.5"
+          }`} />
         </button>
-        {autoSkipResult && (
-          <span className="text-xs text-foreground/40">{autoSkipResult}</span>
-        )}
+        <span className="text-xs text-foreground/50">
+          Hide low-scored
+          {hideLow && trackStats && trackStats.likely_skip > 0 && (
+            <span className="ml-1 text-foreground/30">(hiding {trackStats.likely_skip})</span>
+          )}
+        </span>
       </div>
 
       {/* ─── GENRES ──────────────────────────── */}
