@@ -201,39 +201,34 @@ async function discoverFromSource(
   let sourceEpisodes: Array<{ url: string; title: string; date: string | null }> = [];
 
   if (sourceName === "lotradio") {
-    // Phase 1: search by artist name (finds episodes where artist was DJ/host)
-    try {
-      const searchResults = await source.searchForSeed(seedArtist, seedTitle);
-      sourceEpisodes = searchResults.map((e) => ({ url: e.url, title: e.title, date: e.date }));
-    } catch (err) {
-      log("fail", `Lot Radio search error: ${err instanceof Error ? err.message : err}`);
-    }
-
-    // Phase 2: query our local DB for episodes where the crawled tracklist mentions the seed
+    // Lot Radio: tracklist matching ONLY — find episodes where a DJ played the seed track
+    // No artist-as-host search — that's not the thesis
     try {
       const seedArtistLower = seedArtist.toLowerCase().trim();
       const seedTitleLower = seedTitle.toLowerCase().trim();
       const { data: dbEpisodes } = await db
         .from("episodes")
-        .select("url, title, aired_date")
+        .select("url, title, aired_date, metadata")
         .eq("source", "lotradio")
         .not("metadata", "is", null);
 
       if (dbEpisodes) {
         for (const ep of dbEpisodes as any[]) {
           const tracklist: Array<{ artist: string; title: string }> = ep.metadata?.tracklist || [];
+          if (tracklist.length === 0) continue;
+          // Match: same artist AND same title (the seed track was played in this episode)
           const hasMatch = tracklist.some((t) =>
-            t.artist?.toLowerCase().trim() === seedArtistLower ||
-            (t.artist?.toLowerCase().trim() === seedArtistLower &&
-              t.title?.toLowerCase().trim() === seedTitleLower)
+            t.artist?.toLowerCase().trim() === seedArtistLower &&
+            t.title?.toLowerCase().trim() === seedTitleLower
           );
-          if (hasMatch && !sourceEpisodes.some((e) => e.url === ep.url)) {
+          if (hasMatch) {
             sourceEpisodes.push({ url: ep.url, title: ep.title || ep.url, date: ep.aired_date || null });
           }
         }
       }
+      log("info", `Lot Radio: checked ${dbEpisodes?.length || 0} episodes, found ${sourceEpisodes.length} tracklist matches for "${seedArtist} - ${seedTitle}"`);
     } catch (err) {
-      log("fail", `Lot Radio DB tracklist search error: ${err instanceof Error ? err.message : err}`);
+      log("fail", `Lot Radio tracklist search error: ${err instanceof Error ? err.message : err}`);
     }
   } else {
     // NTS and other sources: use searchForSeed directly

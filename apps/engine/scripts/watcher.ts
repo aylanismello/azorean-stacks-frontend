@@ -91,36 +91,32 @@ async function processSeed(seedId: string) {
     let sourceEpisodes: Array<{ url: string; title: string; date: string | null }> = [];
 
     if (source.name === "lotradio") {
-      // Search by artist (DJ/host matches)
-      try {
-        const results = await source.searchForSeed(seed.artist, seed.title);
-        sourceEpisodes = results.map((e) => ({ url: e.url, title: e.title, date: e.date }));
-      } catch (err) {
-        log("fail", `Lot Radio search error for ${seedLabel}: ${err instanceof Error ? err.message : err}`);
-      }
-
-      // Also query DB for crawled episodes where tracklist mentions the seed artist
+      // Lot Radio: tracklist matching ONLY — find episodes where a DJ played the seed track
       try {
         const seedArtistLower = seed.artist.toLowerCase().trim();
+        const seedTitleLower = seed.title.toLowerCase().trim();
         const { data: dbEpisodes } = await db
           .from("episodes")
-          .select("url, title, aired_date")
+          .select("url, title, aired_date, metadata")
           .eq("source", "lotradio")
           .not("metadata", "is", null);
 
         if (dbEpisodes) {
           for (const ep of dbEpisodes as any[]) {
             const tracklist: Array<{ artist: string; title: string }> = ep.metadata?.tracklist || [];
+            if (tracklist.length === 0) continue;
             const hasMatch = tracklist.some((t) =>
-              t.artist?.toLowerCase().trim() === seedArtistLower
+              t.artist?.toLowerCase().trim() === seedArtistLower &&
+              t.title?.toLowerCase().trim() === seedTitleLower
             );
-            if (hasMatch && !sourceEpisodes.some((e) => e.url === ep.url)) {
+            if (hasMatch) {
               sourceEpisodes.push({ url: ep.url, title: ep.title || ep.url, date: ep.aired_date || null });
             }
           }
         }
+        log("info", `Lot Radio: ${sourceEpisodes.length} tracklist matches for ${seedLabel}`);
       } catch (err) {
-        log("fail", `Lot Radio DB search error: ${err instanceof Error ? err.message : err}`);
+        log("fail", `Lot Radio tracklist search error for ${seedLabel}: ${err instanceof Error ? err.message : err}`);
       }
     } else {
       try {
