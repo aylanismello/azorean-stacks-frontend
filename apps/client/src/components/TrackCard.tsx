@@ -841,6 +841,18 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
           <span className="px-2.5 py-1 bg-surface-2 rounded-lg text-xs text-muted">
             {sourceLabel(track.source)}
           </span>
+          {typeof track.taste_score === "number" && track.taste_score !== 0 && (
+            <span
+              className={`px-2 py-1 rounded-lg text-xs font-mono font-semibold ${
+                track.taste_score > 0
+                  ? "bg-green-500/15 text-green-400"
+                  : "bg-red-500/15 text-red-400"
+              }`}
+              title="Taste score"
+            >
+              {track.taste_score > 0 ? "+" : ""}{track.taste_score.toFixed(2)}
+            </span>
+          )}
           {meta.genre && (
             <span className="px-2.5 py-1 bg-surface-2 rounded-lg text-xs text-muted">
               {meta.genre}

@@ -15,7 +15,7 @@ async function main() {
   // Fetch all voted tracks
   const { data: tracks, error } = await db
     .from("tracks")
-    .select("artist, title, status, metadata")
+    .select("id, artist, title, status, metadata, episode_id, seed_track_id")
     .in("status", ["approved", "rejected"]);
 
   if (error) {
@@ -46,7 +46,7 @@ async function main() {
   for (const track of tracks) {
     const approved = track.status === "approved";
 
-    // Artist signal
+    // Artist signal (improved: stronger negative for heavy rejecters)
     if (track.artist) {
       addSignal("artist", track.artist, approved);
     }
@@ -60,12 +60,136 @@ async function main() {
       }
     }
 
-    if (typeof meta.album === "string") {
-      addSignal("album", meta.album, approved);
+    // NOTE: album signal removed — too sparse, mostly noise
+  }
+
+  // ─── SEED AFFINITY SIGNALS ────────────────────────────────
+  // Seeds with high approval rate → boost tracks from those seeds
+  console.log(`\nComputing seed affinity signals...`);
+
+  const { data: seeds } = await db
+    .from("seeds")
+    .select("id, artist, title")
+    .eq("active", true);
+
+  if (seeds && seeds.length > 0) {
+    // Get per-seed track stats
+    const tracksBySeed = new Map<string, { approvals: number; rejections: number }>();
+
+    for (const track of tracks) {
+      const meta = (track.metadata || {}) as Record<string, unknown>;
+      // Tracks can be linked to seeds via metadata.seed_id or seed_track_id
+      const seedId = (meta.seed_id as string) || null;
+      if (!seedId) continue;
+
+      const acc = tracksBySeed.get(seedId) || { approvals: 0, rejections: 0 };
+      if (track.status === "approved") acc.approvals++;
+      else acc.rejections++;
+      tracksBySeed.set(seedId, acc);
+    }
+
+    for (const seed of seeds) {
+      const acc = tracksBySeed.get(seed.id);
+      if (!acc) continue;
+      const total = acc.approvals + acc.rejections;
+      if (total < 3) continue; // need enough data
+
+      const rate = acc.approvals / total;
+      // >50% approval → positive boost, <20% → negative signal
+      if (rate > 0.5 || rate < 0.2) {
+        addSignal("seed_affinity", seed.id, rate > 0.5);
+      }
+    }
+  }
+
+  // ─── CURATOR QUALITY SIGNALS ──────────────────────────────
+  // NTS show curators with consistent approval rates boost their episode tracks
+  console.log(`Computing curator quality signals...`);
+
+  const { data: curators } = await db
+    .from("curators")
+    .select("id, slug");
+
+  if (curators && curators.length > 0) {
+    // Get all episodes for each curator
+    const { data: curatorEpisodes } = await db
+      .from("episodes")
+      .select("id, curator_id")
+      .not("curator_id", "is", null);
+
+    if (curatorEpisodes && curatorEpisodes.length > 0) {
+      const episodesByCurator = new Map<string, string[]>();
+      for (const ep of curatorEpisodes) {
+        if (!ep.curator_id) continue;
+        const arr = episodesByCurator.get(ep.curator_id) || [];
+        arr.push(ep.id);
+        episodesByCurator.set(ep.curator_id, arr);
+      }
+
+      // Map episode_id → curator_id for O(1) lookup
+      const episodeToCurator = new Map<string, string>();
+      for (const ep of curatorEpisodes) {
+        if (ep.curator_id) episodeToCurator.set(ep.id, ep.curator_id);
+      }
+
+      // Accumulate approval stats per curator from voted tracks
+      const curatorStats = new Map<string, { approvals: number; rejections: number }>();
+      for (const track of tracks) {
+        if (!track.episode_id) continue;
+        const curatorId = episodeToCurator.get(track.episode_id);
+        if (!curatorId) continue;
+        const acc = curatorStats.get(curatorId) || { approvals: 0, rejections: 0 };
+        if (track.status === "approved") acc.approvals++;
+        else acc.rejections++;
+        curatorStats.set(curatorId, acc);
+      }
+
+      // Map curator id → slug for signal value
+      const curatorSlugMap = new Map(curators.map((c: any) => [c.id, c.slug]));
+
+      for (const [curatorId, acc] of curatorStats) {
+        const total = acc.approvals + acc.rejections;
+        if (total < 3) continue; // need enough data
+        const slug = curatorSlugMap.get(curatorId);
+        if (!slug) continue;
+        const approved = acc.approvals / total > 0.5;
+        addSignal("curator", slug, approved);
+      }
+    }
+  }
+
+  // ─── EPISODE DENSITY SIGNALS ──────────────────────────────
+  // Episodes with multiple approved tracks → boost remaining pending tracks
+  console.log(`Computing episode density signals...`);
+
+  const episodeApprovals = new Map<string, number>();
+  for (const track of tracks) {
+    if (track.status !== "approved" || !track.episode_id) continue;
+    episodeApprovals.set(track.episode_id, (episodeApprovals.get(track.episode_id) || 0) + 1);
+  }
+
+  for (const [episodeId, count] of episodeApprovals) {
+    if (count >= 2) {
+      // Multiple approved tracks from same episode → strong positive signal
+      addSignal("episode_density", episodeId, true);
     }
   }
 
   console.log(`Computed ${signals.size} unique signals`);
+
+  // ─── ARTIST NEGATIVE SIGNAL IMPROVEMENT ───────────────────
+  // Artists with >3 rejections and <25% approval get extra negative weight
+  // We do this by adding extra rejection entries to their signal accumulator
+  for (const [key, acc] of signals) {
+    if (!key.startsWith("artist::")) continue;
+    const total = acc.approvals + acc.rejections;
+    const rate = total > 0 ? acc.approvals / total : 0;
+    if (acc.rejections > 3 && rate < 0.25) {
+      // Add extra rejection weight — effectively doubles the negative signal
+      acc.rejections = Math.round(acc.rejections * 1.5);
+      signals.set(key, acc);
+    }
+  }
 
   // Upsert signals
   let upserted = 0;
@@ -118,16 +242,18 @@ async function main() {
   }
 
   // ─── SCORE PENDING TRACKS ─────────────────────────────────
-  // Compute taste_score for all pending tracks using the signals we just built.
-  // Score = weighted average of matching signal weights:
-  //   genre: 0.5, artist: 0.35, album: 0.15
+  // Updated weights:
+  //   genre: 0.30 (was 0.50)
+  //   artist: 0.25 (was 0.35)
+  //   seed_affinity: 0.20 (NEW)
+  //   curator: 0.15 (NEW)
+  //   episode_density: 0.10 (NEW)
+  //   album: removed
 
   console.log(`\n=== Scoring Pending Tracks ===`);
 
-  // Load all signals into a lookup map (weight dampened by sample count confidence)
-  // Uses Bayesian dampening: weight * samples / (samples + prior)
+  // Bayesian dampening: weight * samples / (samples + prior)
   // With prior=3: 1 sample → 25%, 3 → 50%, 6 → 67%, 10 → 77%, 20 → 87%
-  // This prevents single-vote genres from dominating the rankings.
   const CONFIDENCE_PRIOR = 3;
 
   const { data: allSignals } = await db
@@ -147,7 +273,7 @@ async function main() {
   while (true) {
     const { data: batch } = await db
       .from("tracks")
-      .select("id, artist, metadata")
+      .select("id, artist, metadata, episode_id")
       .eq("status", "pending")
       .range(page * 1000, (page + 1) * 1000 - 1);
     if (!batch || batch.length === 0) break;
@@ -157,6 +283,27 @@ async function main() {
   }
 
   console.log(`Scoring ${pending.length} pending tracks`);
+
+  // Build episode → curator lookup for pending tracks
+  const { data: epCuratorLinks } = await db
+    .from("episodes")
+    .select("id, curator_id")
+    .not("curator_id", "is", null);
+
+  const epToCuratorMap = new Map<string, string>();
+  if (epCuratorLinks) {
+    for (const ep of epCuratorLinks) {
+      if (ep.curator_id) epToCuratorMap.set(ep.id, ep.curator_id);
+    }
+  }
+
+  // Build curator id → slug map
+  const curatorIdToSlug = new Map<string, string>();
+  if (curators) {
+    for (const c of curators as any[]) {
+      curatorIdToSlug.set(c.id, c.slug);
+    }
+  }
 
   let scored = 0;
   let scoreErrors = 0;
@@ -168,14 +315,14 @@ async function main() {
     const meta = (track.metadata || {}) as Record<string, unknown>;
     const components: Array<{ weight: number; typeWeight: number }> = [];
 
-    // Artist signal
+    // Artist signal (0.25)
     const artistKey = `artist::${(track.artist || "").toLowerCase().trim()}`;
     const artistWeight = signalMap.get(artistKey);
     if (artistWeight !== undefined) {
-      components.push({ weight: artistWeight, typeWeight: 0.35 });
+      components.push({ weight: artistWeight, typeWeight: 0.25 });
     }
 
-    // Genre signals (average all matching genres, then apply type weight)
+    // Genre signals — average all matching genres, apply type weight (0.30)
     const genres = Array.isArray(meta.genres) ? meta.genres : [];
     const genreWeights: number[] = [];
     for (const g of genres) {
@@ -185,15 +332,40 @@ async function main() {
     }
     if (genreWeights.length > 0) {
       const avgGenre = genreWeights.reduce((a, b) => a + b, 0) / genreWeights.length;
-      components.push({ weight: avgGenre, typeWeight: 0.5 });
+      components.push({ weight: avgGenre, typeWeight: 0.30 });
     }
 
-    // Album signal
-    if (typeof meta.album === "string") {
-      const albumKey = `album::${meta.album.toLowerCase().trim()}`;
-      const albumWeight = signalMap.get(albumKey);
-      if (albumWeight !== undefined) {
-        components.push({ weight: albumWeight, typeWeight: 0.15 });
+    // Seed affinity signal (0.20)
+    const seedId = (meta.seed_id as string) || null;
+    if (seedId) {
+      const seedAffinityKey = `seed_affinity::${seedId.toLowerCase()}`;
+      const seedAffinityWeight = signalMap.get(seedAffinityKey);
+      if (seedAffinityWeight !== undefined) {
+        components.push({ weight: seedAffinityWeight, typeWeight: 0.20 });
+      }
+    }
+
+    // Curator signal (0.15)
+    if (track.episode_id) {
+      const curatorId = epToCuratorMap.get(track.episode_id);
+      if (curatorId) {
+        const slug = curatorIdToSlug.get(curatorId);
+        if (slug) {
+          const curatorKey = `curator::${slug.toLowerCase()}`;
+          const curatorWeight = signalMap.get(curatorKey);
+          if (curatorWeight !== undefined) {
+            components.push({ weight: curatorWeight, typeWeight: 0.15 });
+          }
+        }
+      }
+    }
+
+    // Episode density signal (0.10)
+    if (track.episode_id) {
+      const epDensityKey = `episode_density::${track.episode_id.toLowerCase()}`;
+      const epDensityWeight = signalMap.get(epDensityKey);
+      if (epDensityWeight !== undefined) {
+        components.push({ weight: epDensityWeight, typeWeight: 0.10 });
       }
     }
 
@@ -235,6 +407,77 @@ async function main() {
     else scoreDist.zero++;
   }
   console.log(`Distribution: +${scoreDist.positive} positive, ${scoreDist.zero} neutral, -${scoreDist.negative} negative`);
+
+  // ─── AUTO-SKIP STRONGLY NEGATIVE TRACKS ───────────────────
+  // Tracks with taste_score < -0.5 AND ≥4 negative signal matches → auto-skip
+  console.log(`\n=== Auto-skip Strongly Negative Tracks ===`);
+
+  const stronglyNegative = updates.filter((u) => u.taste_score < -0.5);
+  console.log(`Candidates with score < -0.5: ${stronglyNegative.length}`);
+
+  // For each strongly negative track, count how many negative signals match
+  const pendingById = new Map(pending.map((t) => [t.id, t]));
+  let autoSkipped = 0;
+  let autoSkipErrors = 0;
+
+  const skipCandidates: string[] = [];
+
+  for (const u of stronglyNegative) {
+    const track = pendingById.get(u.id);
+    if (!track) continue;
+
+    const meta = (track.metadata || {}) as Record<string, unknown>;
+    let negativeSignalCount = 0;
+
+    // Check artist signal
+    const artistKey = `artist::${(track.artist || "").toLowerCase().trim()}`;
+    const artistSig = signalMap.get(artistKey);
+    if (artistSig !== undefined && artistSig < 0) negativeSignalCount++;
+
+    // Check genre signals
+    const genres = Array.isArray(meta.genres) ? meta.genres : [];
+    for (const g of genres) {
+      if (typeof g !== "string") continue;
+      const w = signalMap.get(`genre::${g.toLowerCase().trim()}`);
+      if (w !== undefined && w < 0) negativeSignalCount++;
+    }
+
+    // Check curator signal
+    if (track.episode_id) {
+      const curatorId = epToCuratorMap.get(track.episode_id);
+      if (curatorId) {
+        const slug = curatorIdToSlug.get(curatorId);
+        if (slug) {
+          const cw = signalMap.get(`curator::${slug.toLowerCase()}`);
+          if (cw !== undefined && cw < 0) negativeSignalCount++;
+        }
+      }
+    }
+
+    if (negativeSignalCount >= 3) {
+      skipCandidates.push(u.id);
+    }
+  }
+
+  console.log(`Tracks to auto-skip (score < -0.5, ≥3 negative signals): ${skipCandidates.length}`);
+
+  // Update in batches of 100
+  for (let i = 0; i < skipCandidates.length; i += 100) {
+    const batch = skipCandidates.slice(i, i + 100);
+    const { error: skipErr } = await db
+      .from("tracks")
+      .update({ status: "skipped", voted_at: new Date().toISOString() })
+      .in("id", batch);
+
+    if (skipErr) {
+      console.error(`  Auto-skip batch error: ${skipErr.message}`);
+      autoSkipErrors += batch.length;
+    } else {
+      autoSkipped += batch.length;
+    }
+  }
+
+  console.log(`Auto-skipped: ${autoSkipped}, Errors: ${autoSkipErrors}`);
   console.log("");
 }
 

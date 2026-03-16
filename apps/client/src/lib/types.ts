@@ -35,6 +35,9 @@ export interface Track {
   // Seed status — null if not seeded, seed UUID if this track is a seed
   seed_id?: string | null;
 
+  // Taste score computed by update-signals.ts (-1..1, 0 = unscored)
+  taste_score?: number | null;
+
   // Joined from user_tracks when querying for a specific user
   user_track?: UserTrack | null;
 

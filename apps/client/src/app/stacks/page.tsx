@@ -34,6 +34,13 @@ function hueFromString(str: string): number {
   return Math.abs(hash % 360);
 }
 
+interface TrackStats {
+  recommended: number;
+  unscored: number;
+  likely_skip: number;
+  total: number;
+}
+
 export default function StacksPage() {
   const router = useRouter();
   const [stacks, setStacks] = useState<StackSeed[]>([]);
@@ -41,8 +48,11 @@ export default function StacksPage() {
   const [totalPending, setTotalPending] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [trackStats, setTrackStats] = useState<TrackStats | null>(null);
+  const [autoSkipping, setAutoSkipping] = useState(false);
+  const [autoSkipResult, setAutoSkipResult] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchData = () => {
     Promise.all([
       fetch("/api/stacks").then((r) => {
         if (!r.ok) throw new Error(`Stacks: ${r.status}`);
@@ -52,16 +62,48 @@ export default function StacksPage() {
         if (!r.ok) throw new Error(`Genres: ${r.status}`);
         return r.json();
       }),
+      fetch("/api/tracks/stats").then((r) => {
+        if (!r.ok) return null;
+        return r.json();
+      }),
     ])
-      .then(([stackData, genreData]) => {
+      .then(([stackData, genreData, statsData]) => {
         setStacks(stackData.stacks || []);
         setTotalPending(stackData.total_pending || 0);
         setGenres(genreData.genres || []);
+        if (statsData && !statsData.error) setTrackStats(statsData);
         setError(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleAutoSkip = async () => {
+    if (autoSkipping) return;
+    setAutoSkipping(true);
+    setAutoSkipResult(null);
+    try {
+      const res = await fetch("/api/tracks/auto-skip", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Auto-skip failed");
+      setAutoSkipResult(`Skipped ${data.skipped} low-scored tracks`);
+      // Refresh stats after auto-skip
+      const statsRes = await fetch("/api/tracks/stats");
+      if (statsRes.ok) {
+        const stats = await statsRes.json();
+        if (!stats.error) setTrackStats(stats);
+      }
+    } catch (err) {
+      setAutoSkipResult(err instanceof Error ? err.message : "Auto-skip failed");
+    } finally {
+      setAutoSkipping(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -90,7 +132,7 @@ export default function StacksPage() {
       {/* ─── FOR YOU ─────────────────────────── */}
       <button
         onClick={() => router.push("/?source=taste")}
-        className="w-full mb-8 group relative rounded-2xl overflow-hidden transition-all duration-200 hover:scale-[1.01] hover:shadow-xl active:scale-[0.99]"
+        className="w-full mb-2 group relative rounded-2xl overflow-hidden transition-all duration-200 hover:scale-[1.01] hover:shadow-xl active:scale-[0.99]"
       >
         <div
           className="absolute inset-0"
@@ -104,6 +146,15 @@ export default function StacksPage() {
             <p className="text-xs text-white/40 mt-0.5">
               {totalPending} tracks, ranked by taste
             </p>
+            {trackStats && (
+              <p className="text-[11px] text-white/30 mt-1.5 font-mono">
+                <span className="text-green-400/60">{trackStats.recommended} recommended</span>
+                <span className="mx-1 text-white/20">·</span>
+                <span className="text-white/40">{trackStats.unscored} unscored</span>
+                <span className="mx-1 text-white/20">·</span>
+                <span className="text-red-400/50">{trackStats.likely_skip} likely skip</span>
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <span className="text-2xl font-mono font-bold text-accent">{totalPending}</span>
@@ -113,6 +164,37 @@ export default function StacksPage() {
           </div>
         </div>
       </button>
+
+      {/* ─── AUTO-SKIP + FEEDBACK ─────────────── */}
+      <div className="flex items-center gap-3 mb-8 px-1">
+        <button
+          onClick={handleAutoSkip}
+          disabled={autoSkipping}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/5 hover:bg-red-500/10 border border-foreground/10 hover:border-red-400/30 text-xs text-foreground/50 hover:text-red-400 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {autoSkipping ? (
+            <>
+              <svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+              </svg>
+              Skipping...
+            </>
+          ) : (
+            <>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="17 1 21 5 17 9" />
+                <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+                <polyline points="7 23 3 19 7 15" />
+                <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+              </svg>
+              Auto-skip low-scored tracks
+            </>
+          )}
+        </button>
+        {autoSkipResult && (
+          <span className="text-xs text-foreground/40">{autoSkipResult}</span>
+        )}
+      </div>
 
       {/* ─── GENRES ──────────────────────────── */}
       {genres.length > 0 && <GenreSection genres={genres} router={router} />}
