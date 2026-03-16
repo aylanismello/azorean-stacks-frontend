@@ -443,7 +443,7 @@ async function processTrack(trackId: string) {
 
 // ─── SUPER LIKE PIPELINE ────────────────────────────────────
 
-const SUPER_LIKE_DIR = `${process.env.HOME}/Music/PicoDrops`;
+const SUPER_LIKE_DIR = `${process.env.HOME}/Music/PicoDrops/AzoreanStacks`;
 
 function sanitizeFilename(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
