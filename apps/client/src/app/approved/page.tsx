@@ -16,9 +16,15 @@ function safeCoverUrl(url: string | null): string | null {
   return null;
 }
 
-type Tab = "approved" | "pending" | "rejected" | "skipped";
+type Tab = "super_liked" | "approved" | "pending" | "rejected" | "skipped";
 
 const TAB_CONFIG: Record<Tab, { label: string; color: string; activeBg: string; emptyMsg: string }> = {
+  super_liked: {
+    label: "⭐ Downloads",
+    color: "text-yellow-400",
+    activeBg: "bg-yellow-400/10 text-yellow-400 ring-1 ring-yellow-400/20",
+    emptyMsg: "No super liked tracks yet.",
+  },
   approved: {
     label: "Kept",
     color: "text-green-400",
@@ -51,6 +57,7 @@ export default function TracksPage() {
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [tabCounts, setTabCounts] = useState<Record<Tab, number | null>>({
+    super_liked: null,
     approved: null,
     pending: null,
     rejected: null,
@@ -71,7 +78,7 @@ export default function TracksPage() {
 
   // Fetch counts for all tabs (lightweight)
   const fetchCounts = useCallback(async () => {
-    const tabs: Tab[] = ["approved", "pending", "rejected", "skipped"];
+    const tabs: Tab[] = ["super_liked", "approved", "pending", "rejected", "skipped"];
     const results = await Promise.all(
       tabs.map(async (t) => {
         try {
@@ -85,10 +92,11 @@ export default function TracksPage() {
       })
     );
     setTabCounts({
-      approved: results[0],
-      pending: results[1],
-      rejected: results[2],
-      skipped: results[3],
+      super_liked: results[0],
+      approved: results[1],
+      pending: results[2],
+      rejected: results[3],
+      skipped: results[4],
     });
   }, []);
 
@@ -98,6 +106,7 @@ export default function TracksPage() {
 
   const fetchTracks = useCallback(async () => {
     setLoading(true);
+    setTracks([]);
     try {
       const params = new URLSearchParams({
         status: tab,
@@ -285,7 +294,7 @@ export default function TracksPage() {
   // Determine available move-to options based on current tab
   const moveOptions = (trackId: string): { label: string; status: Tab; color: string }[] => {
     const opts: { label: string; status: Tab; color: string }[] = [];
-    if (tab !== "approved") opts.push({ label: "Keep", status: "approved", color: "text-green-400 hover:bg-green-400/10" });
+    if (tab !== "approved" && tab !== "super_liked") opts.push({ label: "Keep", status: "approved", color: "text-green-400 hover:bg-green-400/10" });
     if (tab !== "pending") opts.push({ label: "Back to queue", status: "pending", color: "text-foreground/50 hover:bg-foreground/5" });
     if (tab !== "skipped") opts.push({ label: "Skip", status: "skipped", color: "text-amber-400/70 hover:bg-amber-400/10" });
     if (tab !== "rejected") opts.push({ label: "Nope", status: "rejected", color: "text-red-400/70 hover:bg-red-400/10" });

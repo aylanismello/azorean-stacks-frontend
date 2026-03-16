@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 import { getServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -30,11 +31,28 @@ export async function PATCH(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Also update user_tracks if the row exists (best-effort; engine uses service role)
-    await supabase
-      .from("user_tracks")
-      .update({ super_liked: true, status: "approved", voted_at: updates.voted_at })
-      .eq("track_id", params.id);
+    // Get the authed user so we can upsert user_tracks (watcher needs the row to exist)
+    const authClient = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() { return req.cookies.getAll(); },
+          setAll() {},
+        },
+      }
+    );
+    const { data: { user } } = await authClient.auth.getUser();
+
+    if (user) {
+      // Upsert so the row is created if it doesn't exist — watcher fires on UPDATE super_liked=true
+      await supabase
+        .from("user_tracks")
+        .upsert(
+          { user_id: user.id, track_id: params.id, super_liked: true, status: "approved", voted_at: updates.voted_at },
+          { onConflict: "user_id,track_id" }
+        );
+    }
 
     return NextResponse.json({ ...data, super_liked: true });
   }

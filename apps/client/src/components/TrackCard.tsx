@@ -156,7 +156,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
 
   const gradient = generateGradient(track.artist, track.title);
   const coverUrl = safeCoverUrl(track.cover_art_url) || safeCoverUrl(track.episode?.artwork_url ?? null);
-  const meta = track.metadata as Record<string, string | undefined>;
+  const meta = (track.metadata ?? {}) as Record<string, string | undefined>;
   const hasAudio = !!(track.audio_url || track.preview_url);
   const hasPlayableSource = hasAudio || (!!track.spotify_url && spotify.connected && !!spotify.deviceId);
   const isCurrentTrack = globalPlayer.currentTrack?.id === track.id;
@@ -471,22 +471,32 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
         <span className={`text-sm ${seeded ? "seed-sprout" : ""}`}>{seeded ? "🌿" : "🌱"}</span>
       </button>
 
-      {/* Super Like — gold star, bigger, triggers local download */}
-      <button
-        onClick={handleSuperLike}
-        disabled={superLiking || voting}
-        className={`flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-full border-2 transition-all active:scale-90 disabled:opacity-50 ${
-          superLiked
-            ? "bg-yellow-400/30 border-yellow-400 text-yellow-300 super-like-pop super-like-glow"
-            : "bg-surface-2 md:bg-black/40 md:backdrop-blur-md border-yellow-400/30 text-yellow-400/80 hover:bg-yellow-950/50 hover:border-yellow-400/60 hover:text-yellow-400"
-        }`}
-        title="Super Like — download this track locally"
-        aria-label="Super Like track"
-      >
-        <svg width="24" height="24" viewBox="0 0 24 24" fill={superLiked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-        </svg>
-      </button>
+      {/* Super Like — gold star; after super-liking becomes [->] advance button */}
+      {superLiked ? (
+        <button
+          onClick={handleAdvance}
+          disabled={voting}
+          className="flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-full bg-yellow-400/20 border-2 border-yellow-400 text-yellow-300 transition-all active:scale-90 disabled:opacity-50 kept-pop super-like-glow"
+          title="Advance to next track"
+          aria-label="Advance to next track"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
+          </svg>
+        </button>
+      ) : (
+        <button
+          onClick={handleSuperLike}
+          disabled={superLiking || voting}
+          className="flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-full border-2 transition-all active:scale-90 disabled:opacity-50 bg-surface-2 md:bg-black/40 md:backdrop-blur-md border-yellow-400/30 text-yellow-400/80 hover:bg-yellow-950/50 hover:border-yellow-400/60 hover:text-yellow-400"
+          title="Super Like — download this track locally"
+          aria-label="Super Like track"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+          </svg>
+        </button>
+      )}
 
       {/* Keep (approve) */}
       {kept ? (
@@ -740,22 +750,32 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
               <span className={`text-xs ${seeded ? "seed-sprout" : ""}`}>{seeded ? "🌿" : "🌱"}</span>
             </button>
 
-            {/* Super Like — gold star, bigger, triggers local download */}
-            <button
-              onClick={handleSuperLike}
-              disabled={superLiking || voting}
-              className={`flex items-center justify-center w-13 h-13 rounded-full border-2 backdrop-blur-md transition-all active:scale-90 disabled:opacity-50 ${
-                superLiked
-                  ? "bg-yellow-400/30 border-yellow-400 text-yellow-300 super-like-pop super-like-glow"
-                  : "bg-black/40 border-yellow-400/40 text-yellow-400/90"
-              }`}
-              title="Super Like — download this track locally"
-              aria-label="Super Like track"
-            >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill={superLiked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-              </svg>
-            </button>
+            {/* Super Like — gold star; after super-liking becomes [->] advance button */}
+            {superLiked ? (
+              <button
+                onClick={handleAdvance}
+                disabled={voting}
+                className="flex items-center justify-center w-13 h-13 rounded-full bg-yellow-400/20 backdrop-blur-md border-2 border-yellow-400 text-yellow-300 transition-all active:scale-90 disabled:opacity-50 kept-pop super-like-glow"
+                title="Advance to next track"
+                aria-label="Advance to next track"
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                onClick={handleSuperLike}
+                disabled={superLiking || voting}
+                className="flex items-center justify-center w-13 h-13 rounded-full border-2 backdrop-blur-md transition-all active:scale-90 disabled:opacity-50 bg-black/40 border-yellow-400/40 text-yellow-400/90"
+                title="Super Like — download this track locally"
+                aria-label="Super Like track"
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                </svg>
+              </button>
+            )}
 
             {/* Keep (approve) */}
             {kept ? (

@@ -296,50 +296,7 @@ function StackPageContent() {
       );
 
       setVoteCount((c) => c + 1);
-
-      // Advance to next track
-      if (hasEpisodeTracks) {
-        const remainingPending = tracks.filter((t) => t.id !== id && t.status === "pending");
-        if (remainingPending.length === 0) {
-          advanceToNextEpisode();
-          return;
-        }
-        setEpisodePos((prev) => {
-          for (let i = prev + 1; i < tracks.length; i++) {
-            if (tracks[i].id !== id && tracks[i].status === "pending") return i;
-          }
-          for (let i = 0; i < prev; i++) {
-            if (tracks[i].id !== id && tracks[i].status === "pending") return i;
-          }
-          return prev;
-        });
-      } else {
-        setTracks((prev) => {
-          const remaining = prev.filter((t) => t.id !== id);
-          if (remaining.length <= 3) {
-            const existingIds = new Set(remaining.map((t) => t.id));
-            fetch(buildUrl())
-              .then((r) => r.ok ? r.json() : null)
-              .then((data) => {
-                if (!data) return;
-                const newTracks = (data.tracks || []).filter(
-                  (t: Track) => t.id !== id && !existingIds.has(t.id)
-                );
-                if (newTracks.length > 0) {
-                  setTracks((curr) => {
-                    const currIds = new Set(curr.map((t: Track) => t.id));
-                    const fresh = newTracks.filter((t: Track) => !currIds.has(t.id));
-                    return [...curr, ...fresh];
-                  });
-                  setSessionTracks((curr) => mergeTrackSession(curr, newTracks));
-                }
-                setTotal(data.total || 0);
-              });
-          }
-          return remaining;
-        });
-        setTotal((prev) => prev - 1);
-      }
+      // No auto-advance — user taps the [->] button (second tap) to move on
     } catch (err) {
       console.error("Super like error:", err);
       setError("Failed to super like. Please try again.");

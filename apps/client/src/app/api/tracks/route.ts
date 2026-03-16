@@ -91,6 +91,48 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ tracks, total: count });
   }
 
+  // Super-liked tab: resolve track IDs from user_tracks, then fetch tracks
+  if (status === "super_liked") {
+    const db = getServiceClient();
+    const { data: utRows, error: utError } = await db
+      .from("user_tracks")
+      .select("track_id")
+      .eq("super_liked", true)
+      .order("voted_at", { ascending: false });
+
+    if (utError) return NextResponse.json({ error: utError.message }, { status: 500 });
+
+    const superLikedIds = (utRows || []).map((r: any) => r.track_id);
+    if (superLikedIds.length === 0) return NextResponse.json({ tracks: [], total: 0 });
+
+    const paged = superLikedIds.slice(offset, offset + limit);
+    const { data, error } = await supabase
+      .from("tracks")
+      .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url), seeds!track_id(id)")
+      .in("id", paged);
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const tracks = (data || []).sort((a: any, b: any) => superLikedIds.indexOf(a.id) - superLikedIds.indexOf(b.id));
+    const signPromises: Promise<void>[] = [];
+    for (const track of tracks) {
+      if (Array.isArray(track.seed_track)) track.seed_track = track.seed_track[0] || null;
+      if (track.seed_track && !track.seed_track.artist) track.seed_track = null;
+      if (Array.isArray(track.episode)) track.episode = track.episode[0] || null;
+      const seedArr = Array.isArray(track.seeds) ? track.seeds : [];
+      track.seed_id = seedArr.length > 0 ? seedArr[0].id : null;
+      delete track.seeds;
+      if (track.storage_path) {
+        signPromises.push(
+          supabase.storage.from("tracks").createSignedUrl(track.storage_path, 3600)
+            .then(({ data: signed }) => { if (signed) track.audio_url = signed.signedUrl; })
+        );
+      }
+    }
+    await Promise.all(signPromises);
+    return NextResponse.json({ tracks, total: superLikedIds.length });
+  }
+
   let query = supabase
     .from("tracks")
     .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url), seeds!track_id(id)", { count: "exact" });
