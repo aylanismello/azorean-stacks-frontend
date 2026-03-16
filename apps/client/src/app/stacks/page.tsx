@@ -35,21 +35,12 @@ function hueFromString(str: string): number {
   return Math.abs(hash % 360);
 }
 
-interface TrackStats {
-  recommended: number;
-  unscored: number;
-  likely_skip: number;
-  total: number;
-}
-
 export default function StacksPage() {
   const router = useRouter();
   const [stacks, setStacks] = useState<StackSeed[]>([]);
   const [genres, setGenres] = useState<GenreEntry[]>([]);
-  const [totalPending, setTotalPending] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [trackStats, setTrackStats] = useState<TrackStats | null>(null);
   const [hideLow, setHideLow] = useState(false);
 
   useEffect(() => {
@@ -67,16 +58,10 @@ export default function StacksPage() {
         if (!r.ok) throw new Error(`Genres: ${r.status}`);
         return r.json();
       }),
-      fetch("/api/tracks/stats").then((r) => {
-        if (!r.ok) return null;
-        return r.json();
-      }),
     ])
-      .then(([stackData, genreData, statsData]) => {
+      .then(([stackData, genreData]) => {
         setStacks(stackData.stacks || []);
-        setTotalPending(stackData.total_pending || 0);
         setGenres(genreData.genres || []);
-        if (statsData && !statsData.error) setTrackStats(statsData);
         setError(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
@@ -126,25 +111,11 @@ export default function StacksPage() {
         <div className="relative px-5 py-6 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-white">For You</h2>
-            <p className="text-xs text-white/40 mt-0.5">
-              {totalPending} tracks, ranked by taste
-            </p>
-            {trackStats && (
-              <p className="text-[11px] text-white/30 mt-1.5 font-mono">
-                <span className="text-green-400/60">{trackStats.recommended} recommended</span>
-                <span className="mx-1 text-white/20">·</span>
-                <span className="text-white/40">{trackStats.unscored} unscored</span>
-                <span className="mx-1 text-white/20">·</span>
-                <span className="text-red-400/50">{trackStats.likely_skip} likely skip</span>
-              </p>
-            )}
+            <p className="text-xs text-white/40 mt-0.5">ranked by taste</p>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-2xl font-mono font-bold text-accent">{totalPending}</span>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/40">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-          </div>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/40">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
         </div>
       </button>
 
@@ -164,12 +135,7 @@ export default function StacksPage() {
             hideLow ? "translate-x-4.5" : "translate-x-0.5"
           }`} />
         </button>
-        <span className="text-xs text-foreground/50">
-          Hide low-scored
-          {hideLow && trackStats && trackStats.likely_skip > 0 && (
-            <span className="ml-1 text-foreground/30">(hiding {trackStats.likely_skip})</span>
-          )}
-        </span>
+        <span className="text-xs text-foreground/50">Hide low-scored</span>
       </div>
 
       {/* ─── GENRES ──────────────────────────── */}
