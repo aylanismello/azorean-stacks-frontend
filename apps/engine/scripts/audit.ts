@@ -3,8 +3,7 @@
  * Enrichment Accuracy Audit
  *
  * Scores tracks on Spotify match, YouTube match, and artwork validity.
- * Writes per-track results to `track_audits` and a summary to
- * ~/.openclaw/data/azorean-engine-audit.json
+ * Persists audit data to Supabase `track_audits`.
  *
  * Usage:
  *   bun run audit                   # audit all enriched tracks
@@ -14,9 +13,6 @@
  */
 import { parseArgs } from "util";
 import { getSupabase } from "../lib/supabase";
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
 
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
@@ -36,8 +32,6 @@ const db = getSupabase();
 const BATCH_SIZE = 50;
 const BATCH_DELAY_MS = 2000;
 const REQUEST_DELAY_MS = 200;
-
-const SUMMARY_PATH = join(homedir(), ".openclaw", "data", "azorean-engine-audit.json");
 
 // ─── LOGGING ────────────────────────────────────────────────
 
@@ -415,10 +409,7 @@ function classifyScore(score: number): "excellent" | "good" | "fair" | "poor" {
   return "poor";
 }
 
-async function writeSummary(results: AuditResult[]) {
-  const dir = join(homedir(), ".openclaw", "data");
-  mkdirSync(dir, { recursive: true });
-
+function summarizeResults(results: AuditResult[]) {
   const avgSpotify = Math.round(results.reduce((s, r) => s + r.spotify_score, 0) / results.length);
   const avgYouTube = Math.round(results.reduce((s, r) => s + r.youtube_score, 0) / results.length);
   const avgArtwork = Math.round(results.reduce((s, r) => s + r.artwork_score, 0) / results.length);
@@ -429,21 +420,7 @@ async function writeSummary(results: AuditResult[]) {
     distribution[classifyScore(r.overall_score)]++;
   }
 
-  // Read existing file for history
-  let history: Array<{ date: string; avg_overall: number; tracks_audited: number }> = [];
-  if (existsSync(SUMMARY_PATH)) {
-    try {
-      const existing = JSON.parse(readFileSync(SUMMARY_PATH, "utf-8"));
-      history = existing.history || [];
-    } catch {}
-  }
-
-  const now = new Date().toISOString();
-  history.unshift({ date: now, avg_overall: avgOverall, tracks_audited: results.length });
-  // Keep last 30 entries
-  history = history.slice(0, 30);
-
-  const summary = {
+  return {
     last_audit_at: new Date().toISOString(),
     tracks_audited: results.length,
     avg_spotify_score: avgSpotify,
@@ -451,16 +428,12 @@ async function writeSummary(results: AuditResult[]) {
     avg_artwork_score: avgArtwork,
     avg_overall_score: avgOverall,
     score_distribution: distribution,
-    history,
   };
-
-  writeFileSync(SUMMARY_PATH, JSON.stringify(summary, null, 2) + "\n");
-  log("ok", `Summary written to ${SUMMARY_PATH}`);
-  return summary;
 }
 
 async function main() {
   const start = Date.now();
+  const auditedAt = new Date().toISOString();
   console.log(`\n  The Stacks — Enrichment Audit`);
   console.log(`  ${new Date().toISOString()}`);
 
@@ -547,6 +520,7 @@ async function main() {
     // Write batch results to Supabase
     const rows = results.slice(batchIdx * BATCH_SIZE).map((r) => ({
       track_id: r.track_id,
+      audited_at: auditedAt,
       spotify_score: r.spotify_score,
       youtube_score: r.youtube_score,
       artwork_score: r.artwork_score,
@@ -622,7 +596,7 @@ async function main() {
 
   // Write summary
   console.log(`\n  ── Summary ──`);
-  const summary = await writeSummary(results);
+  const summary = summarizeResults(results);
 
   console.log(`  Tracks audited:  ${summary.tracks_audited}`);
   console.log(`  Avg Spotify:     ${summary.avg_spotify_score}`);
