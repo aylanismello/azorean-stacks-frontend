@@ -264,18 +264,18 @@ async function main() {
 
   log("ok", `Total episodes available: ${firstPage.total}`);
 
-  // Collect all episodes up to crawlLimit (in pages of 16)
+  // Collect all episodes up to crawlLimit (in pages of 100)
   const allEpisodes = [...firstPage.items];
-  const pageSize = 16;
+  const pageSize = 100;
   let skip = crawlOffset + firstPage.items.length;
 
-  while (allEpisodes.length < crawlLimit && skip < crawlOffset + crawlLimit) {
-    await sleep(RATE_LIMIT_MS);
+  while (allEpisodes.length < crawlLimit && skip < firstPage.total) {
     const remaining = crawlLimit - allEpisodes.length;
     const page = await fetchIndexPage(skip, Math.min(remaining, pageSize), since);
     if (!page || page.items.length === 0) break;
     allEpisodes.push(...page.items);
     skip += page.items.length;
+    log("info", `  Fetched ${allEpisodes.length}/${Math.min(crawlLimit, firstPage.total)} episode URLs...`);
   }
 
   log("info", `Fetched ${allEpisodes.length} episode URLs from index`);
