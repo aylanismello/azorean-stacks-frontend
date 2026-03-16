@@ -151,10 +151,43 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // 4. No existing tracks — do lightweight NTS crawl
+  // 4. No existing tracks — run NTS crawl + lot radio DB matching in parallel
   try {
-    const result = await crawlNTS(db, seedArtist, seedTitle, seed_id, seed.track_id, user_id);
-    return NextResponse.json(result);
+    const [ntsResult, lotResult] = await Promise.all([
+      crawlNTS(db, seedArtist, seedTitle, seed_id, seed.track_id, user_id),
+      findLotRadioMatches(db, seedArtist, seedTitle, seed_id, seed.track_id),
+    ]);
+
+    // Create user_tracks for lot radio tracks (NTS already did its own)
+    const lotUserTracksCreated = await createUserTracks(db, user_id, [
+      ...lotResult.newTrackIds,
+      ...lotResult.existingTrackIds,
+    ]);
+
+    const totalNew = ntsResult.tracks_new + lotResult.newTrackIds.length;
+    const totalExisting = ntsResult.tracks_existing + lotResult.existingTrackIds.length;
+    const sourcesSearched = ["nts"];
+    if (lotResult.newTrackIds.length > 0 || lotResult.existingTrackIds.length > 0) {
+      sourcesSearched.push("lotradio");
+    }
+
+    await db.from("discovery_runs").insert({
+      started_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      seed_id: seed_id,
+      seed_track_id: seed.track_id || null,
+      sources_searched: sourcesSearched,
+      tracks_found: totalNew + totalExisting,
+      tracks_added: totalNew,
+      notes: `On-demand discover: ${totalNew} new, ${totalExisting} existing`,
+    });
+
+    return NextResponse.json({
+      tracks_found: totalNew + totalExisting,
+      tracks_new: totalNew,
+      tracks_existing: totalExisting,
+      user_tracks_created: ntsResult.user_tracks_created + lotUserTracksCreated,
+    });
   } catch (err) {
     console.error("Discover crawl error:", err);
     return NextResponse.json(
@@ -182,6 +215,8 @@ async function crawlNTS(
   tracks_new: number;
   tracks_existing: number;
   user_tracks_created: number;
+  newTrackIds: string[];
+  existingTrackIds: string[];
 }> {
   const query = `${seedArtist} ${seedTitle}`;
   const episodes = await ntsSearch(query);
@@ -369,24 +404,137 @@ async function crawlNTS(
   const allTrackIds = Array.from(new Set(newTrackIds.concat(existingTrackIds)));
   const userTracksCreated = await createUserTracks(db, userId, allTrackIds);
 
-  // Log the discovery run
-  await db.from("discovery_runs").insert({
-    started_at: new Date().toISOString(),
-    completed_at: new Date().toISOString(),
-    seed_id: seedId,
-    seed_track_id: seedTrackId || null,
-    sources_searched: ["nts"],
-    tracks_found: allTrackIds.length,
-    tracks_added: newTrackIds.length,
-    notes: `On-demand discover: ${newTrackIds.length} new, ${existingTrackIds.length} existing`,
-  });
-
   return {
     tracks_found: allTrackIds.length,
     tracks_new: newTrackIds.length,
     tracks_existing: existingTrackIds.length,
     user_tracks_created: userTracksCreated,
+    newTrackIds,
+    existingTrackIds,
   };
+}
+
+async function findLotRadioMatches(
+  db: ReturnType<typeof getServiceClient>,
+  seedArtist: string,
+  seedTitle: string,
+  seedId: string,
+  seedTrackId: string | null,
+): Promise<{ newTrackIds: string[]; existingTrackIds: string[] }> {
+  const seedArtistLower = seedArtist.toLowerCase().trim();
+  const seedTitleLower = seedTitle.toLowerCase().trim();
+
+  const { data: episodes } = await db
+    .from("episodes")
+    .select("id, url, title, aired_date, metadata")
+    .eq("source", "lotradio")
+    .not("metadata", "is", null);
+
+  const newTrackIds: string[] = [];
+  const existingTrackIds: string[] = [];
+  const seenKeys = new Set<string>();
+  const GARBAGE_TITLES = new Set(["unknown track", "untitled", "id", "?", "unknown", ""]);
+
+  for (const ep of episodes || []) {
+    const tracklist = (ep.metadata as { tracklist?: Array<{ artist?: string; title?: string }> })?.tracklist || [];
+    if (!Array.isArray(tracklist) || tracklist.length === 0) continue;
+
+    const hasMatch = tracklist.some(
+      (t) =>
+        t.artist?.toLowerCase().trim() === seedArtistLower &&
+        t.title?.toLowerCase().trim() === seedTitleLower
+    );
+    if (!hasMatch) continue;
+
+    // Link episode to seed
+    await db
+      .from("episode_seeds")
+      .upsert(
+        { episode_id: ep.id, seed_id: seedId, match_type: "full" },
+        { onConflict: "episode_id,seed_id" }
+      );
+
+    // Check if episode already has tracks in junction table
+    const { data: epTracks, count: trackCount } = await db
+      .from("episode_tracks")
+      .select("track_id", { count: "exact" })
+      .eq("episode_id", ep.id);
+
+    if (trackCount && trackCount > 0) {
+      for (const t of epTracks || []) existingTrackIds.push(t.track_id);
+      continue;
+    }
+
+    // Insert tracks from the pre-crawled tracklist
+    for (let pos = 0; pos < tracklist.length; pos++) {
+      const track = tracklist[pos];
+      const artist = track.artist?.trim() || "";
+      const title = track.title?.trim() || "";
+      if (!artist || !title) continue;
+
+      // Skip the seed track itself
+      if (
+        artist.toLowerCase() === seedArtistLower &&
+        title.toLowerCase() === seedTitleLower
+      ) continue;
+
+      const lArtist = artist.toLowerCase();
+      const lTitle = title.toLowerCase();
+      if (GARBAGE_TITLES.has(lTitle) || lTitle.length <= 1 || lArtist.length <= 1) continue;
+
+      const key = `${lArtist}::${lTitle}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+
+      const escArtist = artist.replace(/[%_\\]/g, (c) => `\\${c}`);
+      const escTitle = title.replace(/[%_\\]/g, (c) => `\\${c}`);
+      const { data: existing } = await db
+        .from("tracks")
+        .select("id")
+        .ilike("artist", escArtist)
+        .ilike("title", escTitle)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        existingTrackIds.push(existing[0].id);
+        await db
+          .from("episode_tracks")
+          .upsert(
+            { episode_id: ep.id, track_id: existing[0].id, position: pos },
+            { onConflict: "episode_id,track_id" }
+          );
+        continue;
+      }
+
+      const { data: inserted, error: insertErr } = await db
+        .from("tracks")
+        .insert({
+          artist,
+          title,
+          source: "lotradio",
+          source_url: ep.url,
+          source_context: ep.title || ep.url,
+          metadata: { seed_artist: seedArtist, seed_title: seedTitle, discovered_by: "on-demand" },
+          status: "pending",
+          episode_id: ep.id,
+          seed_track_id: seedTrackId || null,
+        })
+        .select("id")
+        .single();
+
+      if (inserted && !insertErr) {
+        newTrackIds.push(inserted.id);
+        await db
+          .from("episode_tracks")
+          .upsert(
+            { episode_id: ep.id, track_id: inserted.id, position: pos },
+            { onConflict: "episode_id,track_id" }
+          );
+      }
+    }
+  }
+
+  return { newTrackIds, existingTrackIds };
 }
 
 async function createUserTracks(
