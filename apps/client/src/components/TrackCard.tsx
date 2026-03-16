@@ -39,6 +39,7 @@ function safeCoverUrl(url: string | null): string | null {
 function sourceLabel(source: string): string {
   const labels: Record<string, string> = {
     nts: "NTS Radio",
+    lotradio: "The Lot Radio",
     "1001tracklists": "1001TL",
     spotify: "Spotify",
     bandcamp: "Bandcamp",

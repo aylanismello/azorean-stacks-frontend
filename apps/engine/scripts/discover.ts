@@ -12,6 +12,7 @@
  */
 import { parseArgs } from "util";
 import { getSupabase } from "../lib/supabase";
+import { SOURCES } from "../lib/sources/index";
 
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
@@ -166,101 +167,7 @@ function maybeSwapArtistTitle(artist: string, title: string): { artist: string; 
   return { artist, title, swapped: false };
 }
 
-// ─── NTS DISCOVERY ───────────────────────────────────────────
-// Search NTS for episodes containing a seed track,
-// then pull every other track from those tracklists.
-
-const NTS_API = "https://www.nts.live/api/v2";
-const NTS_SEARCH_LIMIT = 60;
-const NTS_MAX_EPISODES = 10;
-
-interface NTSTrack { uid: string; artist: string; title: string }
-
-async function ntsSearch(query: string): Promise<Array<{ path: string; title: string; date: string }>> {
-  log("info", `NTS search: "${query}"`);
-  const url = `${NTS_API}/search?q=${encodeURIComponent(query)}&version=2&offset=0&limit=${NTS_SEARCH_LIMIT}&types[]=track`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) {
-    log("fail", `NTS search HTTP ${res.status} for "${query}"`);
-    throw new Error(`NTS search failed: ${res.status}`);
-  }
-  const data = await res.json() as { results: Array<{ local_date: string; article: { path: string; title: string } }> };
-
-  const seen = new Set<string>();
-  const episodes: Array<{ path: string; title: string; date: string }> = [];
-  for (const r of data.results || []) {
-    const path = r.article?.path;
-    if (!path || seen.has(path)) continue;
-    seen.add(path);
-    episodes.push({ path, title: r.article.title || "", date: r.local_date || "" });
-  }
-  log("ok", `NTS returned ${data.results?.length ?? 0} results → ${episodes.length} unique episodes`);
-  return episodes;
-}
-
-async function ntsEpisodeArtwork(episodePath: string): Promise<string | null> {
-  try {
-    const url = `${NTS_API}${episodePath}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-    if (!res.ok) return null;
-    const data = await res.json() as {
-      media?: {
-        picture_large?: string;
-        picture_medium_large?: string;
-        picture_medium?: string;
-        background_large?: string;
-        background_medium_large?: string;
-      };
-    };
-    return data.media?.picture_large
-      || data.media?.picture_medium_large
-      || data.media?.picture_medium
-      || data.media?.background_large
-      || data.media?.background_medium_large
-      || null;
-  } catch {
-    return null;
-  }
-}
-
-async function ntsTracklist(episodePath: string): Promise<NTSTrack[]> {
-  const url = `${NTS_API}${episodePath}/tracklist`;
-  let res: Response;
-  try {
-    res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-  } catch (err) {
-    log("fail", `NTS tracklist fetch error: ${episodePath} — ${err instanceof Error ? err.message : err}`);
-    return [];
-  }
-  if (!res.ok) {
-    log("fail", `NTS tracklist HTTP ${res.status}: ${episodePath} (url: ${url})`);
-    return [];
-  }
-  let data: any;
-  try {
-    data = await res.json();
-  } catch (err) {
-    log("fail", `NTS tracklist JSON parse error: ${episodePath} — ${err instanceof Error ? err.message : err}`);
-    return [];
-  }
-  const tracks = data.results || (data as unknown as NTSTrack[]);
-  if (!Array.isArray(tracks)) {
-    log("fail", `NTS tracklist not an array: ${episodePath} — got ${typeof tracks}: ${JSON.stringify(data).slice(0, 200)}`);
-    return [];
-  }
-  if (tracks.length === 0) {
-    log("fail", `NTS tracklist API returned 0 tracks: ${episodePath}`);
-    return [];
-  }
-  const valid = tracks.filter((t) => t.artist?.trim() && t.title?.trim());
-  if (valid.length === 0) {
-    log("fail", `NTS tracklist all ${tracks.length} tracks filtered out (missing artist/title): ${episodePath}`);
-    log("fail", `  Sample raw track: ${JSON.stringify(tracks[0]).slice(0, 200)}`);
-  } else if (valid.length < tracks.length) {
-    log("warn", `NTS tracklist: ${tracks.length - valid.length}/${tracks.length} tracks filtered out (missing artist/title): ${episodePath}`);
-  }
-  return valid;
-}
+// ─── TRACK DEDUP HELPER ──────────────────────────────────────
 
 function isSameTrack(a: { artist: string; title: string }, b: { artist: string; title: string }): boolean {
   return a.artist.toLowerCase().trim() === b.artist.toLowerCase().trim() &&
@@ -270,30 +177,83 @@ function isSameTrack(a: { artist: string; title: string }, b: { artist: string; 
 interface Candidate {
   artist: string;
   title: string;
+  source: string;
   source_url: string;
   source_context: string;
   co_occurrence: number;
   episode_id: string | null;
 }
 
-async function discover(seedArtist: string, seedTitle: string, seedId: string): Promise<{ candidates: Candidate[]; emptyTracklists: number; failedEpisodes: string[]; episodePositions: Map<string, Array<{ key: string; position: number }>> }> {
-  const query = `${seedArtist} ${seedTitle}`;
-  const episodes = await ntsSearch(query);
-  console.log(`  Found ${episodes.length} NTS episodes`);
+const SOURCE_MAX_EPISODES = 10;
 
-  const coMap = new Map<string, Candidate>();
-  const episodePositions = new Map<string, Array<{ key: string; position: number }>>();
-  let crawled = 0;
-  let skipped = 0;
-  let emptyTracklists = 0;
-  const failedEpisodes: string[] = [];
+async function discoverFromSource(
+  sourceName: string,
+  seedArtist: string,
+  seedTitle: string,
+  seedId: string,
+  coMap: Map<string, Candidate>,
+  episodePositions: Map<string, Array<{ key: string; position: number }>>,
+  stats: { crawled: number; skipped: number; emptyTracklists: number; failedEpisodes: string[] },
+): Promise<void> {
+  const source = SOURCES.find((s) => s.name === sourceName);
+  if (!source) return;
 
-  for (const ep of episodes.slice(0, NTS_MAX_EPISODES)) {
-    await sleep(1000); // respect NTS rate limits
+  let sourceEpisodes: Array<{ url: string; title: string; date: string | null }> = [];
 
-    const episodeUrl = `https://www.nts.live${ep.path}`;
-    const context = `${ep.title}${ep.date ? ` (${ep.date.split("T")[0]})` : ""}`;
-    const airedDate = ep.date ? ep.date.split("T")[0] : null;
+  if (sourceName === "lotradio") {
+    // Phase 1: search by artist name (finds episodes where artist was DJ/host)
+    try {
+      const searchResults = await source.searchForSeed(seedArtist, seedTitle);
+      sourceEpisodes = searchResults.map((e) => ({ url: e.url, title: e.title, date: e.date }));
+    } catch (err) {
+      log("fail", `Lot Radio search error: ${err instanceof Error ? err.message : err}`);
+    }
+
+    // Phase 2: query our local DB for episodes where the crawled tracklist mentions the seed
+    try {
+      const seedArtistLower = seedArtist.toLowerCase().trim();
+      const seedTitleLower = seedTitle.toLowerCase().trim();
+      const { data: dbEpisodes } = await db
+        .from("episodes")
+        .select("url, title, aired_date")
+        .eq("source", "lotradio")
+        .not("metadata", "is", null);
+
+      if (dbEpisodes) {
+        for (const ep of dbEpisodes as any[]) {
+          const tracklist: Array<{ artist: string; title: string }> = ep.metadata?.tracklist || [];
+          const hasMatch = tracklist.some((t) =>
+            t.artist?.toLowerCase().trim() === seedArtistLower ||
+            (t.artist?.toLowerCase().trim() === seedArtistLower &&
+              t.title?.toLowerCase().trim() === seedTitleLower)
+          );
+          if (hasMatch && !sourceEpisodes.some((e) => e.url === ep.url)) {
+            sourceEpisodes.push({ url: ep.url, title: ep.title || ep.url, date: ep.aired_date || null });
+          }
+        }
+      }
+    } catch (err) {
+      log("fail", `Lot Radio DB tracklist search error: ${err instanceof Error ? err.message : err}`);
+    }
+  } else {
+    // NTS and other sources: use searchForSeed directly
+    try {
+      const searchResults = await source.searchForSeed(seedArtist, seedTitle);
+      sourceEpisodes = searchResults.map((e) => ({ url: e.url, title: e.title, date: e.date }));
+    } catch (err) {
+      log("fail", `${sourceName} search error: ${err instanceof Error ? err.message : err}`);
+      return;
+    }
+  }
+
+  console.log(`  Found ${sourceEpisodes.length} ${sourceName} episodes`);
+
+  for (const ep of sourceEpisodes.slice(0, SOURCE_MAX_EPISODES)) {
+    await sleep(1000);
+
+    const episodeUrl = ep.url;
+    const context = `${ep.title}${ep.date ? ` (${ep.date})` : ""}`;
+    const airedDate = ep.date || null;
 
     // Check if episode already crawled
     const { data: existingEp } = await db.from("episodes")
@@ -308,26 +268,23 @@ async function discover(seedArtist: string, seedTitle: string, seedId: string): 
         { onConflict: "episode_id,seed_id" }
       );
 
-      // Check if this episode actually has tracks — if not, it may have been
-      // interrupted mid-crawl or NTS returned empty. Re-try the tracklist.
       const { count: trackCount } = await db.from("tracks")
         .select("*", { count: "exact", head: true })
         .eq("episode_id", episodeId);
 
       if (trackCount && trackCount > 0) {
         log("skip", `Already crawled (${trackCount} tracks): ${context}`);
-        skipped++;
+        stats.skipped++;
         continue;
       }
 
       log("warn", `Episode exists but has 0 tracks — re-fetching tracklist: ${context}`);
     } else {
-      // New episode — insert and link seed
-      const artworkUrl = await ntsEpisodeArtwork(ep.path);
+      const artworkUrl = await source.getArtwork(episodeUrl);
       const { data: newEp, error: epErr } = await db.from("episodes").insert({
         url: episodeUrl,
         title: ep.title || null,
-        source: "nts",
+        source: sourceName,
         aired_date: airedDate,
         artwork_url: artworkUrl,
       }).select("id").single();
@@ -339,11 +296,10 @@ async function discover(seedArtist: string, seedTitle: string, seedId: string): 
       episodeId = newEp.id;
     }
 
-    const tracks = await ntsTracklist(ep.path);
+    const rawTracks = await source.getTracklist(episodeUrl);
 
-    // Determine match quality: does the tracklist contain the full seed track or just the artist?
-    const hasFullMatch = tracks.some((t) => isSameTrack(t, { artist: seedArtist, title: seedTitle }));
-    const hasArtistMatch = !hasFullMatch && tracks.some(
+    const hasFullMatch = rawTracks.some((t) => isSameTrack(t, { artist: seedArtist, title: seedTitle }));
+    const hasArtistMatch = !hasFullMatch && rawTracks.some(
       (t) => t.artist.toLowerCase().trim() === seedArtist.toLowerCase().trim()
     );
     const matchType = hasFullMatch ? "full" : hasArtistMatch ? "artist" : "artist";
@@ -353,9 +309,9 @@ async function discover(seedArtist: string, seedTitle: string, seedId: string): 
       { onConflict: "episode_id,seed_id" }
     );
 
-    if (tracks.length === 0) {
-      emptyTracklists++;
-      failedEpisodes.push(context);
+    if (rawTracks.length === 0) {
+      stats.emptyTracklists++;
+      stats.failedEpisodes.push(context);
       log("fail", `EMPTY TRACKLIST: ${context} — ${episodeUrl}`);
       continue;
     }
@@ -363,8 +319,8 @@ async function discover(seedArtist: string, seedTitle: string, seedId: string): 
     log("info", `Match type: ${matchType} for ${context}`);
 
     let epNew = 0;
-    for (let pos = 0; pos < tracks.length; pos++) {
-      const track = tracks[pos];
+    for (let pos = 0; pos < rawTracks.length; pos++) {
+      const track = rawTracks[pos];
       if (isSameTrack(track, { artist: seedArtist, title: seedTitle })) continue;
 
       const key = `${track.artist.toLowerCase().trim()}::${track.title.toLowerCase().trim()}`;
@@ -375,6 +331,7 @@ async function discover(seedArtist: string, seedTitle: string, seedId: string): 
         coMap.set(key, {
           artist: track.artist.trim(),
           title: track.title.trim(),
+          source: sourceName,
           source_url: episodeUrl,
           source_context: context,
           co_occurrence: 1,
@@ -383,27 +340,35 @@ async function discover(seedArtist: string, seedTitle: string, seedId: string): 
         epNew++;
       }
 
-      // Track position mapping for episode_tracks insertion later
       if (!episodePositions.has(episodeId)) episodePositions.set(episodeId, []);
       episodePositions.get(episodeId)!.push({ key, position: pos });
     }
-    crawled++;
-    log("ok", `${context} — ${tracks.length} tracks, ${epNew} new candidates`);
+    stats.crawled++;
+    log("ok", `${context} — ${rawTracks.length} tracks, ${epNew} new candidates`);
+  }
+}
+
+async function discover(seedArtist: string, seedTitle: string, seedId: string): Promise<{ candidates: Candidate[]; emptyTracklists: number; failedEpisodes: string[]; episodePositions: Map<string, Array<{ key: string; position: number }>> }> {
+  const coMap = new Map<string, Candidate>();
+  const episodePositions = new Map<string, Array<{ key: string; position: number }>>();
+  const stats = { crawled: 0, skipped: 0, emptyTracklists: 0, failedEpisodes: [] as string[] };
+
+  for (const source of SOURCES) {
+    await discoverFromSource(source.name, seedArtist, seedTitle, seedId, coMap, episodePositions, stats);
   }
 
-  log("info", `Discovery scan: ${crawled} crawled, ${skipped} already known, ${coMap.size} unique candidates`);
-  if (emptyTracklists > 0) {
-    console.log(`\n  ⚠️  ${emptyTracklists} episode(s) returned EMPTY tracklists:`);
-    for (const name of failedEpisodes) {
+  log("info", `Discovery scan: ${stats.crawled} crawled, ${stats.skipped} already known, ${coMap.size} unique candidates`);
+  if (stats.emptyTracklists > 0) {
+    console.log(`\n  ⚠️  ${stats.emptyTracklists} episode(s) returned EMPTY tracklists:`);
+    for (const name of stats.failedEpisodes) {
       console.log(`     - ${name}`);
     }
-    console.log(`     These episodes exist in DB but have 0 tracks. NTS may not have tracklist data for them.\n`);
+    console.log(`     These episodes exist in DB but have 0 tracks.\n`);
   }
 
-  // Sort by co-occurrence (stronger signal first)
   const candidates = Array.from(coMap.values())
     .sort((a, b) => b.co_occurrence - a.co_occurrence);
-  return { candidates, emptyTracklists, failedEpisodes, episodePositions };
+  return { candidates, emptyTracklists: stats.emptyTracklists, failedEpisodes: stats.failedEpisodes, episodePositions };
 }
 
 async function runDiscover(): Promise<number> {
@@ -499,7 +464,7 @@ async function runDiscover(): Promise<number> {
     const { data: inserted, error } = await db.from("tracks").insert({
       artist: c.artist,
       title: c.title,
-      source: "nts",
+      source: c.source,
       source_url: c.source_url,
       source_context: c.source_context,
       metadata: { co_occurrence: c.co_occurrence, seed_artist: seed.artist, seed_title: seed.title },
@@ -533,7 +498,7 @@ async function runDiscover(): Promise<number> {
     completed_at: new Date().toISOString(),
     seed_id: seed.id,
     seed_track_id: seed.track_id || null,
-    sources_searched: ["nts"],
+    sources_searched: SOURCES.map((s) => s.name),
     tracks_found: candidates.length,
     tracks_added: added,
     notes: candidates.length === 0
