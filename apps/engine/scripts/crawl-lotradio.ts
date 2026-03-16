@@ -6,6 +6,9 @@
  * Episodes are stored with source="lotradio" and their tracklist in the
  * metadata JSONB column for seed-matching at discovery time.
  *
+ * Uses the Lot Radio Next.js server action API to enumerate episodes
+ * (the index page is fully client-side rendered — static HTML has no links).
+ *
  * Usage: bun run scripts/crawl-lotradio.ts [--limit 50] [--offset 0]
  *
  * Rate limit: 1 request per second (polite crawling).
@@ -32,6 +35,12 @@ const db = getSupabase();
 const LOT_BASE = "https://www.thelotradio.com";
 const RATE_LIMIT_MS = 1_000;
 
+// Next.js server action ID for the index pagination endpoint.
+// This is derived from the action function hash and may change on redeployment.
+// If crawling returns 0 results, inspect network requests on /the-index to find the new ID.
+const INDEX_ACTION_ID = "c0525175425bb70fffcabc46ac6f1ed53392c63452";
+const INDEX_RSC_TREE = "%5B%22%22%2C%7B%22children%22%3A%5B%22(website)%22%2C%7B%22children%22%3A%5B%22the-index%22%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%2Ctrue%5D";
+
 async function fetchHtml(url: string, timeoutMs = 20_000): Promise<string | null> {
   try {
     const res = await fetch(url, {
@@ -53,31 +62,80 @@ async function fetchHtml(url: string, timeoutMs = 20_000): Promise<string | null
 }
 
 /**
- * Parse episode links from the Lot Radio index/archive page.
- * Returns unique episode URLs.
+ * Fetch a page of episodes from the Lot Radio index via the Next.js server action.
+ * The site is fully client-side rendered — the server action is the only way to
+ * enumerate episodes without a headless browser.
+ *
+ * Returns { items, total } where items are episode objects with url/title/date.
  */
-function parseIndexPage(html: string): Array<{ url: string; title: string; date: string | null }> {
-  const $ = load(html);
-  const episodes: Array<{ url: string; title: string; date: string | null }> = [];
-  const seen = new Set<string>();
+async function fetchIndexPage(skip: number, limit: number, since: string): Promise<{
+  items: Array<{ url: string; title: string; date: string | null; artwork: string | null }>;
+  total: number;
+} | null> {
+  try {
+    const body = JSON.stringify([{
+      limit,
+      skip,
+      order: "date:desc",
+      filters: "$undefined",
+      staffChoice: "$undefined",
+      since,
+    }]);
 
-  $("a[href]").each((_, el) => {
-    const href = $(el).attr("href") || "";
-    // Episode URLs: /shows/{show-slug}/{YYYY-MM-DD-HHMM}
-    if (!/^\/shows\/[^/]+\/\d{4}-\d{2}-\d{2}/.test(href)) return;
+    const res = await fetch(`${LOT_BASE}/the-index`, {
+      method: "POST",
+      signal: AbortSignal.timeout(30_000),
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; AzoreanStacks/1.0)",
+        "Accept": "text/x-component",
+        "Content-Type": "text/plain;charset=UTF-8",
+        "next-action": INDEX_ACTION_ID,
+        "next-router-state-tree": INDEX_RSC_TREE,
+      },
+      body,
+    });
 
-    const url = href.startsWith("http") ? href : `${LOT_BASE}${href}`;
-    if (seen.has(url)) return;
-    seen.add(url);
+    if (!res.ok) {
+      log("fail", `Index API HTTP ${res.status} (skip=${skip})`);
+      return null;
+    }
 
-    const dateMatch = href.match(/(\d{4}-\d{2}-\d{2})/);
-    const date = dateMatch ? dateMatch[1] : null;
-    const title = $(el).attr("aria-label") || $(el).text().trim() || href;
+    const text = await res.text();
+    // RSC format: each line is `{index}:{json}` — line "1:" has the payload
+    const dataLine = text.split("\n").find((l) => l.startsWith("1:"));
+    if (!dataLine) {
+      log("fail", `Index API: no data line in response (skip=${skip})`);
+      return null;
+    }
 
-    episodes.push({ url, title, date });
-  });
+    const payload = JSON.parse(dataLine.slice(2)) as {
+      total: number;
+      items: Array<{
+        title: string;
+        slug: string;
+        date: string;
+        show: { slug: string } | null;
+        image: { url: string } | null;
+      }>;
+    };
 
-  return episodes;
+    const items = payload.items.map((item) => {
+      const showSlug = item.show?.slug ?? "special-guests";
+      const url = `${LOT_BASE}/shows/${showSlug}/${item.slug}`;
+      const dateMatch = item.slug.match(/^(\d{4}-\d{2}-\d{2})/);
+      return {
+        url,
+        title: item.title,
+        date: dateMatch ? dateMatch[1] : null,
+        artwork: item.image?.url ?? null,
+      };
+    });
+
+    return { items, total: payload.total };
+  } catch (err) {
+    log("fail", `Index API error (skip=${skip}): ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
 }
 
 /**
@@ -142,7 +200,7 @@ function parseEpisodeMeta(html: string): { title: string | null; artwork: string
   return { title, artwork };
 }
 
-async function crawlEpisode(url: string, title: string, date: string | null): Promise<boolean> {
+async function crawlEpisode(url: string, title: string, date: string | null, prefetchedArtwork?: string | null): Promise<boolean> {
   await sleep(RATE_LIMIT_MS);
 
   const html = await fetchHtml(url);
@@ -155,7 +213,7 @@ async function crawlEpisode(url: string, title: string, date: string | null): Pr
   const meta = parseEpisodeMeta(html);
 
   const episodeTitle = meta.title || title;
-  const artwork = meta.artwork;
+  const artwork = prefetchedArtwork ?? meta.artwork;
 
   log("info", `  ${episodeTitle || url} — ${tracklist.length} tracks`);
 
@@ -193,34 +251,39 @@ async function main() {
   console.log(`  ${new Date().toISOString()}`);
   console.log(`  Options: limit=${crawlLimit}, offset=${crawlOffset}\n`);
 
-  // Check if DB has a metadata column on episodes (needed for tracklist storage)
-  // If not, we gracefully degrade by skipping tracklist storage in metadata
-  const { data: testEp } = await db.from("episodes").select("metadata").limit(1).single();
-  const hasMetadata = testEp !== null || true; // assume it exists based on tracks table pattern
+  const since = new Date().toISOString();
 
-  log("info", `Fetching Lot Radio index: ${LOT_BASE}/the-index`);
+  // Fetch the first page to get total count and first batch of episodes
+  log("info", `Fetching Lot Radio index via server action (offset=${crawlOffset})`);
   await sleep(RATE_LIMIT_MS);
 
-  const indexHtml = await fetchHtml(`${LOT_BASE}/the-index`);
-  if (!indexHtml) {
-    log("fail", "Could not fetch Lot Radio index page");
+  const firstPage = await fetchIndexPage(crawlOffset, Math.min(crawlLimit, 16), since);
+  if (!firstPage) {
+    log("fail", "Could not fetch Lot Radio index — action ID may have changed");
+    log("info", "To find the new action ID: open /the-index in browser devtools → Network → filter POST → copy next-action header");
     process.exit(1);
   }
 
-  const allEpisodes = parseIndexPage(indexHtml);
-  log("ok", `Found ${allEpisodes.length} episode links on index page`);
+  log("ok", `Total episodes available: ${firstPage.total}`);
 
-  if (allEpisodes.length === 0) {
-    log("warn", "No episodes found — the index page structure may have changed");
-    process.exit(0);
+  // Collect all episodes up to crawlLimit (in pages of 16)
+  const allEpisodes = [...firstPage.items];
+  const pageSize = 16;
+  let skip = crawlOffset + firstPage.items.length;
+
+  while (allEpisodes.length < crawlLimit && skip < crawlOffset + crawlLimit) {
+    await sleep(RATE_LIMIT_MS);
+    const remaining = crawlLimit - allEpisodes.length;
+    const page = await fetchIndexPage(skip, Math.min(remaining, pageSize), since);
+    if (!page || page.items.length === 0) break;
+    allEpisodes.push(...page.items);
+    skip += page.items.length;
   }
 
-  // Apply offset and limit
-  const episodesToCrawl = allEpisodes.slice(crawlOffset, crawlOffset + crawlLimit);
-  log("info", `Processing ${episodesToCrawl.length} episodes (offset=${crawlOffset}, limit=${crawlLimit})`);
+  log("info", `Fetched ${allEpisodes.length} episode URLs from index`);
 
   // Check which episodes are already in the DB
-  const urls = episodesToCrawl.map((e) => e.url);
+  const urls = allEpisodes.map((e) => e.url);
   const { data: existing } = await db.from("episodes")
     .select("url")
     .in("url", urls)
@@ -233,17 +296,17 @@ async function main() {
   let skipped = 0;
   let failed = 0;
 
-  for (const ep of episodesToCrawl) {
+  for (const ep of allEpisodes) {
     if (existingUrls.has(ep.url)) {
       log("skip", `Already crawled: ${ep.title || ep.url}`);
       skipped++;
       continue;
     }
 
-    const ok = await crawlEpisode(ep.url, ep.title, ep.date);
+    const ok = await crawlEpisode(ep.url, ep.title, ep.date, ep.artwork);
     if (ok) {
       crawled++;
-      log("ok", `[${crawled}/${episodesToCrawl.length - skipped}] ${ep.url}`);
+      log("ok", `[${crawled}] ${ep.url}`);
     } else {
       failed++;
     }
