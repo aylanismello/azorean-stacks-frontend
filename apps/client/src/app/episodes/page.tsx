@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { Episode, EpisodeTrack } from "@/lib/types";
 import { openYouTube } from "@/lib/youtube";
 
+type SourceTab = "all" | "nts" | "lotradio";
+
 export default function EpisodesPage() {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [total, setTotal] = useState(0);
@@ -11,14 +13,36 @@ export default function EpisodesPage() {
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [showSkipped, setShowSkipped] = useState(false);
+  const [sourceTab, setSourceTab] = useState<SourceTab>("all");
+  const [sourceCounts, setSourceCounts] = useState<{ all: number; nts: number; lotradio: number }>({ all: 0, nts: 0, lotradio: 0 });
   const limit = 30;
+
+  useEffect(() => {
+    const skippedParam = showSkipped ? "&show_skipped=true" : "";
+    Promise.all([
+      fetch(`/api/episodes?limit=1&offset=0${skippedParam}`).then((r) => r.json()),
+      fetch(`/api/episodes?limit=1&offset=0&source=nts${skippedParam}`).then((r) => r.json()),
+      fetch(`/api/episodes?limit=1&offset=0&source=lotradio${skippedParam}`).then((r) => r.json()),
+    ]).then(([allData, ntsData, lotData]) => {
+      setSourceCounts({ all: allData.total || 0, nts: ntsData.total || 0, lotradio: lotData.total || 0 });
+    });
+  }, [showSkipped]);
 
   const fetchEpisodes = useCallback(async () => {
     try {
-      const res = await fetch(`/api/episodes?limit=${limit}&offset=${offset}${showSkipped ? "&show_skipped=true" : ""}`);
+      const sourceParam = sourceTab !== "all" ? `&source=${sourceTab}` : "";
+      const res = await fetch(`/api/episodes?limit=${limit}&offset=${offset}${showSkipped ? "&show_skipped=true" : ""}${sourceParam}`);
       if (!res.ok) throw new Error(`Failed to load episodes (${res.status})`);
       const data = await res.json();
-      setEpisodes(data.episodes || []);
+      const sorted = (data.episodes || []).sort((a: Episode, b: Episode) => {
+        const aApproved = a.track_stats?.approved || 0;
+        const bApproved = b.track_stats?.approved || 0;
+        if (bApproved !== aApproved) return bApproved - aApproved;
+        const dateA = a.aired_date ? new Date(a.aired_date).getTime() : 0;
+        const dateB = b.aired_date ? new Date(b.aired_date).getTime() : 0;
+        return dateB - dateA;
+      });
+      setEpisodes(sorted);
       setTotal(data.total || 0);
       setError(null);
     } catch (err) {
@@ -26,7 +50,7 @@ export default function EpisodesPage() {
     } finally {
       setLoading(false);
     }
-  }, [offset, showSkipped]);
+  }, [offset, showSkipped, sourceTab]);
 
   useEffect(() => {
     fetchEpisodes();
@@ -47,9 +71,35 @@ export default function EpisodesPage() {
           {showSkipped ? "Hide skipped" : "Show skipped"}
         </button>
       </div>
-      <p className="text-sm text-muted mb-6">
+      <p className="text-sm text-muted mb-4">
         {total} episode{total !== 1 ? "s" : ""} crawled
       </p>
+
+      {/* Source tabs */}
+      <div className="flex gap-1.5 mb-6">
+        {(["all", "nts", "lotradio"] as const).map((tab) => {
+          const label = tab === "all" ? "All" : tab === "nts" ? "NTS" : "The Lot Radio";
+          const count = sourceCounts[tab];
+          return (
+            <button
+              key={tab}
+              onClick={() => { setSourceTab(tab); setOffset(0); }}
+              className={`text-[12px] px-3 py-1.5 rounded-full transition-colors ${
+                sourceTab === tab
+                  ? "bg-surface-2 text-foreground"
+                  : "text-muted/60 hover:text-muted hover:bg-surface-1"
+              }`}
+            >
+              {label}
+              {count > 0 && (
+                <span className={`ml-1.5 text-[10px] ${sourceTab === tab ? "opacity-50" : "opacity-40"}`}>
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
 
       {error && (
         <div className="mb-4 p-3 bg-red-400/10 border border-red-400/20 rounded-lg text-sm text-red-400">

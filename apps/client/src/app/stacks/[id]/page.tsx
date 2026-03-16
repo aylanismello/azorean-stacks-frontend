@@ -158,7 +158,10 @@ export default function StackDetailPage() {
   const sortedEpisodes = [...seed.episodes].sort((a, b) => {
     if (a.match_type === "full" && b.match_type !== "full") return -1;
     if (a.match_type !== "full" && b.match_type === "full") return 1;
-    return b.pending - a.pending;
+    if (b.approved !== a.approved) return b.approved - a.approved;
+    const dateA = a.aired_date ? new Date(a.aired_date).getTime() : 0;
+    const dateB = b.aired_date ? new Date(b.aired_date).getTime() : 0;
+    return dateB - dateA;
   });
   const pendingEpisodes = sortedEpisodes.filter((ep) => ep.pending > 0);
   const doneEpisodes = sortedEpisodes.filter((ep) => ep.pending === 0);
@@ -271,12 +274,12 @@ function EpisodeRow({
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-muted uppercase tracking-wider flex-shrink-0">
           {episode.source}
         </span>
-        <span className={`text-[9px] px-1 py-0.5 rounded flex-shrink-0 ${
+        <span className={`text-[9px] px-1.5 py-0.5 rounded flex-shrink-0 font-medium ${
           episode.match_type === "full"
-            ? "bg-accent/15 text-accent"
+            ? "bg-green-500/15 text-green-400"
             : "bg-amber-500/15 text-amber-400"
         }`}>
-          {episode.match_type === "full" ? "exact" : "artist only"}
+          {episode.match_type === "full" ? "✓ exact" : "~ artist"}
         </span>
         {episode.aired_date && (
           <span className="text-[10px] text-muted flex-shrink-0">
