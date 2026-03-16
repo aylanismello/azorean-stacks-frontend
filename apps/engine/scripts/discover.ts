@@ -31,6 +31,10 @@ const deadline = durationMinutes ? Date.now() + durationMinutes * 60_000 : null;
 const db = getSupabase();
 const ENRICH_CONCURRENCY = 5;
 const ENRICH_MAX_RETRIES = 3;
+const YT_DLP_BIN =
+  process.env.YT_DLP_BIN ||
+  Bun.which("yt-dlp") ||
+  "/opt/homebrew/bin/yt-dlp";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -715,7 +719,7 @@ async function youtubeLookup(artist: string, title: string): Promise<YouTubeResu
     const { primaryArtist, cleanTitle } = normalizeForSearch(artist, title);
     const searchQuery = `${primaryArtist} ${cleanTitle}`;
     const proc = Bun.spawn(
-      ["yt-dlp", "--dump-json", "--no-download", "--flat-playlist", "--no-warnings",
+      [YT_DLP_BIN, "--dump-json", "--no-download", "--flat-playlist", "--no-warnings",
        `ytsearch3:${searchQuery}`],
       { stdout: "pipe", stderr: "pipe" },
     );
@@ -796,55 +800,59 @@ async function enrichOne(track: any): Promise<boolean> {
   const label = `${track.artist} – ${track.title}`;
   const t0 = Date.now();
   const updates: Record<string, unknown> = {};
-  let spotFound = false;
-  let ytFound = false;
+  let spotFound = !!track.spotify_url;
+  let ytFound = !!track.youtube_url;
 
   let spotConfidence = 0;
   let ytThumbnail: string | null = null;
 
-  try {
-    const spot = await spotifyLookup(track.artist, track.title);
-    if (spot) {
-      spotFound = true;
-      spotConfidence = spot.spotify_confidence;
-      updates.spotify_url = spot.spotify_url;
-      if (!track.preview_url && spot.preview_url) updates.preview_url = spot.preview_url;
+  if (!track.spotify_url) {
+    try {
+      const spot = await spotifyLookup(track.artist, track.title);
+      if (spot) {
+        spotFound = true;
+        spotConfidence = spot.spotify_confidence;
+        updates.spotify_url = spot.spotify_url;
+        if (!track.preview_url && spot.preview_url) updates.preview_url = spot.preview_url;
 
-      // Only use Spotify cover art when confidence is high (strong match)
-      // The 65 floor in spotifyLookup already filters the worst, but we want
-      // extra confidence before trusting artwork since wrong art is very visible
-      if (!track.cover_art_url && spot.cover_art_url && spot.spotify_confidence >= 75) {
-        updates.cover_art_url = spot.cover_art_url;
+        // Only use Spotify cover art when confidence is high (strong match)
+        // The 65 floor in spotifyLookup already filters the worst, but we want
+        // extra confidence before trusting artwork since wrong art is very visible
+        if (!track.cover_art_url && spot.cover_art_url && spot.spotify_confidence >= 75) {
+          updates.cover_art_url = spot.cover_art_url;
+        }
+
+        // Fetch artist genres from Spotify
+        const genres = await spotifyArtistGenres(spot.artist_ids);
+
+        updates.metadata = {
+          ...(track.metadata || {}),
+          spotify_id: spot.spotify_id,
+          album: spot.album,
+          spotify_confidence: spot.spotify_confidence,
+          ...(genres.length > 0 ? { genres } : {}),
+        };
+      } else {
+        // Mark as checked with empty string so future repair passes can focus on YouTube.
+        updates.spotify_url = "";
       }
-
-      // Fetch artist genres from Spotify
-      const genres = await spotifyArtistGenres(spot.artist_ids);
-
-      updates.metadata = {
-        ...(track.metadata || {}),
-        spotify_id: spot.spotify_id,
-        album: spot.album,
-        spotify_confidence: spot.spotify_confidence,
-        ...(genres.length > 0 ? { genres } : {}),
-      };
-    } else {
-      // Mark as checked with empty string so `.is("spotify_url", null)` won't re-fetch
+    } catch (err) {
+      log("fail", `Spotify error for ${label}: ${err instanceof Error ? err.message : err}`);
       updates.spotify_url = "";
     }
-  } catch (err) {
-    log("fail", `Spotify error for ${label}: ${err instanceof Error ? err.message : err}`);
-    updates.spotify_url = "";
   }
 
-  try {
-    const yt = await youtubeLookup(track.artist, track.title);
-    if (yt) {
-      updates.youtube_url = yt.url;
-      ytFound = true;
-      ytThumbnail = yt.thumbnail;
+  if (!track.youtube_url) {
+    try {
+      const yt = await youtubeLookup(track.artist, track.title);
+      if (yt) {
+        updates.youtube_url = yt.url;
+        ytFound = true;
+        ytThumbnail = yt.thumbnail;
+      }
+    } catch (err) {
+      log("fail", `YouTube error for ${label}: ${err instanceof Error ? err.message : err}`);
     }
-  } catch (err) {
-    log("fail", `YouTube error for ${label}: ${err instanceof Error ? err.message : err}`);
   }
 
   // Artwork fallback: use NTS episode artwork (always contextually correct)
@@ -877,8 +885,9 @@ async function runEnrich(): Promise<number> {
 
   // Count total pending before we start
   const { count: pendingCount } = await db.from("tracks")
-    .select("*", { count: "exact", head: true })
-    .eq("status", "pending").is("spotify_url", null);
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending")
+    .or("spotify_url.is.null,and(youtube_url.is.null,storage_path.is.null)");
   console.log(`  ${pendingCount ?? "?"} tracks pending enrichment`);
 
   if (pendingCount === 0) {
@@ -890,16 +899,19 @@ async function runEnrich(): Promise<number> {
   let failed = 0;
   let round = 0;
   const failCounts = new Map<string, number>(); // track id -> retry count
+  const processedIds = new Set<string>();
 
   while (true) {
     round++;
     const { data: tracks } = await db.from("tracks").select("*")
-      .eq("status", "pending").is("spotify_url", null)
+      .eq("status", "pending")
+      .or("spotify_url.is.null,and(youtube_url.is.null,storage_path.is.null)")
       .order("created_at").limit(30);
     if (!tracks?.length) break;
 
     // Filter out tracks that have exceeded max retries
     const eligible = tracks.filter((t) => {
+      if (processedIds.has(t.id)) return false;
       const retries = failCounts.get(t.id) || 0;
       if (retries >= ENRICH_MAX_RETRIES) {
         log("warn", `Giving up after ${retries} failures: ${t.artist} – ${t.title}`);
@@ -909,8 +921,14 @@ async function runEnrich(): Promise<number> {
     });
 
     if (!eligible.length) {
+      // If we've exhausted the current window of tracks, move on.
+      if (tracks.every((t) => processedIds.has(t.id))) {
+        break;
+      }
+
       // All remaining tracks have been retried too many times — mark them and bail
       for (const t of tracks) {
+        if (processedIds.has(t.id)) continue;
         await db.from("tracks").update({ spotify_url: "", metadata: { ...(t.metadata || {}), enrich_error: "max retries exceeded" } }).eq("id", t.id);
       }
       log("warn", `${tracks.length} tracks failed after ${ENRICH_MAX_RETRIES} retries — marked and moving on`);
@@ -918,6 +936,9 @@ async function runEnrich(): Promise<number> {
     }
 
     console.log(`  Round ${round}: ${eligible.length} tracks (${elapsed(t0)} elapsed)`);
+    for (const track of eligible) {
+      processedIds.add(track.id);
+    }
 
     for (let i = 0; i < eligible.length; i += ENRICH_CONCURRENCY) {
       const batch = eligible.slice(i, i + ENRICH_CONCURRENCY);

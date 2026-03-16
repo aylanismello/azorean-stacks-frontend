@@ -1,14 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 import { getServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/seeds
-export async function GET() {
+export async function GET(req: NextRequest) {
   const supabase = getServiceClient();
+  const auth = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return req.cookies.getAll();
+        },
+        setAll() {
+          // Read-only access to auth cookies in route handlers.
+        },
+      },
+    }
+  );
+  const {
+    data: { user },
+  } = await auth.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { data, error } = await supabase
     .from("seeds")
     .select("*")
+    .or(`user_id.eq.${user.id},user_id.is.null`)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -198,6 +222,28 @@ async function parseInput(input: string): Promise<{ artist: string; title: strin
 // POST /api/seeds
 export async function POST(req: NextRequest) {
   const supabase = getServiceClient();
+  const auth = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return req.cookies.getAll();
+        },
+        setAll() {
+          // Read-only access to auth cookies in route handlers.
+        },
+      },
+    }
+  );
+  const {
+    data: { user },
+  } = await auth.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const body = await req.json();
 
   let artist: string;
@@ -230,6 +276,7 @@ export async function POST(req: NextRequest) {
   const { data: existingSeed } = await supabase
     .from("seeds")
     .select("id")
+    .or(`user_id.eq.${user.id},user_id.is.null`)
     .ilike("artist", escArtist)
     .ilike("title", escTitle)
     .limit(1)
@@ -256,7 +303,8 @@ export async function POST(req: NextRequest) {
       artist,
       title,
       track_id: existingTrack?.id || null,
-      ...(source ? { source } : {}),
+      user_id: user.id,
+      source: source || "manual",
     })
     .select()
     .single();

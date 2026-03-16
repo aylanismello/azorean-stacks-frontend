@@ -1,7 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 import { getServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
+
+async function getAuthenticatedUser(req: NextRequest) {
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return req.cookies.getAll();
+        },
+        setAll() {
+          // Read-only access to auth cookies in route handlers.
+        },
+      },
+    }
+  );
+
+  return supabase.auth.getUser();
+}
 
 // PATCH /api/seeds/[id] — toggle active
 export async function PATCH(
@@ -9,6 +29,14 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   const supabase = getServiceClient();
+  const {
+    data: { user },
+  } = await getAuthenticatedUser(req);
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const body = await req.json();
 
   const updates: Record<string, unknown> = {};
@@ -24,6 +52,7 @@ export async function PATCH(
     .from("seeds")
     .update(updates)
     .eq("id", params.id)
+    .or(`user_id.eq.${user.id},user_id.is.null`)
     .select()
     .single();
 
@@ -36,10 +65,17 @@ export async function PATCH(
 
 // DELETE /api/seeds/[id]
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const supabase = getServiceClient();
+  const {
+    data: { user },
+  } = await getAuthenticatedUser(req);
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   // discovery_runs.seed_id does not cascade on delete, so clean up history first
   const { error: runsError } = await supabase
@@ -54,7 +90,8 @@ export async function DELETE(
   const { error } = await supabase
     .from("seeds")
     .delete()
-    .eq("id", params.id);
+    .eq("id", params.id)
+    .or(`user_id.eq.${user.id},user_id.is.null`);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

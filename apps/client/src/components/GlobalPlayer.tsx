@@ -72,21 +72,21 @@ export function GlobalPlayer() {
   return (
     <div className="global-player fixed left-0 right-0 z-40 hidden md:block md:bottom-0">
       {/* Player bar */}
-      <div className="bg-surface-1/95 backdrop-blur-xl border-t border-surface-2 px-3 py-1.5 flex flex-col gap-0">
-        {/* Progress bar — full width, compact hit area */}
+      <div className="global-player-shell border-t border-surface-2 px-3 py-2">
+        {/* Progress bar */}
         <div
           ref={progressRef}
-          className="group relative z-10 h-3 cursor-pointer touch-none flex items-center -mx-3"
+          className="group relative z-10 mb-2 flex h-4 cursor-pointer items-center touch-none"
           onMouseDown={handleSeekStart}
           onTouchStart={handleTouchSeek}
         >
-          <div className="relative w-full h-[3px] bg-surface-3 group-hover:h-1 transition-all overflow-visible">
+          <div className="relative h-1.5 w-full overflow-visible rounded-full bg-surface-3/80 transition-all group-hover:bg-surface-3">
             <div
-              className="absolute inset-y-0 left-0 bg-accent transition-[width] duration-75"
+              className="absolute inset-y-0 left-0 rounded-full bg-accent transition-[width] duration-75"
               style={{ width: `${pct}%` }}
             />
             <div
-              className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 bg-accent rounded-full shadow-lg shadow-black/50 transition-all ${
+              className={`absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-black/10 bg-accent shadow-lg shadow-black/40 transition-all ${
                 dragging ? "scale-125 opacity-100" : "scale-0 group-hover:scale-100 opacity-0 group-hover:opacity-100"
               }`}
               style={{ left: `${pct}%` }}
@@ -183,6 +183,8 @@ export function GlobalPlayer() {
             <button
               onClick={togglePlayPause}
               className="w-9 h-9 flex items-center justify-center rounded-full bg-foreground text-surface-0 hover:scale-105 transition-transform active:scale-95 flex-shrink-0"
+              title={playing ? "Pause track" : "Play track"}
+              aria-label={playing ? "Pause track" : "Play track"}
             >
               {loading ? (
                 <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">

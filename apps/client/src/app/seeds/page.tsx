@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Seed, EpisodeTrack } from "@/lib/types";
 import { SeedForm } from "@/components/SeedForm";
 import { useAuth } from "@/components/AuthProvider";
+import { isReseed } from "@/lib/seeds";
 import { openYouTube } from "@/lib/youtube";
 
 // Decode common HTML entities that may be stored in DB from NTS/external APIs
@@ -16,10 +17,6 @@ function decodeEntities(s: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#0?39;/g, "'")
     .replace(/&#x27;/g, "'");
-}
-
-function isReseed(seed: Seed): boolean {
-  return seed.source === "re-seed" || !!seed.user_id;
 }
 
 export default function SeedsPage() {

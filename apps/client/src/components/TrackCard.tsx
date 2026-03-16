@@ -4,6 +4,7 @@ import { useState, useCallback, useRef } from "react";
 import { Track } from "@/lib/types";
 import { openYouTube } from "@/lib/youtube";
 import { useGlobalPlayer } from "./GlobalPlayerProvider";
+import { useSpotify } from "./SpotifyProvider";
 
 interface TrackCardProps {
   track: Track;
@@ -55,6 +56,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
   const [swipeX, setSwipeX] = useState(0);
   const touchRef = useRef<{ startX: number; startY: number; swiping: boolean } | null>(null);
   const globalPlayer = useGlobalPlayer();
+  const spotify = useSpotify();
 
   const handleCopy = useCallback(async () => {
     await navigator.clipboard.writeText(`${track.artist} - ${track.title}`);
@@ -138,7 +140,7 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
   const coverUrl = safeCoverUrl(track.cover_art_url) || safeCoverUrl(track.episode?.artwork_url ?? null);
   const meta = track.metadata as Record<string, string | undefined>;
   const hasAudio = !!(track.audio_url || track.preview_url);
-  const hasPlayableSource = hasAudio || !!track.spotify_url;
+  const hasPlayableSource = hasAudio || (!!track.spotify_url && spotify.connected && !!spotify.deviceId);
   const isCurrentTrack = globalPlayer.currentTrack?.id === track.id;
 
   const handleArtworkPlay = useCallback(() => {
@@ -239,6 +241,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
           <button
             onClick={handleRewind}
             className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/50 active:scale-90 transition-all"
+            title="Rewind 30 seconds"
+            aria-label="Rewind 30 seconds"
           >
             {rewindIcon}
           </button>
@@ -246,6 +250,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
           {/* Play/pause */}
           <button
             onClick={handleArtworkPlay}
+            title={isCurrentTrack && globalPlayer.playing ? "Pause track" : "Play track"}
+            aria-label={isCurrentTrack && globalPlayer.playing ? "Pause track" : "Play track"}
           >
             <span className="flex items-center justify-center w-16 h-16 rounded-full backdrop-blur-md bg-black/40 transition-all active:scale-90">
               {isCurrentTrack && globalPlayer.loading ? (
@@ -269,6 +275,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
           <button
             onClick={handleForward}
             className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 hover:text-white hover:bg-black/50 active:scale-90 transition-all"
+            title="Skip ahead 30 seconds"
+            aria-label="Skip ahead 30 seconds"
           >
             {forwardIcon}
           </button>
@@ -409,6 +417,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
         onClick={() => handleVote("rejected", true)}
         disabled={voting}
         className="flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-full bg-surface-2 md:bg-black/40 md:backdrop-blur-md border-2 border-red-400/30 text-red-400/80 hover:bg-red-950/50 hover:border-red-400/60 hover:text-red-400 transition-all active:scale-90 disabled:opacity-50"
+        title="Reject track"
+        aria-label="Reject track"
       >
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -449,6 +459,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
           onClick={handleAdvance}
           disabled={voting}
           className="flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-full bg-green-500/20 border-2 border-green-400 text-green-400 transition-all active:scale-90 disabled:opacity-50 kept-pop approve-glow"
+          title="Advance to next track"
+          aria-label="Advance to next track"
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
@@ -459,6 +471,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
           onClick={() => handleVote("approved", false)}
           disabled={voting}
           className="flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-full bg-surface-2 md:bg-black/40 md:backdrop-blur-md border-2 border-green-400/30 text-green-400/80 hover:bg-green-950/50 hover:border-green-400/60 hover:text-green-400 transition-all active:scale-90 disabled:opacity-50"
+          title="Keep track"
+          aria-label="Keep track"
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
@@ -507,6 +521,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
               <button
                 onClick={handleRewind}
                 className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 active:scale-90 transition-all"
+                title="Rewind 30 seconds"
+                aria-label="Rewind 30 seconds"
               >
                 {rewindIcon}
               </button>
@@ -515,6 +531,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
               <button
                 onClick={handleArtworkPlay}
                 className="group/play"
+                title={isCurrentTrack && globalPlayer.playing ? "Pause track" : "Play track"}
+                aria-label={isCurrentTrack && globalPlayer.playing ? "Pause track" : "Play track"}
               >
                 <span
                   className={`flex items-center justify-center w-16 h-16 rounded-full backdrop-blur-md transition-all active:scale-90 bg-black/30 ${
@@ -542,6 +560,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
               <button
                 onClick={handleForward}
                 className="w-10 h-10 flex items-center justify-center rounded-full bg-black/30 backdrop-blur-sm text-white/80 active:scale-90 transition-all"
+                title="Skip ahead 30 seconds"
+                aria-label="Skip ahead 30 seconds"
               >
                 {forwardIcon}
               </button>
@@ -649,6 +669,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
               onClick={() => handleVote("rejected", true)}
               disabled={voting}
               className="flex items-center justify-center w-13 h-13 rounded-full bg-black/40 backdrop-blur-md border-2 border-red-400/40 text-red-400/90 active:scale-90 transition-all disabled:opacity-50"
+              title="Reject track"
+              aria-label="Reject track"
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -689,6 +711,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
                 onClick={handleAdvance}
                 disabled={voting}
                 className="flex items-center justify-center w-13 h-13 rounded-full bg-green-500/20 backdrop-blur-md border-2 border-green-400 text-green-400 transition-all active:scale-90 disabled:opacity-50 kept-pop approve-glow"
+                title="Advance to next track"
+                aria-label="Advance to next track"
               >
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12" />
@@ -699,6 +723,8 @@ export function TrackCard({ track, onVote, onSkipEpisode, skippingEpisode }: Tra
                 onClick={() => handleVote("approved", false)}
                 disabled={voting}
                 className="flex items-center justify-center w-13 h-13 rounded-full bg-black/40 backdrop-blur-md border-2 border-green-400/40 text-green-400/90 active:scale-90 transition-all disabled:opacity-50"
+                title="Keep track"
+                aria-label="Keep track"
               >
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />

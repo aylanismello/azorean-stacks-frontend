@@ -102,7 +102,7 @@ export interface Seed {
   artist: string;
   title: string;
   active: boolean;
-  source?: string | null;
+  source?: "manual" | "re-seed" | null;
   created_at: string;
   discovery_count?: number;
   episodes?: Array<{ id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[] }>;

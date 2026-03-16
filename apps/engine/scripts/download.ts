@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, readdirSync } from "fs
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
   options: {
-    limit: { type: "string", default: "20" },
+    limit: { type: "string", default: "60" },
     force: { type: "boolean", default: false },
     duration: { type: "string" },
   },
@@ -36,6 +36,10 @@ const DL_CONCURRENCY = 6;
 const TMP_DIR = "/tmp/stacks";
 const DL_TIMEOUT = 90_000;
 const MAX_ATTEMPTS = 3;
+const YT_DLP_BIN =
+  process.env.YT_DLP_BIN ||
+  Bun.which("yt-dlp") ||
+  "/opt/homebrew/bin/yt-dlp";
 
 function sanitize(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -76,7 +80,7 @@ async function downloadOne(track: any): Promise<boolean> {
   const expectedPath = `${TMP_DIR}/${videoId}.mp3`;
 
   const dlProc = Bun.spawn(
-    ["yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "0",
+    [YT_DLP_BIN, "-x", "--audio-format", "mp3", "--audio-quality", "0",
      "--no-playlist", "--no-warnings", "-o", outPath, track.youtube_url],
     { stdout: "ignore", stderr: "ignore" },
   );

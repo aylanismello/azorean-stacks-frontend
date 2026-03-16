@@ -104,7 +104,7 @@ export function EpisodeTracklist(props: TracklistProps) {
   const handlePlay = (t: TrackListItem) => {
     const audioUrl = t.audio_url || t.preview_url || null;
     const origin = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/";
-    globalPlayer.play({
+    const trackPayload = {
       id: t.id,
       artist: t.artist,
       title: t.title,
@@ -114,7 +114,13 @@ export function EpisodeTracklist(props: TracklistProps) {
       episodeId: episodeId,
       episodeTitle: episodeTitle || undefined,
       youtubeUrl: t.youtube_url,
-    }, origin);
+    };
+
+    if (audioUrl || t.spotify_url) {
+      globalPlayer.play(trackPayload, origin);
+    } else {
+      globalPlayer.loadTrack(trackPayload, origin);
+    }
   };
 
   const statusDot = (s: string) => {
@@ -191,14 +197,14 @@ export function EpisodeTracklist(props: TracklistProps) {
                   ref={isPlaying ? playingRef : undefined}
                   onClick={() => {
                     onTrackSelect?.(t.id);
-                    if (hasAudio) handlePlay(t);
+                    handlePlay(t);
                   }}
                   disabled={false}
                   className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-2.5 transition-colors group ${
                     isPlaying
                       ? "bg-accent/10 border border-accent/20"
                       : "hover:bg-surface-2 border border-transparent"
-                  } ${!hasAudio ? "opacity-40 cursor-default" : ""}`}
+                  } ${!hasAudio ? "opacity-60" : ""}`}
                 >
                   {/* Status dot */}
                   <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(t.status)}`} />

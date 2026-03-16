@@ -5,6 +5,10 @@
 import { getSupabase } from "./supabase";
 
 const db = getSupabase();
+const YT_DLP_BIN =
+  process.env.YT_DLP_BIN ||
+  Bun.which("yt-dlp") ||
+  "/opt/homebrew/bin/yt-dlp";
 
 // ─── GENERAL UTILITIES ──────────────────────────────────────
 
@@ -299,7 +303,7 @@ export async function youtubeLookup(artist: string, title: string): Promise<YouT
     const { primaryArtist, cleanTitle } = normalizeForSearch(artist, title);
     const searchQuery = `${primaryArtist} ${cleanTitle}`;
     const proc = Bun.spawn(
-      ["yt-dlp", "--dump-json", "--no-download", "--flat-playlist", "--no-warnings",
+      [YT_DLP_BIN, "--dump-json", "--no-download", "--flat-playlist", "--no-warnings",
        `ytsearch3:${searchQuery}`],
       { stdout: "pipe", stderr: "pipe" },
     );
@@ -367,42 +371,46 @@ export async function enrichTrack(track: any): Promise<boolean> {
   const label = `${track.artist} – ${track.title}`;
   const t0 = Date.now();
   const updates: Record<string, unknown> = {};
-  let spotFound = false;
-  let ytFound = false;
+  let spotFound = !!track.spotify_url;
+  let ytFound = !!track.youtube_url;
 
-  try {
-    const spot = await spotifyLookup(track.artist, track.title);
-    if (spot) {
-      spotFound = true;
-      updates.spotify_url = spot.spotify_url;
-      if (!track.preview_url && spot.preview_url) updates.preview_url = spot.preview_url;
-      if (!track.cover_art_url && spot.cover_art_url && spot.spotify_confidence >= 75) {
-        updates.cover_art_url = spot.cover_art_url;
+  if (!track.spotify_url) {
+    try {
+      const spot = await spotifyLookup(track.artist, track.title);
+      if (spot) {
+        spotFound = true;
+        updates.spotify_url = spot.spotify_url;
+        if (!track.preview_url && spot.preview_url) updates.preview_url = spot.preview_url;
+        if (!track.cover_art_url && spot.cover_art_url && spot.spotify_confidence >= 75) {
+          updates.cover_art_url = spot.cover_art_url;
+        }
+        const genres = await spotifyArtistGenres(spot.artist_ids);
+        updates.metadata = {
+          ...(track.metadata || {}),
+          spotify_id: spot.spotify_id,
+          album: spot.album,
+          spotify_confidence: spot.spotify_confidence,
+          ...(genres.length > 0 ? { genres } : {}),
+        };
+      } else {
+        updates.spotify_url = "";
       }
-      const genres = await spotifyArtistGenres(spot.artist_ids);
-      updates.metadata = {
-        ...(track.metadata || {}),
-        spotify_id: spot.spotify_id,
-        album: spot.album,
-        spotify_confidence: spot.spotify_confidence,
-        ...(genres.length > 0 ? { genres } : {}),
-      };
-    } else {
+    } catch (err) {
+      log("fail", `Spotify error for ${label}: ${err instanceof Error ? err.message : err}`);
       updates.spotify_url = "";
     }
-  } catch (err) {
-    log("fail", `Spotify error for ${label}: ${err instanceof Error ? err.message : err}`);
-    updates.spotify_url = "";
   }
 
-  try {
-    const yt = await youtubeLookup(track.artist, track.title);
-    if (yt) {
-      updates.youtube_url = yt.url;
-      ytFound = true;
+  if (!track.youtube_url) {
+    try {
+      const yt = await youtubeLookup(track.artist, track.title);
+      if (yt) {
+        updates.youtube_url = yt.url;
+        ytFound = true;
+      }
+    } catch (err) {
+      log("fail", `YouTube error for ${label}: ${err instanceof Error ? err.message : err}`);
     }
-  } catch (err) {
-    log("fail", `YouTube error for ${label}: ${err instanceof Error ? err.message : err}`);
   }
 
   // Artwork fallback: use NTS episode artwork
@@ -448,7 +456,7 @@ export async function downloadTrack(track: any): Promise<boolean> {
   const expectedPath = `${TMP_DIR}/${videoId}.mp3`;
 
   const dlProc = Bun.spawn(
-    ["yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "0",
+    [YT_DLP_BIN, "-x", "--audio-format", "mp3", "--audio-quality", "0",
      "--no-playlist", "--no-warnings", "-o", outPath, track.youtube_url],
     { stdout: "ignore", stderr: "ignore" },
   );

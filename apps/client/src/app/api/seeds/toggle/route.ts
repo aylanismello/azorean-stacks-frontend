@@ -55,6 +55,7 @@ export async function POST(req: NextRequest) {
       .from("seeds")
       .select("id")
       .eq("user_id", user.id)
+      .eq("source", "re-seed")
       .ilike("artist", escArtist)
       .ilike("title", escTitle)
       .limit(1)
@@ -76,6 +77,7 @@ export async function POST(req: NextRequest) {
       title: title.trim(),
       track_id: track_id || null,
       user_id: user.id,
+      source: "re-seed",
     })
     .select("id")
     .single();
@@ -84,5 +86,35 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ action: "created", seed_id: newSeed.id }, { status: 201 });
+  let discoverTriggered = false;
+  let discoverError: string | null = null;
+
+  try {
+    const discoverUrl = new URL("/api/discover", req.url);
+    const response = await fetch(discoverUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({
+        seed_id: newSeed.id,
+        user_id: user.id,
+      }),
+    });
+    discoverTriggered = response.ok;
+    if (!response.ok) {
+      discoverError = await response.text();
+    }
+  } catch (err) {
+    discoverError = err instanceof Error ? err.message : String(err);
+  }
+
+  return NextResponse.json(
+    {
+      action: "created",
+      seed_id: newSeed.id,
+      discover_triggered: discoverTriggered,
+      discover_error: discoverError,
+    },
+    { status: 201 }
+  );
 }

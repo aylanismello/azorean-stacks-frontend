@@ -8,11 +8,11 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-engine/runner.sh</string>
+        <string>/Users/pico/.openclaw/workspace/repos/azorean-stacks/apps/engine/runner.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/pico/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-engine</string>
+    <string>/Users/pico/.openclaw/workspace/repos/azorean-stacks/apps/engine</string>
 
     <key>RunAtLoad</key>
     <true/>

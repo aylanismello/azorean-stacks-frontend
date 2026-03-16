@@ -4,10 +4,10 @@ Use the Playwright MCP server for visual testing — NOT agent-browser.
 
 ### How to use Playwright MCP
 1. If browser not installed, call `mcp__playwright__browser_install` first
-2. Navigate to the app: `mcp__playwright__browser_navigate` → `http://localhost:3002`
+2. Navigate to the app: `mcp__playwright__browser_navigate` → `http://localhost:3004`
 3. Take screenshots: `mcp__playwright__browser_take_screenshot`
 4. Use `mcp__playwright__browser_snapshot` to get the accessibility tree for interacting with elements
-5. Dev server runs on **port 3002**
+5. Dev server runs on **port 3004**
 
 ### Viewport & device settings
 - Test at iPhone viewport: 390x844 (iPhone 14) or 375x812 (iPhone 13)

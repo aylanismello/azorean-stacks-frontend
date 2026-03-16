@@ -225,6 +225,7 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
 
   const togglePlayPause = useCallback(() => {
     if (!currentTrack) return;
+    if (noSource) return;
 
     if (source === "audio") {
       const audio = audioRef.current;
@@ -256,7 +257,7 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
       // Source not set yet — treat like first play
       play(currentTrack);
     }
-  }, [source, playing, spotify, currentTrack, play]);
+  }, [source, playing, spotify, currentTrack, play, noSource]);
 
   const seek = useCallback((seconds: number) => {
     if (source === "audio") {

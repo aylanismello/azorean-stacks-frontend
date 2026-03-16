@@ -288,25 +288,162 @@ async function processSeed(seedId: string) {
 // ─── REALTIME SUBSCRIPTION ──────────────────────────────────
 
 let processing = false;
-const queue: string[] = [];
+const seedQueue: string[] = [];
+const trackQueue: string[] = [];
+
+function enqueueSeed(seedId: string) {
+  if (!seedId) return;
+  if (seedQueue.includes(seedId)) return;
+  seedQueue.push(seedId);
+}
+
+function enqueueTrack(trackId: string) {
+  if (!trackId) return;
+  if (trackQueue.includes(trackId)) return;
+  trackQueue.push(trackId);
+}
+
+async function enqueueBacklogSeeds() {
+  const { data: seeds, error: seedErr } = await db.from("seeds")
+    .select("id, artist, title, created_at")
+    .eq("active", true)
+    .order("created_at", { ascending: true });
+
+  if (seedErr || !seeds?.length) {
+    if (seedErr) log("fail", `Backlog seed scan failed: ${seedErr.message}`);
+    return;
+  }
+
+  const seedIds = seeds.map((seed) => seed.id);
+  const [{ data: episodeLinks, error: episodeErr }, { data: runLinks, error: runErr }] = await Promise.all([
+    db.from("episode_seeds").select("seed_id").in("seed_id", seedIds),
+    db.from("discovery_runs").select("seed_id").in("seed_id", seedIds),
+  ]);
+
+  if (episodeErr || runErr) {
+    log("fail", `Backlog scan failed: ${episodeErr?.message || runErr?.message}`);
+    return;
+  }
+
+  const seedsWithEpisodes = new Set((episodeLinks || []).map((link: any) => link.seed_id));
+  const seedsWithRuns = new Set((runLinks || []).map((link: any) => link.seed_id));
+  const freshSeeds = seeds.filter((seed) => !seedsWithEpisodes.has(seed.id) && !seedsWithRuns.has(seed.id));
+
+  if (freshSeeds.length === 0) {
+    log("info", "No backlog seeds to recover");
+    return;
+  }
+
+  for (const seed of freshSeeds) {
+    enqueueSeed(seed.id);
+  }
+
+  log("info", `Recovered ${freshSeeds.length} fresh seed(s) missed before watcher startup`);
+}
+
+async function enqueueBacklogTracks() {
+  const { data: tracks, error } = await db.from("tracks")
+    .select("id, status, spotify_url, youtube_url, storage_path, created_at")
+    .in("status", ["pending", "approved"])
+    .is("storage_path", null)
+    .order("created_at", { ascending: true })
+    .limit(500);
+
+  if (error) {
+    log("fail", `Backlog track scan failed: ${error.message}`);
+    return;
+  }
+
+  const incomplete = (tracks || []).filter((track) =>
+    !track.youtube_url || (track.status === "pending" && !track.spotify_url)
+  );
+
+  if (incomplete.length === 0) {
+    log("info", "No backlog tracks to recover");
+    return;
+  }
+
+  for (const track of incomplete) {
+    enqueueTrack(track.id);
+  }
+
+  log("info", `Recovered ${incomplete.length} incomplete track(s) for enrich/download repair`);
+}
+
+async function processTrack(trackId: string) {
+  const { data: track, error } = await db.from("tracks")
+    .select("*")
+    .eq("id", trackId)
+    .single();
+
+  if (error || !track) {
+    log("fail", `Could not read track ${trackId}: ${error?.message ?? "not found"}`);
+    return;
+  }
+
+  const label = `${track.artist} – ${track.title}`;
+  const shouldEnrich =
+    track.status === "pending" &&
+    (!track.spotify_url || (!track.youtube_url && !track.storage_path));
+  const canDownload =
+    ["pending", "approved"].includes(track.status) &&
+    !!track.youtube_url &&
+    !track.storage_path;
+
+  if (!shouldEnrich && !canDownload) {
+    return;
+  }
+
+  log("info", `Repairing track: ${label}`);
+
+  if (shouldEnrich) {
+    await enrichTrack(track);
+  }
+
+  const { data: refreshed } = await db.from("tracks")
+    .select("*")
+    .eq("id", trackId)
+    .single();
+
+  if (!refreshed) return;
+
+  if (
+    ["pending", "approved"].includes(refreshed.status) &&
+    refreshed.youtube_url &&
+    !refreshed.storage_path
+  ) {
+    const ok = await downloadTrack(refreshed);
+    log(ok ? "ok" : "fail", `Repair DL: ${label}`);
+  }
+}
 
 async function processQueue() {
   if (processing) return;
   processing = true;
 
-  while (queue.length > 0) {
-    const seedId = queue.shift()!;
+  while (seedQueue.length > 0 || trackQueue.length > 0) {
     lastEventAt = new Date().toISOString();
     updateStatusFile();
 
+    if (seedQueue.length > 0) {
+      const seedId = seedQueue.shift()!;
+      try {
+        await processSeed(seedId);
+      } catch (err) {
+        log("fail", `Pipeline error for seed ${seedId}: ${err instanceof Error ? err.message : err}`);
+        await logEngineEvent("error", "failed", {
+          seedId,
+          message: `Pipeline error: ${err instanceof Error ? err.message : err}`,
+        });
+      }
+      continue;
+    }
+
+    const trackId = trackQueue.shift()!;
     try {
-      await processSeed(seedId);
+      await processTrack(trackId);
     } catch (err) {
-      log("fail", `Pipeline error for seed ${seedId}: ${err instanceof Error ? err.message : err}`);
-      await logEngineEvent("error", "failed", {
-        seedId,
-        message: `Pipeline error: ${err instanceof Error ? err.message : err}`,
-      });
+      log("fail", `Repair error for track ${trackId}: ${err instanceof Error ? err.message : err}`);
     }
   }
 
@@ -327,11 +464,25 @@ function startWatcher() {
           return;
         }
         log("ok", `Seed INSERT detected: ${payload.new?.artist} – ${payload.new?.title} (${seedId})`);
-        queue.push(seedId);
+        enqueueSeed(seedId);
         processQueue();
       },
     )
-    .subscribe((status) => {
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "user_tracks" },
+      (payload) => {
+        const trackId = payload.new?.track_id;
+        if (!trackId) {
+          log("warn", "Received user_track INSERT without track_id");
+          return;
+        }
+        log("ok", `user_track INSERT detected for track ${trackId}`);
+        enqueueTrack(trackId);
+        processQueue();
+      },
+    )
+    .subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
         watcherConnectedAt = new Date().toISOString();
         log("ok", "Realtime subscription active — watching for new seeds");
@@ -339,6 +490,9 @@ function startWatcher() {
           message: "Watcher connected to Supabase Realtime",
         });
         updateStatusFile();
+        await enqueueBacklogSeeds();
+        await enqueueBacklogTracks();
+        processQueue();
       } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
         log("warn", `Realtime channel ${status} — will attempt reconnect`);
         logEngineEvent("watcher_disconnected", "info", {

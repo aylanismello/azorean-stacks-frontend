@@ -8,6 +8,32 @@ import { EpisodeTracklist, TracklistSheet } from "@/components/EpisodeTracklist"
 import { useGlobalPlayer } from "@/components/GlobalPlayerProvider";
 import { useSpotify } from "@/components/SpotifyProvider";
 
+function mergeTrackSession(existing: Track[], incoming: Track[]): Track[] {
+  const merged = new Map(existing.map((track) => [track.id, track]));
+  for (const track of incoming) {
+    merged.set(track.id, { ...merged.get(track.id), ...track });
+  }
+
+  const seen = new Set<string>();
+  const ordered: Track[] = [];
+
+  for (const track of existing) {
+    const next = merged.get(track.id);
+    if (!next || seen.has(track.id)) continue;
+    ordered.push(next);
+    seen.add(track.id);
+  }
+
+  for (const track of incoming) {
+    const next = merged.get(track.id);
+    if (!next || seen.has(track.id)) continue;
+    ordered.push(next);
+    seen.add(track.id);
+  }
+
+  return ordered;
+}
+
 export default function StackPage() {
   return (
     <Suspense
@@ -27,6 +53,9 @@ function StackPageContent() {
   const router = useRouter();
   const globalPlayer = useGlobalPlayer();
   const { connected: spotifyConnected } = useSpotify();
+  const desktopPlayerFrameClass = globalPlayer.currentTrack
+    ? "md:h-[calc(100dvh-148px)] md:pb-6"
+    : "md:h-[calc(100dvh-100px)] md:pb-4";
 
   // URL-driven state
   const episodeId = searchParams.get("episode_id");
@@ -45,6 +74,7 @@ function StackPageContent() {
   const isTasteMode = stackSource === "taste" || stackSource === "genre" || isSeedMode || (!stackSource && !episodeId);
 
   const [tracks, setTracks] = useState<Track[]>([]);
+  const [sessionTracks, setSessionTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -108,6 +138,9 @@ function StackPageContent() {
       const data = await res.json();
       const newTracks: Track[] = data.tracks || [];
       setTracks(newTracks);
+      setSessionTracks((prev) =>
+        episodeId || !isTasteMode ? newTracks : mergeTrackSession(prev, newTracks)
+      );
       setTotal(data.total || 0);
       setError(null);
       setAdvancingEpisode(false);
@@ -128,6 +161,10 @@ function StackPageContent() {
   useEffect(() => {
     fetchTracks();
   }, [fetchTracks]);
+
+  useEffect(() => {
+    setSessionTracks([]);
+  }, [episodeId, stackSource, genreFilter, seedFilter]);
 
   // Reconcile tracks with globalPlayer.currentTrack after fetch completes.
   // When re-mounting (e.g. navigating back to Playing tab), fetchTracks gets fresh
@@ -173,6 +210,23 @@ function StackPageContent() {
         episode_id: playerTrack.episodeId,
         status: "pending",
       } as Track;
+      return [synthetic, ...prev];
+    });
+
+    setSessionTracks((prev) => {
+      if (prev.some((track) => track.id === playerTrack.id)) return prev;
+
+      const synthetic: Track = {
+        id: playerTrack.id,
+        artist: playerTrack.artist,
+        title: playerTrack.title,
+        cover_art_url: playerTrack.coverArtUrl,
+        spotify_url: playerTrack.spotifyUrl,
+        audio_url: playerTrack.audioUrl,
+        episode_id: playerTrack.episodeId,
+        status: "pending",
+      } as Track;
+
       return [synthetic, ...prev];
     });
 
@@ -237,6 +291,9 @@ function StackPageContent() {
       setTracks((prev) =>
         prev.map((t) => t.id === id ? { ...t, status, voted_at: new Date().toISOString() } : t)
       );
+      setSessionTracks((prev) =>
+        prev.map((t) => t.id === id ? { ...t, status, voted_at: new Date().toISOString() } : t)
+      );
 
       setVoteCount((c) => c + 1);
 
@@ -281,6 +338,7 @@ function StackPageContent() {
                     const fresh = newTracks.filter((t: Track) => !currIds.has(t.id));
                     return [...curr, ...fresh];
                   });
+                  setSessionTracks((curr) => mergeTrackSession(curr, newTracks));
                 }
                 setTotal(data.total || 0);
               });
@@ -350,7 +408,6 @@ function StackPageContent() {
       const idx = tracks.findIndex((t) => t.id === trackId);
       if (idx >= 0) setEpisodePos(idx);
     } else {
-      // All-pending without episode context: move to front if found
       setTracks((prev) => {
         const idx = prev.findIndex((t) => t.id === trackId);
         if (idx <= 0) return prev;
@@ -425,24 +482,26 @@ function StackPageContent() {
     // Already playing this track
     if (playerTrackId === currentTrack.id) return;
 
-    // Skip unplayable tracks (advance past them)
+    const origin = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/";
+
+    // Unplayable tracks should still become the active card/player item and stop the prior song.
     const hasPlayable = !!(currentTrack.audio_url || currentTrack.preview_url || currentTrack.spotify_url);
     if (!hasPlayable) {
-      if (hasEpisodeTracks) {
-        // Episode mode: skip to next track
-        setEpisodePos((prev) => {
-          if (prev + 1 < tracks.length) return prev + 1;
-          return prev;
-        });
-      } else {
-        // All-pending: drop unplayable track
-        setTracks((prev) => prev.length < 2 ? prev : prev.slice(1));
-      }
+      globalPlayer.loadTrack({
+        id: currentTrack.id,
+        artist: currentTrack.artist,
+        title: currentTrack.title,
+        coverArtUrl: currentTrack.cover_art_url || currentTrack.episode?.artwork_url || null,
+        spotifyUrl: currentTrack.spotify_url,
+        audioUrl: currentTrack.audio_url || currentTrack.preview_url || null,
+        episodeId: currentTrack.episode_id,
+        episodeTitle: currentTrack.episode?.title,
+        youtubeUrl: currentTrack.youtube_url,
+      }, origin);
       return;
     }
 
     // Play the card track — set origin to current URL so Playing tab returns here
-    const origin = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/";
     globalPlayer.play({
       id: currentTrack.id,
       artist: currentTrack.artist,
@@ -506,6 +565,7 @@ function StackPageContent() {
                 const fresh = newTracks.filter((t: Track) => !currIds.has(t.id));
                 return [...curr, ...fresh];
               });
+              setSessionTracks((curr) => mergeTrackSession(curr, newTracks));
             }
             setTotal(data.total || 0);
           });
@@ -636,7 +696,7 @@ function StackPageContent() {
 
   // ── Main stack view ──
   return (
-    <div className="px-4 pt-2 pb-0 h-[calc(100dvh-3.5rem-env(safe-area-inset-bottom,0px))] flex flex-col overflow-hidden md:h-[calc(100dvh-100px)] md:pb-4">
+    <div className={`px-4 pt-2 pb-0 h-[calc(100dvh-3.5rem-env(safe-area-inset-bottom,0px))] flex flex-col overflow-hidden ${desktopPlayerFrameClass}`}>
       {/* Top bar — stack identity always visible */}
       <div className="relative flex items-center justify-between mb-3 md:mb-2 md:max-w-6xl md:mx-auto md:w-full md:flex-shrink-0 min-h-[40px]">
         {/* Left: back to stacks */}
@@ -705,7 +765,7 @@ function StackPageContent() {
             />
           ) : (
             <EpisodeTracklist
-              directTracks={tracks as any}
+              directTracks={sessionTracks as any}
               listTitle={seedName || genreFilter || "For You"}
               onTrackSelect={handleTrackSelect}
             />
@@ -729,7 +789,7 @@ function StackPageContent() {
         episodeId={currentEpisodeId || undefined}
         episodeTitle={currentEpisodeTitle}
         listTitle={currentEpisodeId ? currentEpisodeTitle : (seedName || genreFilter || "For You")}
-        directTracks={currentEpisodeId ? undefined : (tracks as any)}
+        directTracks={currentEpisodeId ? undefined : (sessionTracks as any)}
         refreshKey={voteCount}
         open={tracklistOpen}
         onClose={() => setTracklistOpen(false)}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Azorean Stacks Engine — persistent runner
-# Runs discover → download in a loop with 30min sleeps between each step.
+# Runs discover/enrich, then spends most of the cycle draining downloads.
 
 set -o pipefail
 
@@ -10,6 +10,7 @@ LOG_FILE="$LOG_DIR/azorean-engine.log"
 STATUS_FILE="$HOME/.openclaw/data/azorean-engine-status.json"
 MAX_LOG_LINES=10000
 BUN="/opt/homebrew/bin/bun"
+YT_DLP_BIN="${YT_DLP_BIN:-$(command -v yt-dlp 2>/dev/null || true)}"
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$(dirname "$STATUS_FILE")"
@@ -27,7 +28,7 @@ UPTIME_SINCE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 CYCLE_COUNT=0
 
 log() {
-  echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] $*" | tee -a "$LOG_FILE"
+  echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] $*" >> "$LOG_FILE"
 }
 
 truncate_log() {
@@ -81,12 +82,18 @@ WATCHER_PID=0
 log "=== Azorean Stacks Engine starting ==="
 log "Engine directory: $ENGINE_DIR"
 log "Bun: $BUN"
+log "yt-dlp: ${YT_DLP_BIN:-missing}"
+
+if [ -n "$YT_DLP_BIN" ]; then
+  export YT_DLP_BIN
+fi
 
 # Spawn Realtime watcher in background
 log "Starting Realtime watcher..."
 "$BUN" run scripts/watcher.ts >> "$LOG_FILE" 2>&1 &
 WATCHER_PID=$!
 log "Watcher started (PID: $WATCHER_PID)"
+write_status
 
 while true; do
   CYCLE_COUNT=$((CYCLE_COUNT + 1))
@@ -112,14 +119,10 @@ while true; do
   fi
   write_status
 
-  log "Sleeping 30 minutes..."
-  sleep 1800 &
-  wait $!
-
   # Download
   log "Running download..."
   LAST_DOWNLOAD_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  if output=$("$BUN" run download 2>&1); then
+  if output=$("$BUN" run download --duration 25 --limit 60 2>&1); then
     # Parse "  Downloaded: {N}" from download output
     tracks_downloaded=$(echo "$output" | grep -oE 'Downloaded: [0-9]+' | grep -oE '[0-9]+' | head -1)
     if [ -n "$tracks_downloaded" ]; then
@@ -139,7 +142,7 @@ while true; do
   # Truncate log periodically
   truncate_log
 
-  log "Sleeping 30 minutes..."
-  sleep 1800 &
+  log "Sleeping 5 minutes..."
+  sleep 300 &
   wait $!
 done

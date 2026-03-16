@@ -5,7 +5,7 @@ Agent-side scripts for music discovery. Finds tracks via NTS Radio, 1001Tracklis
 ## Setup
 
 ```bash
-cd azorean-stacks-engine
+cd apps/engine
 cp .env.example .env  # fill in credentials
 bun install
 ```
@@ -79,7 +79,7 @@ Each loop iteration runs scripts fresh from disk — editing source code takes e
 
 ```bash
 # Install the CLI
-ln -sf ~/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-engine/azorean-engine ~/.local/bin/azorean-engine
+ln -sf ~/.openclaw/workspace/repos/azorean-stacks/apps/engine/azorean-engine ~/.local/bin/azorean-engine
 
 # Start the service
 azorean-engine start

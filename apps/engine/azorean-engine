@@ -1,16 +1,75 @@
 #!/usr/bin/env bash
 # azorean-engine — CLI wrapper for the Azorean Stacks Engine service
 
+set -euo pipefail
+
+SOURCE_PATH="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE_PATH" ]; do
+  SOURCE_DIR="$(cd -P "$(dirname "$SOURCE_PATH")" && pwd)"
+  SOURCE_PATH="$(readlink "$SOURCE_PATH")"
+  [[ "$SOURCE_PATH" != /* ]] && SOURCE_PATH="$SOURCE_DIR/$SOURCE_PATH"
+done
+
+ENGINE_DIR="$(cd -P "$(dirname "$SOURCE_PATH")" && pwd)"
 PLIST_NAME="com.azorean.stacks-engine"
-PLIST_SRC="$HOME/.openclaw/workspace/repos/azorean-stacks/azorean-stacks-engine/com.azorean.stacks-engine.plist"
 PLIST_DST="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
 LOG_FILE="$HOME/.openclaw/logs/azorean-engine.log"
 STATUS_FILE="$HOME/.openclaw/data/azorean-engine-status.json"
+RUNNER_PATH="$ENGINE_DIR/runner.sh"
+
+install_plist() {
+  mkdir -p "$(dirname "$PLIST_DST")"
+  cat > "$PLIST_DST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$PLIST_NAME</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$RUNNER_PATH</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>$ENGINE_DIR</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>$LOG_FILE</string>
+
+    <key>StandardErrorPath</key>
+    <string>$LOG_FILE</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>
+EOF
+}
+
+launchctl_pid() {
+  launchctl list | awk -v label="$PLIST_NAME" '$3 == label { print $1 }'
+}
+
+status_running_flag() {
+  [ -f "$STATUS_FILE" ] || return 0
+  awk -F': ' '/"running"/ { gsub(/[ ,]/, "", $2); print $2 }' "$STATUS_FILE"
+}
 
 cmd_start() {
-  if [ ! -f "$PLIST_DST" ]; then
-    cp "$PLIST_SRC" "$PLIST_DST"
-  fi
+  install_plist
+  launchctl unload "$PLIST_DST" 2>/dev/null || true
   launchctl load "$PLIST_DST" 2>/dev/null
   echo "Azorean Stacks Engine started."
 }
@@ -27,15 +86,25 @@ cmd_restart() {
 }
 
 cmd_status() {
+  local pid=""
+  local running_flag=""
+
   echo "=== Azorean Stacks Engine ==="
   echo ""
 
-  # Check if running via launchctl
-  if launchctl list "$PLIST_NAME" &>/dev/null; then
-    pid=$(launchctl list "$PLIST_NAME" 2>/dev/null | grep PID | awk '{print $NF}')
+  pid="$(launchctl_pid)"
+  running_flag="$(status_running_flag)"
+
+  if [[ "$pid" =~ ^[0-9]+$ ]] && [ "$pid" -gt 0 ]; then
     echo "Status: RUNNING"
-    if [ -n "$pid" ] && [ "$pid" != "-" ]; then
-      echo "PID: $pid"
+    echo "PID: $pid"
+  elif launchctl list "$PLIST_NAME" &>/dev/null; then
+    if [ "$running_flag" = "false" ]; then
+      echo "Status: STOPPED"
+      echo "Loaded agent is present, but the runner is not active."
+    else
+      echo "Status: LOADED"
+      echo "Agent is loaded, but no active runner PID was reported."
     fi
   else
     echo "Status: STOPPED"

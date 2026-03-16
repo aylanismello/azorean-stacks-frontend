@@ -3,6 +3,17 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 const TEST_EMAIL = process.env.E2E_EMAIL;
 const TEST_PASSWORD = process.env.E2E_PASSWORD;
 
+function parseClock(value: string | null): number | null {
+  if (!value) return null;
+  const match = value.match(/(\d+):(\d{2})/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function trackClientFailures(page: Page) {
   const pageErrors: string[] = [];
   const requestFailures: string[] = [];
@@ -180,7 +191,7 @@ test.describe("authenticated app flows", () => {
     await expect(page).toHaveURL(/\/approved$/);
     await page.getByRole("link", { name: "Seeds" }).click();
     await expect(page).toHaveURL(/\/seeds$/);
-    await page.getByRole("button", { name: /⚙|Connected/i }).click();
+    await page.getByRole("button", { name: /More|Connected|⚙/i }).click();
     await expect(page.getByText(/Theme|Spotify|Sign out/i).first()).toBeVisible();
 
     expect(failures.pageErrors, `page errors: ${failures.pageErrors.join("\n")}`).toEqual([]);
@@ -226,6 +237,41 @@ test.describe("authenticated app flows", () => {
     expect(failures.consoleErrors, `console errors: ${failures.consoleErrors.join("\n")}`).toEqual([]);
   });
 
+  test("desktop manual seeds do not appear in Re-seeds", async ({ page }) => {
+    test.skip(
+      test.info().project.name !== "desktop",
+      "Desktop-only seed classification coverage runs in the desktop project"
+    );
+    test.setTimeout(60000);
+
+    const failures = trackClientFailures(page);
+
+    await login(page);
+    await page.goto("/seeds", { waitUntil: "networkidle" });
+    await expectAfterReload(page, () => page.getByText("Add tracks as seeds"), 30000);
+
+    const seedTitle = `PW Manual Seed ${Date.now()}`;
+    const seedArtist = "PW Manual Artist";
+    await page.getByPlaceholder("Title").fill(seedTitle);
+    await page.getByPlaceholder("Artist").fill(seedArtist);
+    await page.getByRole("button", { name: "Add" }).click();
+
+    const newSeedRow = page.locator("div.rounded-xl").filter({ hasText: seedTitle }).first();
+    await expect(newSeedRow).toBeVisible({ timeout: 15000 });
+
+    const reseedsTab = page.getByRole("button", { name: /Re-seeds \(/ });
+    await reseedsTab.click();
+    await expect(page.getByText(seedTitle)).toHaveCount(0);
+
+    await page.getByRole("button", { name: /All \(/ }).click();
+    await newSeedRow.getByRole("button", { name: "✕" }).click();
+    await expect(page.getByText(seedTitle)).toHaveCount(0);
+
+    expect(failures.pageErrors, `page errors: ${failures.pageErrors.join("\n")}`).toEqual([]);
+    expect(failures.requestFailures, `server failures: ${failures.requestFailures.join("\n")}`).toEqual([]);
+    expect(failures.consoleErrors, `console errors: ${failures.consoleErrors.join("\n")}`).toEqual([]);
+  });
+
   test("desktop For You can advance through multiple tracks without breaking the UI", async ({ page }) => {
     test.skip(
       test.info().project.name !== "desktop",
@@ -256,6 +302,91 @@ test.describe("authenticated app flows", () => {
     }
 
     expect(seenTitles.size).toBeGreaterThan(1);
+    expect(failures.pageErrors, `page errors: ${failures.pageErrors.join("\n")}`).toEqual([]);
+    expect(failures.requestFailures, `server failures: ${failures.requestFailures.join("\n")}`).toEqual([]);
+    expect(failures.consoleErrors, `console errors: ${failures.consoleErrors.join("\n")}`).toEqual([]);
+  });
+
+  test("desktop playback controls work on an audio-backed track", async ({ page }) => {
+    test.skip(
+      test.info().project.name !== "desktop",
+      "Desktop-only playback coverage runs in the desktop project"
+    );
+    test.setTimeout(60000);
+
+    const failures = trackClientFailures(page);
+
+    await login(page);
+    const response = await page.request.get("/api/tracks?status=pending&limit=20&order_by=taste_score");
+    const data = await response.json();
+    const audioTrack = (data.tracks || []).find(
+      (track: { title: string; artist: string; audio_url?: string | null; preview_url?: string | null }) =>
+        track.audio_url || track.preview_url
+    );
+
+    test.skip(!audioTrack, "No audio-backed pending track available");
+
+    await page.goto("/?source=taste", { waitUntil: "networkidle" });
+    await expectAfterReload(page, () => page.getByTitle("All stacks"), 30000);
+
+    const listButton = page
+      .getByRole("button", {
+        name: new RegExp(`${escapeRegex(audioTrack.title)}\\s+${escapeRegex(audioTrack.artist)}`),
+      })
+      .first();
+    await listButton.click();
+
+    const playerTime = page.locator(".global-player").getByText(/\d+:\d{2} \/ \d+:\d{2}/).first();
+    await expect(playerTime).toBeVisible();
+
+    const transportButton = page.getByRole("button", { name: /Play track|Pause track/ }).first();
+    await expect(transportButton).toBeVisible();
+    if ((await transportButton.getAttribute("aria-label")) === "Play track") {
+      await transportButton.click();
+    }
+
+    const startedAt = parseClock(await playerTime.textContent());
+    await expect
+      .poll(async () => parseClock(await playerTime.textContent()), { timeout: 15000 })
+      .toBeGreaterThan(startedAt ?? 0);
+
+    const beforeSkip = parseClock(await playerTime.textContent()) ?? 0;
+    await page.getByRole("button", { name: "Skip ahead 30 seconds" }).first().click();
+    await expect
+      .poll(async () => parseClock(await playerTime.textContent()), { timeout: 15000 })
+      .toBeGreaterThan(beforeSkip);
+
+    await page.getByRole("button", { name: "Pause track" }).first().click();
+    await expect(page.getByRole("heading", { level: 2, name: audioTrack.title })).toBeVisible();
+
+    expect(failures.pageErrors, `page errors: ${failures.pageErrors.join("\n")}`).toEqual([]);
+    expect(failures.requestFailures, `server failures: ${failures.requestFailures.join("\n")}`).toEqual([]);
+    expect(failures.consoleErrors, `console errors: ${failures.consoleErrors.join("\n")}`).toEqual([]);
+  });
+
+  test("desktop sidebar selection changes the card without reordering the visible list", async ({ page }) => {
+    test.skip(
+      test.info().project.name !== "desktop",
+      "Desktop-only sidebar ordering coverage runs in the desktop project"
+    );
+    test.setTimeout(60000);
+
+    const failures = trackClientFailures(page);
+
+    await login(page);
+    await page.goto("/?source=taste", { waitUntil: "networkidle" });
+    await expectAfterReload(page, () => page.getByTitle("All stacks"), 30000);
+
+    const listItems = page.locator("button.w-full.text-left");
+    const topBefore = ((await listItems.nth(0).textContent()) || "").trim();
+    const clickedTitle = ((await listItems.nth(5).locator("p").first().textContent()) || "").trim();
+
+    await listItems.nth(5).click();
+    await expect(page.getByRole("heading", { level: 2, name: clickedTitle })).toBeVisible();
+
+    const topAfter = ((await listItems.nth(0).textContent()) || "").trim();
+    expect(topAfter).toBe(topBefore);
+
     expect(failures.pageErrors, `page errors: ${failures.pageErrors.join("\n")}`).toEqual([]);
     expect(failures.requestFailures, `server failures: ${failures.requestFailures.join("\n")}`).toEqual([]);
     expect(failures.consoleErrors, `console errors: ${failures.consoleErrors.join("\n")}`).toEqual([]);
