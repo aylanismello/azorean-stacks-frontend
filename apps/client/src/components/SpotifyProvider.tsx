@@ -44,12 +44,27 @@ declare global {
   }
 }
 
+const isMobile =
+  typeof navigator !== "undefined" &&
+  /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+async function fetchActiveDevice(token: string): Promise<string | null> {
+  const res = await fetch("https://api.spotify.com/v1/me/player/devices", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const active = data.devices?.find((d: { is_active: boolean }) => d.is_active);
+  return active?.id || data.devices?.[0]?.id || null;
+}
+
 export function SpotifyProvider({ children }: { children: React.ReactNode }) {
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [playerState, setPlayerState] = useState<Spotify.PlaybackState | null>(null);
+  const [playing, setPlaying] = useState(false);
   const playerRef = useRef<Spotify.Player | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -82,8 +97,9 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Initialize SDK when we have a token
+  // Initialize SDK when we have a token (desktop only)
   const initPlayer = useCallback((token: string) => {
+    if (isMobile) return;
     if (playerRef.current) return;
     if (!window.Spotify) return;
 
@@ -130,8 +146,9 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
   const tokenRef = useRef<string | null>(null);
   tokenRef.current = accessToken;
 
-  // Load SDK script
+  // Load SDK script (desktop only)
   const loadSDK = useCallback(() => {
+    if (isMobile) return;
     if (document.getElementById("spotify-sdk")) return;
 
     window.onSpotifyWebPlaybackSDKReady = () => {
@@ -151,10 +168,16 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
 
   // On mount: check if Spotify is connected
   useEffect(() => {
-    fetchToken().then((token) => {
+    fetchToken().then(async (token) => {
       setLoading(false);
       if (token) {
-        loadSDK();
+        if (isMobile) {
+          // On mobile, auto-fetch the active device
+          const device = await fetchActiveDevice(token);
+          if (device) setDeviceId(device);
+        } else {
+          loadSDK();
+        }
 
         // Auto-sync playlist after fresh Spotify connect
         const params = new URLSearchParams(window.location.search);
@@ -182,12 +205,33 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When token becomes available and SDK is loaded, init player
+  // When token becomes available and SDK is loaded, init player (desktop only)
   useEffect(() => {
-    if (accessToken && window.Spotify && !playerRef.current) {
+    if (!isMobile && accessToken && window.Spotify && !playerRef.current) {
       initPlayer(accessToken);
     }
   }, [accessToken, initPlayer]);
+
+  // On mobile, poll playback state every 1 second while playing
+  useEffect(() => {
+    if (!isMobile || !connected || !playing) return;
+    const interval = setInterval(async () => {
+      const token = await fetchToken();
+      if (!token) return;
+      const res = await fetch("https://api.spotify.com/v1/me/player", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok && res.status !== 204) {
+        const state = await res.json();
+        setPlayerState({
+          paused: !state.is_playing,
+          position: state.progress_ms,
+          duration: state.item?.duration_ms || 0,
+        } as unknown as Spotify.PlaybackState);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [connected, playing, fetchToken]);
 
   const connect = useCallback(() => {
     window.location.href = "/api/spotify/login";
@@ -200,13 +244,12 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
     setConnected(false);
     setAccessToken(null);
     setPlayerState(null);
+    setPlaying(false);
     clearTimeout(refreshTimerRef.current);
     await fetch("/api/spotify/logout", { method: "POST" });
   }, []);
 
   const playUri = useCallback(async (spotifyUri: string) => {
-    if (!deviceId || !accessToken) return;
-
     // Convert URL to URI if needed
     let uri = spotifyUri;
     if (uri.includes("open.spotify.com")) {
@@ -219,27 +262,79 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
       } catch {}
     }
 
-    await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ uris: [uri] }),
-    });
-  }, [deviceId, accessToken]);
+    const token = await fetchToken();
+    if (!token) return;
+
+    if (isMobile) {
+      let device = deviceId;
+      if (!device) {
+        device = await fetchActiveDevice(token);
+        if (device) setDeviceId(device);
+      }
+      if (!device) throw new Error("No active Spotify device found. Open Spotify on your phone first.");
+
+      await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${device}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ uris: [uri] }),
+      });
+      setPlaying(true);
+    } else {
+      if (!deviceId || !accessToken) return;
+      await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ uris: [uri] }),
+      });
+    }
+  }, [deviceId, accessToken, fetchToken]);
 
   const pause = useCallback(async () => {
-    await playerRef.current?.pause();
-  }, []);
+    if (isMobile) {
+      const token = await fetchToken();
+      if (!token) return;
+      await fetch("https://api.spotify.com/v1/me/player/pause", {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setPlaying(false);
+    } else {
+      await playerRef.current?.pause();
+    }
+  }, [fetchToken]);
 
   const resume = useCallback(async () => {
-    await playerRef.current?.resume();
-  }, []);
+    if (isMobile) {
+      const token = await fetchToken();
+      if (!token) return;
+      await fetch("https://api.spotify.com/v1/me/player/play", {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setPlaying(true);
+    } else {
+      await playerRef.current?.resume();
+    }
+  }, [fetchToken]);
 
   const seek = useCallback(async (positionMs: number) => {
-    await playerRef.current?.seek(positionMs);
-  }, []);
+    if (isMobile) {
+      const token = await fetchToken();
+      if (!token) return;
+      await fetch(`https://api.spotify.com/v1/me/player/seek?position_ms=${positionMs}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } else {
+      await playerRef.current?.seek(positionMs);
+    }
+  }, [fetchToken]);
 
   return (
     <SpotifyContext.Provider
