@@ -112,7 +112,7 @@ export interface Seed {
   source?: "manual" | "re-seed" | null;
   created_at: string;
   discovery_count?: number;
-  episodes?: Array<{ id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[] }>;
+  episodes?: Array<{ id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[]; track_count?: number; enriched_count?: number }>;
   curated_count?: number;
   last_run?: { tracks_found: number; tracks_added: number; started_at: string } | null;
 }

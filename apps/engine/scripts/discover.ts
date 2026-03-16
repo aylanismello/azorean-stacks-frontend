@@ -193,7 +193,8 @@ async function discoverFromSource(
   seedId: string,
   coMap: Map<string, Candidate>,
   episodePositions: Map<string, Array<{ key: string; position: number }>>,
-  stats: { crawled: number; skipped: number; emptyTracklists: number; failedEpisodes: string[] },
+  seedPositionsByEpisode: Map<string, number>,
+  stats: { crawled: number; skipped: number; emptyTracklists: number; failedEpisodes: string[]; fullMatchEpisodeIds: string[] },
 ): Promise<void> {
   const source = SOURCES.find((s) => s.name === sourceName);
   if (!source) return;
@@ -317,10 +318,20 @@ async function discoverFromSource(
 
     log("info", `Match type: ${matchType} for ${context}`);
 
+    if (matchType === "full") {
+      stats.fullMatchEpisodeIds.push(episodeId);
+    }
+
     let epNew = 0;
     for (let pos = 0; pos < rawTracks.length; pos++) {
       const track = rawTracks[pos];
-      if (isSameTrack(track, { artist: seedArtist, title: seedTitle })) continue;
+      if (isSameTrack(track, { artist: seedArtist, title: seedTitle })) {
+        // Track the seed track's position in this episode for episode_tracks linking
+        if (!seedPositionsByEpisode.has(episodeId)) {
+          seedPositionsByEpisode.set(episodeId, pos);
+        }
+        continue;
+      }
 
       const key = `${track.artist.toLowerCase().trim()}::${track.title.toLowerCase().trim()}`;
       const existing = coMap.get(key);
@@ -347,13 +358,14 @@ async function discoverFromSource(
   }
 }
 
-async function discover(seedArtist: string, seedTitle: string, seedId: string): Promise<{ candidates: Candidate[]; emptyTracklists: number; failedEpisodes: string[]; episodePositions: Map<string, Array<{ key: string; position: number }>> }> {
+async function discover(seedArtist: string, seedTitle: string, seedId: string): Promise<{ candidates: Candidate[]; emptyTracklists: number; failedEpisodes: string[]; episodePositions: Map<string, Array<{ key: string; position: number }>>; seedPositionsByEpisode: Map<string, number>; fullMatchEpisodeIds: string[] }> {
   const coMap = new Map<string, Candidate>();
   const episodePositions = new Map<string, Array<{ key: string; position: number }>>();
-  const stats = { crawled: 0, skipped: 0, emptyTracklists: 0, failedEpisodes: [] as string[] };
+  const seedPositionsByEpisode = new Map<string, number>();
+  const stats = { crawled: 0, skipped: 0, emptyTracklists: 0, failedEpisodes: [] as string[], fullMatchEpisodeIds: [] as string[] };
 
   for (const source of SOURCES) {
-    await discoverFromSource(source.name, seedArtist, seedTitle, seedId, coMap, episodePositions, stats);
+    await discoverFromSource(source.name, seedArtist, seedTitle, seedId, coMap, episodePositions, seedPositionsByEpisode, stats);
   }
 
   log("info", `Discovery scan: ${stats.crawled} crawled, ${stats.skipped} already known, ${coMap.size} unique candidates`);
@@ -367,7 +379,7 @@ async function discover(seedArtist: string, seedTitle: string, seedId: string): 
 
   const candidates = Array.from(coMap.values())
     .sort((a, b) => b.co_occurrence - a.co_occurrence);
-  return { candidates, emptyTracklists: stats.emptyTracklists, failedEpisodes: stats.failedEpisodes, episodePositions };
+  return { candidates, emptyTracklists: stats.emptyTracklists, failedEpisodes: stats.failedEpisodes, episodePositions, seedPositionsByEpisode, fullMatchEpisodeIds: stats.fullMatchEpisodeIds };
 }
 
 async function runDiscover(): Promise<number> {
@@ -407,7 +419,7 @@ async function runDiscover(): Promise<number> {
   }
   console.log(`  Seed: ${seed.artist} - ${seed.title}`);
 
-  const { candidates, emptyTracklists, failedEpisodes, episodePositions } = await discover(seed.artist, seed.title, seed.id);
+  const { candidates, emptyTracklists, failedEpisodes, episodePositions, seedPositionsByEpisode, fullMatchEpisodeIds } = await discover(seed.artist, seed.title, seed.id);
   console.log(`  ${candidates.length} candidates found`);
 
   if (candidates.length > 0) {
@@ -487,6 +499,54 @@ async function runDiscover(): Promise<number> {
             { onConflict: "episode_id,track_id" }
           );
         }
+      }
+    }
+  }
+
+  // Ensure the seed track itself exists in the tracks table
+  {
+    const { data: existingSeedTrack } = await db.from("tracks")
+      .select("id")
+      .ilike("artist", seed.artist)
+      .ilike("title", seed.title)
+      .limit(1)
+      .maybeSingle();
+
+    let seedTrackId: string | null = existingSeedTrack?.id || null;
+
+    if (!existingSeedTrack) {
+      // Find first full-match episode for episode_id linkage
+      const firstFullMatchEpId = fullMatchEpisodeIds[0] || null;
+      const { data: newSeedTrack } = await db.from("tracks").insert({
+        artist: seed.artist,
+        title: seed.title,
+        source: "seed",
+        source_url: "",
+        source_context: "Seed track",
+        status: "approved",
+        episode_id: firstFullMatchEpId,
+        metadata: { is_seed: true },
+      }).select("id").single();
+
+      if (newSeedTrack) {
+        seedTrackId = newSeedTrack.id;
+        log("ok", `Created seed track entry: ${seed.artist} - ${seed.title}`);
+      }
+    }
+
+    if (seedTrackId) {
+      // Update seed.track_id if not already set
+      if (!seed.track_id) {
+        await db.from("seeds").update({ track_id: seedTrackId }).eq("id", seed.id);
+      }
+
+      // Link seed track to episodes where it was directly found (full match)
+      for (const epId of fullMatchEpisodeIds) {
+        const pos = seedPositionsByEpisode.get(epId);
+        await db.from("episode_tracks").upsert(
+          { episode_id: epId, track_id: seedTrackId, position: pos ?? 0 },
+          { onConflict: "episode_id,track_id" }
+        );
       }
     }
   }

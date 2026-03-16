@@ -26,6 +26,7 @@ export default function SeedsPage() {
   const [enriching, setEnriching] = useState(false);
   const [discoverResult, setDiscoverResult] = useState<{ tracks_found: number } | null>(null);
   const [tab, setTab] = useState<"all" | "reseeds">("all");
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; artist: string; title: string } | null>(null);
   const { user } = useAuth();
 
   const fetchSeeds = useCallback(async () => {
@@ -102,13 +103,21 @@ export default function SeedsPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
+    const seed = seeds.find((s) => s.id === id);
+    if (seed) setPendingDelete({ id, artist: seed.artist, title: seed.title });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete) return;
     try {
-      const res = await fetch(`/api/seeds/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/seeds/${pendingDelete.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete seed");
-      setSeeds((prev) => prev.filter((s) => s.id !== id));
+      setSeeds((prev) => prev.filter((s) => s.id !== pendingDelete.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete seed");
+    } finally {
+      setPendingDelete(null);
     }
   };
 
@@ -197,6 +206,40 @@ export default function SeedsPage() {
               onDelete={handleDelete}
             />
           ))}
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {pendingDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setPendingDelete(null)}
+        >
+          <div
+            className="bg-surface-1 border border-surface-3 rounded-xl p-5 mx-4 max-w-sm w-full shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm font-medium text-foreground mb-1">Delete seed?</p>
+            <p className="text-xs text-muted mb-4">
+              {decodeEntities(pendingDelete.artist)} — {decodeEntities(pendingDelete.title)}
+              <br />
+              <span className="text-muted/60">This will stop discovery for this track.</span>
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setPendingDelete(null)}
+                className="px-3 py-1.5 text-sm rounded-lg bg-surface-2 text-muted hover:text-foreground transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="px-3 py-1.5 text-sm rounded-lg bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -330,7 +373,7 @@ function SeedCard({
 }
 
 function SeedEpisodeRow({ episode: ep, seedArtist, seedTitle }: {
-  episode: { id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[] };
+  episode: { id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[]; track_count?: number; enriched_count?: number };
   seedArtist?: string;
   seedTitle?: string;
 }) {
@@ -400,6 +443,21 @@ function SeedEpisodeRow({ episode: ep, seedArtist, seedTitle }: {
             found: {ep.matched_tracks.map((t) => t.title).join(", ")}
           </p>
         )}
+        {/* Enrichment status */}
+        {typeof ep.track_count === "number" && ep.track_count > 0 && (
+          <div className="flex items-center gap-1.5 mt-1">
+            <span className="text-[10px] text-muted">
+              {ep.track_count} track{ep.track_count !== 1 ? "s" : ""}
+            </span>
+            {ep.enriched_count === ep.track_count ? (
+              <span className="text-[10px] text-green-400" title="All tracks have audio">✓</span>
+            ) : ep.enriched_count && ep.enriched_count > 0 ? (
+              <span className="text-[10px] text-amber-400" title={`${ep.enriched_count}/${ep.track_count} tracks have audio`}>
+                {ep.enriched_count}/{ep.track_count}
+              </span>
+            ) : null}
+          </div>
+        )}
       </button>
 
       {/* Expanded: track list */}
@@ -431,9 +489,31 @@ function SeedEpisodeRow({ episode: ep, seedArtist, seedTitle }: {
             <p className="text-[10px] text-muted/50 py-1">No tracks</p>
           ) : (
             <div className="space-y-0.5">
-              {tracks.map((t) => (
-                <SeedTrackRow key={t.id} track={t} statusDot={statusDot} statusColor={statusColor} />
-              ))}
+              {/* Seed track pinned at top */}
+              {(() => {
+                if (!seedArtist || !seedTitle) return null;
+                const seedArtistL = seedArtist.toLowerCase().trim();
+                const seedTitleL = seedTitle.toLowerCase().trim();
+                const seedTrack = tracks.find(
+                  (t) => t.artist.toLowerCase().trim() === seedArtistL && t.title.toLowerCase().trim() === seedTitleL
+                );
+                if (!seedTrack) return null;
+                return (
+                  <div key={`seed-${seedTrack.id}`} className="border-b border-surface-3/40 pb-1 mb-1">
+                    <p className="text-[9px] text-emerald-400/60 uppercase tracking-wider mb-0.5">Seed track</p>
+                    <SeedTrackRow track={seedTrack} statusDot={statusDot} statusColor={statusColor} />
+                  </div>
+                );
+              })()}
+              {/* Remaining tracks */}
+              {tracks
+                .filter((t) => {
+                  if (!seedArtist || !seedTitle) return true;
+                  return !(t.artist.toLowerCase().trim() === seedArtist.toLowerCase().trim() && t.title.toLowerCase().trim() === seedTitle.toLowerCase().trim());
+                })
+                .map((t) => (
+                  <SeedTrackRow key={t.id} track={t} statusDot={statusDot} statusColor={statusColor} />
+                ))}
             </div>
           )}
         </div>

@@ -83,11 +83,13 @@ export async function GET(req: NextRequest) {
   // Also collect artist-matched tracks for artist-only episodes
   const artistTracksByEpisode: Record<string, { artist: string; title: string }[]> = {};
 
+  const episodeTrackStats: Record<string, { total: number; with_audio: number }> = {};
+
   if (allEpisodeIds.length > 0) {
     // Get tracks for these episodes via junction table
     const { data: etLinks } = await supabase
       .from("episode_tracks")
-      .select("episode_id, tracks(status, artist, title)")
+      .select("episode_id, tracks(status, artist, title, storage_path)")
       .in("episode_id", allEpisodeIds);
 
     // Flatten junction rows into a tracks-like array
@@ -96,6 +98,7 @@ export async function GET(req: NextRequest) {
       status: row.tracks?.status,
       artist: row.tracks?.artist,
       title: row.tracks?.title,
+      storage_path: row.tracks?.storage_path,
     })).filter((t: any) => t.status);
 
     const episodesWithPending = new Set<string>();
@@ -108,6 +111,12 @@ export async function GET(req: NextRequest) {
         if (artistTracksByEpisode[key].length < 5) {
           artistTracksByEpisode[key].push({ artist: t.artist, title: t.title });
         }
+      }
+      // Track enrichment stats per episode
+      if (t.episode_id) {
+        if (!episodeTrackStats[t.episode_id]) episodeTrackStats[t.episode_id] = { total: 0, with_audio: 0 };
+        episodeTrackStats[t.episode_id].total++;
+        if (t.storage_path) episodeTrackStats[t.episode_id].with_audio++;
       }
     }
 
@@ -144,6 +153,8 @@ export async function GET(req: NextRequest) {
       matched_tracks: ep.match_type !== "full"
         ? (artistTracksByEpisode[`${ep.id}::${seedArtistLower}`] || [])
         : [],
+      track_count: episodeTrackStats[ep.id]?.total ?? 0,
+      enriched_count: episodeTrackStats[ep.id]?.with_audio ?? 0,
     }));
     return {
       ...seed,
