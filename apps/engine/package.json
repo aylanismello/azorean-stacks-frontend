@@ -10,7 +10,8 @@
     "clear-storage": "bun run scripts/clear-storage.ts",
     "update-signals": "bun run scripts/update-signals.ts",
     "audit": "bun run scripts/audit.ts",
-    "watcher": "bun run scripts/watcher.ts"
+    "watcher": "bun run scripts/watcher.ts",
+    "crawl-lotradio": "bun run scripts/crawl-lotradio.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

@@ -85,76 +85,7 @@ export function stringSimilarity(a: string, b: string): number {
   return Math.round(Math.max(0, (1 - prev[n] / maxLen) * 100));
 }
 
-// ─── NTS DISCOVERY ──────────────────────────────────────────
-
-const NTS_API = "https://www.nts.live/api/v2";
-const NTS_SEARCH_LIMIT = 60;
-const NTS_MAX_EPISODES = 10;
-
-interface NTSTrack { uid: string; artist: string; title: string }
-
-export async function ntsSearch(query: string): Promise<Array<{ path: string; title: string; date: string }>> {
-  log("info", `NTS search: "${query}"`);
-  const url = `${NTS_API}/search?q=${encodeURIComponent(query)}&version=2&offset=0&limit=${NTS_SEARCH_LIMIT}&types[]=track`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) {
-    log("fail", `NTS search HTTP ${res.status} for "${query}"`);
-    throw new Error(`NTS search failed: ${res.status}`);
-  }
-  const data = await res.json() as { results: Array<{ local_date: string; article: { path: string; title: string } }> };
-  const seen = new Set<string>();
-  const episodes: Array<{ path: string; title: string; date: string }> = [];
-  for (const r of data.results || []) {
-    const path = r.article?.path;
-    if (!path || seen.has(path)) continue;
-    seen.add(path);
-    episodes.push({ path, title: r.article.title || "", date: r.local_date || "" });
-  }
-  log("ok", `NTS returned ${data.results?.length ?? 0} results → ${episodes.length} unique episodes`);
-  return episodes;
-}
-
-export async function ntsEpisodeArtwork(episodePath: string): Promise<string | null> {
-  try {
-    const url = `${NTS_API}${episodePath}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-    if (!res.ok) return null;
-    const data = await res.json() as any;
-    return data.media?.picture_large
-      || data.media?.picture_medium_large
-      || data.media?.picture_medium
-      || data.media?.background_large
-      || data.media?.background_medium_large
-      || null;
-  } catch {
-    return null;
-  }
-}
-
-export async function ntsTracklist(episodePath: string): Promise<NTSTrack[]> {
-  const url = `${NTS_API}${episodePath}/tracklist`;
-  let res: Response;
-  try {
-    res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-  } catch (err) {
-    log("fail", `NTS tracklist fetch error: ${episodePath} — ${err instanceof Error ? err.message : err}`);
-    return [];
-  }
-  if (!res.ok) {
-    log("fail", `NTS tracklist HTTP ${res.status}: ${episodePath}`);
-    return [];
-  }
-  let data: any;
-  try {
-    data = await res.json();
-  } catch (err) {
-    log("fail", `NTS tracklist JSON parse error: ${episodePath}`);
-    return [];
-  }
-  const tracks = data.results || (data as unknown as NTSTrack[]);
-  if (!Array.isArray(tracks)) return [];
-  return tracks.filter((t) => t.artist?.trim() && t.title?.trim());
-}
+// ─── TRACK HELPERS ──────────────────────────────────────────
 
 export function isSameTrack(a: { artist: string; title: string }, b: { artist: string; title: string }): boolean {
   return a.artist.toLowerCase().trim() === b.artist.toLowerCase().trim() &&

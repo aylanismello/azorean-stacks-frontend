@@ -11,12 +11,12 @@
 import { getSupabase } from "../lib/supabase";
 import {
   log, elapsed, sleep,
-  ntsSearch, ntsTracklist, ntsEpisodeArtwork,
   isSameTrack,
   enrichTrack, downloadTrack,
   spotifyLookup,
   logEngineEvent,
 } from "../lib/pipeline";
+import { SOURCES } from "../lib/sources/index";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 
 const db = getSupabase();
@@ -29,7 +29,7 @@ const CONCURRENCY = {
   download: 3,        // yt-dlp audio downloads per batch
   repair: 5,          // Background track repair tasks
   superLike: 2,       // Simultaneous super-like downloads
-  ntsMaxEpisodes: 10, // Max NTS episodes to check per seed
+  ntsMaxEpisodes: 10, // Max episodes to check per source per seed
 } as const;
 
 const GARBAGE_TITLES = new Set(["unknown track", "untitled", "id", "?", "unknown", ""]);
@@ -80,200 +80,238 @@ async function processSeed(seedId: string) {
     metadata: { artist: seed.artist, title: seed.title },
   });
 
-  // ── Phase 1: NTS Discovery (first matching episode only) ──
+  // ── Phase 1: Multi-source Discovery (first matching episode per source) ──
   await logEngineEvent("discover_started", "started", { seedId, message: seedLabel });
 
-  const query = `${seed.artist} ${seed.title}`;
-  let episodes: Awaited<ReturnType<typeof ntsSearch>>;
-  try {
-    episodes = await ntsSearch(query);
-  } catch (err) {
-    log("fail", `NTS search failed for ${seedLabel}: ${err instanceof Error ? err.message : err}`);
-    await logEngineEvent("error", "failed", {
-      seedId,
-      message: `NTS search failed: ${err instanceof Error ? err.message : err}`,
-    });
-    return;
-  }
-
-  if (episodes.length === 0) {
-    log("warn", `No NTS episodes found for ${seedLabel}`);
-    await logEngineEvent("discover_completed", "completed", {
-      seedId,
-      message: "No episodes found",
-      metadata: { episodes_found: 0 },
-    });
-    return;
-  }
-
-  // Process the FIRST matching episode only
   let tracksAdded = 0;
   let episodeProcessed: string | null = null;
+  let totalEpisodesFound = 0;
 
-  for (const ep of episodes.slice(0, CONCURRENCY.ntsMaxEpisodes)) {
-    await sleep(1000); // NTS rate limit
+  for (const source of SOURCES) {
+    let sourceEpisodes: Array<{ url: string; title: string; date: string | null }> = [];
 
-    const episodeUrl = `https://www.nts.live${ep.path}`;
-    const context = `${ep.title}${ep.date ? ` (${ep.date.split("T")[0]})` : ""}`;
+    if (source.name === "lotradio") {
+      // Search by artist (DJ/host matches)
+      try {
+        const results = await source.searchForSeed(seed.artist, seed.title);
+        sourceEpisodes = results.map((e) => ({ url: e.url, title: e.title, date: e.date }));
+      } catch (err) {
+        log("fail", `Lot Radio search error for ${seedLabel}: ${err instanceof Error ? err.message : err}`);
+      }
 
-    // Check if already crawled with tracks
-    const { data: existingEp } = await db.from("episodes")
-      .select("id").eq("url", episodeUrl).limit(1).single();
+      // Also query DB for crawled episodes where tracklist mentions the seed artist
+      try {
+        const seedArtistLower = seed.artist.toLowerCase().trim();
+        const { data: dbEpisodes } = await db
+          .from("episodes")
+          .select("url, title, aired_date")
+          .eq("source", "lotradio")
+          .not("metadata", "is", null);
 
-    let episodeId: string;
+        if (dbEpisodes) {
+          for (const ep of dbEpisodes as any[]) {
+            const tracklist: Array<{ artist: string; title: string }> = ep.metadata?.tracklist || [];
+            const hasMatch = tracklist.some((t) =>
+              t.artist?.toLowerCase().trim() === seedArtistLower
+            );
+            if (hasMatch && !sourceEpisodes.some((e) => e.url === ep.url)) {
+              sourceEpisodes.push({ url: ep.url, title: ep.title || ep.url, date: ep.aired_date || null });
+            }
+          }
+        }
+      } catch (err) {
+        log("fail", `Lot Radio DB search error: ${err instanceof Error ? err.message : err}`);
+      }
+    } else {
+      try {
+        const results = await source.searchForSeed(seed.artist, seed.title);
+        sourceEpisodes = results.map((e) => ({ url: e.url, title: e.title, date: e.date }));
+      } catch (err) {
+        log("fail", `${source.name} search failed for ${seedLabel}: ${err instanceof Error ? err.message : err}`);
+        continue;
+      }
+    }
 
-    if (existingEp) {
-      episodeId = existingEp.id;
+    if (sourceEpisodes.length === 0) {
+      log("warn", `No ${source.name} episodes found for ${seedLabel}`);
+      continue;
+    }
+
+    totalEpisodesFound += sourceEpisodes.length;
+    log("info", `${source.name}: ${sourceEpisodes.length} episodes found`);
+
+    for (const ep of sourceEpisodes.slice(0, CONCURRENCY.ntsMaxEpisodes)) {
+      await sleep(1000);
+
+      const episodeUrl = ep.url;
+      const context = `${ep.title}${ep.date ? ` (${ep.date})` : ""}`;
+
+      const { data: existingEp } = await db.from("episodes")
+        .select("id").eq("url", episodeUrl).limit(1).single();
+
+      let episodeId: string;
+
+      if (existingEp) {
+        episodeId = existingEp.id;
+        await db.from("episode_seeds").upsert(
+          { episode_id: episodeId, seed_id: seedId },
+          { onConflict: "episode_id,seed_id" },
+        );
+
+        const { count } = await db.from("tracks")
+          .select("*", { count: "exact", head: true })
+          .eq("episode_id", episodeId);
+
+        if (count && count > 0) {
+          log("skip", `Already crawled (${count} tracks): ${context}`);
+          continue;
+        }
+      } else {
+        const artworkUrl = await source.getArtwork(episodeUrl);
+        const { data: newEp, error: epErr } = await db.from("episodes").insert({
+          url: episodeUrl,
+          title: ep.title || null,
+          source: source.name,
+          aired_date: ep.date || null,
+          artwork_url: artworkUrl,
+        }).select("id").single();
+
+        if (!newEp) {
+          log("fail", `Episode insert failed: ${context} — ${epErr?.message}`);
+          continue;
+        }
+        episodeId = newEp.id;
+      }
+
       await db.from("episode_seeds").upsert(
         { episode_id: episodeId, seed_id: seedId },
         { onConflict: "episode_id,seed_id" },
       );
 
-      const { count } = await db.from("tracks")
-        .select("*", { count: "exact", head: true })
-        .eq("episode_id", episodeId);
-
-      if (count && count > 0) {
-        log("skip", `Already crawled (${count} tracks): ${context}`);
+      const rawTracks = await source.getTracklist(episodeUrl);
+      if (rawTracks.length === 0) {
+        log("fail", `Empty tracklist: ${context}`);
         continue;
       }
-    } else {
-      const artworkUrl = await ntsEpisodeArtwork(ep.path);
-      const { data: newEp, error: epErr } = await db.from("episodes").insert({
-        url: episodeUrl,
-        title: ep.title || null,
-        source: "nts",
-        aired_date: ep.date ? ep.date.split("T")[0] : null,
-        artwork_url: artworkUrl,
-      }).select("id").single();
 
-      if (!newEp) {
-        log("fail", `Episode insert failed: ${context} — ${epErr?.message}`);
-        continue;
+      // Insert candidate tracks from this episode
+      const insertedTracks: any[] = [];
+      for (let pos = 0; pos < rawTracks.length; pos++) {
+        const track = rawTracks[pos];
+        if (isSameTrack(track, { artist: seed.artist, title: seed.title })) continue;
+
+        const lTitle = track.title.toLowerCase().trim();
+        const lArtist = track.artist.toLowerCase().trim();
+        if (GARBAGE_TITLES.has(lTitle) || lTitle.length <= 1 || lArtist.length <= 1) continue;
+
+        const { data: existing } = await db.from("tracks")
+          .select("id").ilike("artist", track.artist.trim()).ilike("title", track.title.trim()).limit(1);
+        if (existing && existing.length > 0) continue;
+
+        const { data: inserted, error } = await db.from("tracks").insert({
+          artist: track.artist.trim(),
+          title: track.title.trim(),
+          source: source.name,
+          source_url: episodeUrl,
+          source_context: context,
+          metadata: { co_occurrence: 1, seed_artist: seed.artist, seed_title: seed.title },
+          status: "pending",
+          episode_id: episodeId,
+          seed_track_id: seed.track_id || null,
+        }).select("*").single();
+
+        if (error || !inserted) continue;
+
+        await db.from("episode_tracks").upsert(
+          { episode_id: episodeId, track_id: inserted.id, position: pos },
+          { onConflict: "episode_id,track_id" },
+        );
+
+        insertedTracks.push(inserted);
+        tracksAdded++;
       }
-      episodeId = newEp.id;
-    }
 
-    await db.from("episode_seeds").upsert(
-      { episode_id: episodeId, seed_id: seedId },
-      { onConflict: "episode_id,seed_id" },
-    );
+      if (episodeProcessed === null) episodeProcessed = context;
+      log("ok", `${context} — ${rawTracks.length} tracks, ${insertedTracks.length} new`);
 
-    const tracks = await ntsTracklist(ep.path);
-    if (tracks.length === 0) {
-      log("fail", `Empty tracklist: ${context}`);
-      continue;
-    }
-
-    // Insert candidate tracks from this episode
-    const insertedTracks: any[] = [];
-    for (let pos = 0; pos < tracks.length; pos++) {
-      const track = tracks[pos];
-      if (isSameTrack(track, { artist: seed.artist, title: seed.title })) continue;
-
-      const lTitle = track.title.toLowerCase().trim();
-      const lArtist = track.artist.toLowerCase().trim();
-      if (GARBAGE_TITLES.has(lTitle) || lTitle.length <= 1 || lArtist.length <= 1) continue;
-
-      // Dedup against DB
-      const { data: existing } = await db.from("tracks")
-        .select("id").ilike("artist", track.artist.trim()).ilike("title", track.title.trim()).limit(1);
-      if (existing && existing.length > 0) continue;
-
-      const { data: inserted, error } = await db.from("tracks").insert({
-        artist: track.artist.trim(),
-        title: track.title.trim(),
-        source: "nts",
-        source_url: episodeUrl,
-        source_context: context,
-        metadata: { co_occurrence: 1, seed_artist: seed.artist, seed_title: seed.title },
-        status: "pending",
-        episode_id: episodeId,
+      // Log discovery run
+      await db.from("discovery_runs").insert({
+        started_at: new Date(t0).toISOString(),
+        completed_at: new Date().toISOString(),
+        seed_id: seedId,
         seed_track_id: seed.track_id || null,
-      }).select("*").single();
+        sources_searched: [source.name],
+        tracks_found: rawTracks.length,
+        tracks_added: insertedTracks.length,
+        notes: `Watcher: processed first episode "${context}" from ${source.name}`,
+      });
 
-      if (error || !inserted) continue;
+      await logEngineEvent("discover_completed", "completed", {
+        seedId,
+        message: `${context}: ${insertedTracks.length} tracks added`,
+        metadata: { episode: context, source: source.name, tracks_found: rawTracks.length, tracks_added: insertedTracks.length },
+      });
 
-      await db.from("episode_tracks").upsert(
-        { episode_id: episodeId, track_id: inserted.id, position: pos },
-        { onConflict: "episode_id,track_id" },
-      );
+      // ── Phase 2: Enrich tracks from this episode ──
+      if (insertedTracks.length > 0) {
+        await logEngineEvent("enrich_started", "started", {
+          seedId,
+          message: `Enriching ${insertedTracks.length} tracks`,
+        });
 
-      insertedTracks.push(inserted);
-      tracksAdded++;
+        let enriched = 0;
+        let enrichFailed = 0;
+
+        for (let i = 0; i < insertedTracks.length; i += CONCURRENCY.enrich) {
+          const batch = insertedTracks.slice(i, i + CONCURRENCY.enrich);
+          const results = await Promise.allSettled(batch.map(enrichTrack));
+          for (const r of results) {
+            if (r.status === "fulfilled" && r.value) enriched++;
+            else enrichFailed++;
+          }
+        }
+
+        await logEngineEvent("enrich_completed", "completed", {
+          seedId,
+          message: `Enriched: ${enriched}, Failed: ${enrichFailed}`,
+          metadata: { enriched, failed: enrichFailed },
+        });
+
+        // ── Phase 3: Download audio for enriched tracks ──
+        const { data: downloadable } = await db.from("tracks")
+          .select("*")
+          .in("id", insertedTracks.map((t) => t.id))
+          .not("youtube_url", "is", null)
+          .is("storage_path", null);
+
+        if (downloadable?.length) {
+          log("info", `Downloading audio for ${downloadable.length} tracks...`);
+          let downloaded = 0;
+          for (let i = 0; i < downloadable.length; i += CONCURRENCY.download) {
+            const batch = downloadable.slice(i, i + CONCURRENCY.download);
+            const results = await Promise.allSettled(batch.map(async (track) => {
+              const ok = await downloadTrack(track);
+              log(ok ? "ok" : "fail", `DL: ${track.artist} – ${track.title}`);
+              return ok;
+            }));
+            downloaded += results.filter(r => r.status === "fulfilled" && r.value).length;
+          }
+          log("info", `Downloaded ${downloaded}/${downloadable.length} tracks`);
+        }
+      }
+
+      // Only process the first episode with tracks per source
+      break;
     }
+  }
 
-    episodeProcessed = context;
-    log("ok", `${context} — ${tracks.length} tracks, ${insertedTracks.length} new`);
-
-    // Log discovery run
-    await db.from("discovery_runs").insert({
-      started_at: new Date(t0).toISOString(),
-      completed_at: new Date().toISOString(),
-      seed_id: seedId,
-      seed_track_id: seed.track_id || null,
-      sources_searched: ["nts"],
-      tracks_found: tracks.length,
-      tracks_added: insertedTracks.length,
-      notes: `Watcher: processed first episode "${context}"`,
-    });
-
+  if (totalEpisodesFound === 0) {
+    log("warn", `No episodes found across all sources for ${seedLabel}`);
     await logEngineEvent("discover_completed", "completed", {
       seedId,
-      message: `${context}: ${insertedTracks.length} tracks added`,
-      metadata: { episode: context, tracks_found: tracks.length, tracks_added: insertedTracks.length },
+      message: "No episodes found",
+      metadata: { episodes_found: 0 },
     });
-
-    // ── Phase 2: Enrich tracks from this episode ──
-    if (insertedTracks.length > 0) {
-      await logEngineEvent("enrich_started", "started", {
-        seedId,
-        message: `Enriching ${insertedTracks.length} tracks`,
-      });
-
-      let enriched = 0;
-      let enrichFailed = 0;
-
-      for (let i = 0; i < insertedTracks.length; i += CONCURRENCY.enrich) {
-        const batch = insertedTracks.slice(i, i + CONCURRENCY.enrich);
-        const results = await Promise.allSettled(batch.map(enrichTrack));
-        for (const r of results) {
-          if (r.status === "fulfilled" && r.value) enriched++;
-          else enrichFailed++;
-        }
-      }
-
-      await logEngineEvent("enrich_completed", "completed", {
-        seedId,
-        message: `Enriched: ${enriched}, Failed: ${enrichFailed}`,
-        metadata: { enriched, failed: enrichFailed },
-      });
-
-      // ── Phase 3: Download audio for enriched tracks ──
-      const { data: downloadable } = await db.from("tracks")
-        .select("*")
-        .in("id", insertedTracks.map((t) => t.id))
-        .not("youtube_url", "is", null)
-        .is("storage_path", null);
-
-      if (downloadable?.length) {
-        log("info", `Downloading audio for ${downloadable.length} tracks...`);
-        let downloaded = 0;
-        for (let i = 0; i < downloadable.length; i += CONCURRENCY.download) {
-          const batch = downloadable.slice(i, i + CONCURRENCY.download);
-          const results = await Promise.allSettled(batch.map(async (track) => {
-            const ok = await downloadTrack(track);
-            log(ok ? "ok" : "fail", `DL: ${track.artist} – ${track.title}`);
-            return ok;
-          }));
-          downloaded += results.filter(r => r.status === "fulfilled" && r.value).length;
-        }
-        log("info", `Downloaded ${downloaded}/${downloadable.length} tracks`);
-      }
-    }
-
-    // Only process the first episode with tracks
-    break;
   }
 
   // ── Phase 4: Populate seed cover art if missing ──
