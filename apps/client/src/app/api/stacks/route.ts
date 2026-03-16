@@ -95,12 +95,19 @@ export async function GET() {
   // 4. Build per-episode, per-artist matched tracks for artist-only episodes
   // Key: `${episodeId}::${artistLower}` → tracks by that artist in that episode
   const artistTracksByEpisode: Record<string, { artist: string; title: string }[]> = {};
+  // Also track cover art by artist (across all episodes) for fallback
+  const artistCoverArt: Record<string, string> = {};
   for (const t of (tracks || []) as any[]) {
     if (!t.episode_id) continue;
     const key = `${t.episode_id}::${(t.artist || "").toLowerCase()}`;
     if (!artistTracksByEpisode[key]) artistTracksByEpisode[key] = [];
     if (artistTracksByEpisode[key].length < 5) {
       artistTracksByEpisode[key].push({ artist: t.artist, title: t.title });
+    }
+    // Save first cover art we find for each artist
+    const artistLower = (t.artist || "").toLowerCase();
+    if (t.cover_art_url && !artistCoverArt[artistLower]) {
+      artistCoverArt[artistLower] = t.cover_art_url;
     }
   }
 
@@ -128,8 +135,9 @@ export async function GET() {
     globalPending += totalPending;
 
     // Use the seed's own cover art (from Spotify lookup of the seed song itself)
-    // Fall back to episode track art only if seed has no cover art yet
-    const cover_art_url = seed.cover_art_url || eps.find((e) => e.cover_art_url)?.cover_art_url || null;
+    // Fall back to cover art from a track by the SAME artist (not random episode art)
+    // If no same-artist art exists, return null → UI shows gradient fallback
+    const cover_art_url = seed.cover_art_url || artistCoverArt[seedArtistLower] || null;
 
     const has_exact_match = eps.some((e) => e.match_type === "full");
 
