@@ -6,6 +6,7 @@ import { SeedForm } from "@/components/SeedForm";
 import { useAuth } from "@/components/AuthProvider";
 import { isReseed } from "@/lib/seeds";
 import { openYouTube } from "@/lib/youtube";
+import { EpisodeTracklist } from "@/components/EpisodeTracklist";
 
 // Decode common HTML entities that may be stored in DB from NTS/external APIs
 function decodeEntities(s: string): string {
@@ -660,20 +661,6 @@ function SeedEpisodeRow({ episode: ep, seedId, seedArtist, seedTitle, allSeeds, 
     setPendingRemove(false);
   };
 
-  const statusDot = (s: string) => {
-    if (s === "approved") return "bg-green-500";
-    if (s === "rejected") return "bg-red-500";
-    if (s === "skipped") return "bg-amber-400";
-    return "bg-surface-4";
-  };
-
-  const statusColor = (s: string) => {
-    if (s === "approved") return "text-green-400";
-    if (s === "rejected") return "text-red-400";
-    if (s === "skipped") return "text-amber-400";
-    return "text-muted";
-  };
-
   const trackCount = ep.track_count ?? 0;
   const enrichedCount = ep.enriched_count ?? 0;
 
@@ -810,40 +797,10 @@ function SeedEpisodeRow({ episode: ep, seedId, seedArtist, seedTitle, allSeeds, 
           ) : tracks.length === 0 ? (
             <p className="text-[10px] text-muted/50 py-1">No tracks</p>
           ) : (
-            <div className="space-y-0.5">
-              {/* Seed track pinned at top */}
-              {(() => {
-                if (!seedArtist || !seedTitle) return null;
-                const seedArtistL = seedArtist.toLowerCase().trim();
-                const seedTitleL = seedTitle.toLowerCase().trim();
-                const seedTrack = tracks.find(
-                  (t) => t.artist.toLowerCase().trim() === seedArtistL && t.title.toLowerCase().trim() === seedTitleL
-                );
-                if (!seedTrack) return null;
-                return (
-                  <div key={`seed-${seedTrack.id}`} className="border-b border-surface-3/40 pb-1 mb-1">
-                    <p className="text-[9px] text-emerald-400/60 uppercase tracking-wider mb-0.5">Seed track</p>
-                    <SeedTrackRow track={seedTrack} statusDot={statusDot} statusColor={statusColor} isSeedTrack />
-                  </div>
-                );
-              })()}
-              {/* Remaining tracks */}
-              {tracks
-                .filter((t) => {
-                  if (!seedArtist || !seedTitle) return true;
-                  return !(t.artist.toLowerCase().trim() === seedArtist.toLowerCase().trim() && t.title.toLowerCase().trim() === seedTitle.toLowerCase().trim());
-                })
-                .map((t) => {
-                  const tArtistL = t.artist.toLowerCase().trim();
-                  const tTitleL = t.title.toLowerCase().trim();
-                  const isReseedTrack = !!(allSeeds?.some((s) =>
-                    s.artist.toLowerCase().trim() === tArtistL &&
-                    s.title.toLowerCase().trim() === tTitleL &&
-                    !(s.artist.toLowerCase().trim() === seedArtist?.toLowerCase().trim() && s.title.toLowerCase().trim() === seedTitle?.toLowerCase().trim())
-                  ));
-                  return <SeedTrackRow key={t.id} track={t} statusDot={statusDot} statusColor={statusColor} isReseedTrack={isReseedTrack} />;
-                })}
-            </div>
+            <EpisodeTracklist
+              directTracks={tracks as any}
+              variant="sheet"
+            />
           )}
         </div>
       )}

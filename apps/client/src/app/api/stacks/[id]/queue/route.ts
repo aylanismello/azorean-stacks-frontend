@@ -233,10 +233,19 @@ export async function GET(
       ? t.episode[0] || null
       : t.episode;
 
+    // Mark as seed track if this track's artist+title matches the seed track it was discovered from
+    const normalizedSeedTrack = seedTrack?.artist ? seedTrack : null;
+    const isSeed = !!(
+      normalizedSeedTrack &&
+      normalizedSeedTrack.artist.toLowerCase().trim() === (t.artist || "").toLowerCase().trim() &&
+      normalizedSeedTrack.title.toLowerCase().trim() === (t.title || "").toLowerCase().trim()
+    );
+
     return {
       ...t,
-      seed_track: seedTrack?.artist ? seedTrack : null,
+      seed_track: normalizedSeedTrack,
       episode,
+      is_seed: isSeed,
       _ranked_score: Math.round(total),
       _score_components: components,
       _match_type: matchType,
