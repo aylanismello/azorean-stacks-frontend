@@ -30,17 +30,26 @@ export async function GET(
   // Look up which seeds are connected to this episode
   const { data: episodeSeedRows } = await db
     .from("episode_seeds")
-    .select("seed_id, match_type, seeds(id, artist, title, source)")
+    .select("seed_id, match_type, seeds(id, artist, title, source, track_id)")
     .eq("episode_id", params.id);
 
-  // Build sets of artist+title pairs (lowercased) for seed and re-seed matching
+  // Build sets for seed matching: prefer direct track_id, fall back to artist::title
+  const seedTrackIds = new Set<string>();
+  const reSeedTrackIds = new Set<string>();
   const seedPairs = new Set<string>();
   const reSeedPairs = new Set<string>();
   for (const row of (episodeSeedRows || []) as any[]) {
     const seed = Array.isArray(row.seeds) ? row.seeds[0] : row.seeds;
-    if (seed?.artist && seed?.title) {
+    const isReSeed = row.match_type === "re_seed" || row.match_type === "re-seed";
+    if (seed?.track_id) {
+      if (isReSeed) {
+        reSeedTrackIds.add(seed.track_id);
+      } else {
+        seedTrackIds.add(seed.track_id);
+      }
+    } else if (seed?.artist && seed?.title) {
       const key = `${seed.artist.toLowerCase().trim()}::${seed.title.toLowerCase().trim()}`;
-      if (seed.source === "re-seed") {
+      if (isReSeed) {
         reSeedPairs.add(key);
       } else {
         seedPairs.add(key);
@@ -82,10 +91,10 @@ export async function GET(
   const signPromises: Promise<void>[] = [];
 
   for (const track of tracks) {
-    // Add seed/re-seed/super_liked flags (match by artist+title, not ID)
+    // Add seed/re-seed/super_liked flags (prefer direct track_id match, fall back to artist::title)
     const trackKey = `${track.artist.toLowerCase().trim()}::${track.title.toLowerCase().trim()}`;
-    (track as any).is_seed = seedPairs.has(trackKey);
-    (track as any).is_re_seed = reSeedPairs.has(trackKey);
+    (track as any).is_seed = seedTrackIds.has(track.id) || seedPairs.has(trackKey);
+    (track as any).is_re_seed = reSeedTrackIds.has(track.id) || reSeedPairs.has(trackKey);
     (track as any).super_liked = superLikedIds.has(track.id);
 
     if (track.storage_path) {
