@@ -22,6 +22,8 @@ async function getClientCredentialsToken(): Promise<string | null> {
   const clientId = process.env.SPOTIFY_CLIENT_ID!;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET!;
 
+  const tokenController = new AbortController();
+  const tokenTimeout = setTimeout(() => tokenController.abort(), 8000);
   const res = await fetch("https://accounts.spotify.com/api/token", {
     method: "POST",
     headers: {
@@ -29,8 +31,9 @@ async function getClientCredentialsToken(): Promise<string | null> {
       Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
     },
     body: "grant_type=client_credentials",
-    signal: AbortSignal.timeout(8000),
+    signal: tokenController.signal,
   });
+  clearTimeout(tokenTimeout);
 
   if (!res.ok) return null;
   const data = await res.json();
@@ -47,10 +50,13 @@ async function fetchPlaylistTracks(
     `?fields=next,items(track(name,artists(name),type))&limit=100`;
 
   while (url) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(10000),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
     if (!res.ok) break;
     const data = await res.json();
 
