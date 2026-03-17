@@ -435,7 +435,9 @@ export type EngineEventType =
   | "super_like_completed"
   | "error"
   | "watcher_connected"
-  | "watcher_disconnected";
+  | "watcher_disconnected"
+  | "watcher_reconnect"
+  | "radar_curator_run";
 
 export async function logEngineEvent(
   eventType: EngineEventType,

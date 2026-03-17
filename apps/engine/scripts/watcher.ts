@@ -17,6 +17,7 @@ import {
   logEngineEvent,
 } from "../lib/pipeline";
 import { SOURCES } from "../lib/sources/index";
+import { runCuratorRadar } from "./radar-curator";
 import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync } from "fs";
 
 const db = getSupabase();
@@ -1203,6 +1204,28 @@ function startWatcher() {
             if (shuttingDown) return;
             await pollForMissingSuperLikes();
           }, 60_000);
+
+          // Every 6 hours: run the curator affinity radar to discover new tracks
+          // from trusted NTS shows based on voting patterns
+          const SIX_HOURS = 6 * 60 * 60 * 1000;
+          setInterval(async () => {
+            if (shuttingDown) return;
+            log("info", "[Radar] Starting scheduled curator affinity run");
+            await logEngineEvent("radar_curator_run", "started", {
+              message: "Scheduled curator radar run",
+            });
+            try {
+              await runCuratorRadar();
+              await logEngineEvent("radar_curator_run", "completed", {
+                message: "Scheduled curator radar run complete",
+              });
+            } catch (err) {
+              log("fail", `[Radar] Curator radar failed: ${err instanceof Error ? err.message : err}`);
+              await logEngineEvent("radar_curator_run", "failed", {
+                message: `Curator radar error: ${err instanceof Error ? err.message : err}`,
+              });
+            }
+          }, SIX_HOURS);
 
           // Every 10 min: warn + resubscribe if no Realtime events received
           setInterval(() => {
