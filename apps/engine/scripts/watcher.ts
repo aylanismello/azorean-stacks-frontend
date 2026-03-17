@@ -17,7 +17,7 @@ import {
   logEngineEvent,
 } from "../lib/pipeline";
 import { SOURCES } from "../lib/sources/index";
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, readdirSync } from "fs";
 
 const db = getSupabase();
 const STATUS_FILE = `${process.env.HOME}/.openclaw/data/azorean-engine-status.json`;
@@ -409,6 +409,46 @@ async function enqueueBacklogTracks() {
   }
 
   log("info", `Recovered ${incomplete.length} incomplete track(s) for enrich/download repair`);
+}
+
+async function enqueueBacklogSuperLikes() {
+  const { data: superLiked, error } = await db.from("user_tracks")
+    .select("track_id, tracks(artist, title)")
+    .eq("super_liked", true);
+
+  if (error) {
+    log("fail", `Backlog super-like scan failed: ${error.message}`);
+    return;
+  }
+
+  if (!superLiked || superLiked.length === 0) {
+    log("info", "No backlog super likes to recover");
+    return;
+  }
+
+  let existingFiles: Set<string>;
+  try {
+    existingFiles = new Set(readdirSync(SUPER_LIKE_DIR));
+  } catch {
+    existingFiles = new Set();
+  }
+
+  let enqueued = 0;
+  for (const row of superLiked) {
+    const track = Array.isArray(row.tracks) ? row.tracks[0] : row.tracks;
+    if (!track?.artist || !track?.title) continue;
+    const expected = `${sanitizeFilename(track.artist)} - ${sanitizeFilename(track.title)}.mp3`;
+    if (!existingFiles.has(expected)) {
+      enqueueSuperLike(row.track_id);
+      enqueued++;
+    }
+  }
+
+  if (enqueued === 0) {
+    log("info", "All super-liked tracks already downloaded");
+  } else {
+    log("info", `Recovered ${enqueued} super-liked track(s) missing from local directory`);
+  }
 }
 
 async function processTrack(trackId: string, prefetched?: any) {
@@ -1069,6 +1109,20 @@ function startWatcher() {
     )
     .on(
       "postgres_changes",
+      { event: "INSERT", schema: "public", table: "user_tracks", filter: "super_liked=eq.true" },
+      (payload) => {
+        const trackId = payload.new?.track_id;
+        if (!trackId) {
+          log("warn", "Received super_liked INSERT without track_id");
+          return;
+        }
+        log("ok", `Super Like INSERT detected for track ${trackId} — queuing local download`);
+        enqueueSuperLike(trackId);
+        processSuperLikeQueue();
+      },
+    )
+    .on(
+      "postgres_changes",
       { event: "UPDATE", schema: "public", table: "user_tracks", filter: "super_liked=eq.true" },
       (payload) => {
         const trackId = payload.new?.track_id;
@@ -1092,6 +1146,7 @@ function startWatcher() {
         await resetStalePipelineStatuses();
         await enqueueBacklogSeeds();
         await enqueueBacklogTracks();
+        await enqueueBacklogSuperLikes();
         processSeedQueue();
         processRepairQueue();
         processPriorityQueue();
