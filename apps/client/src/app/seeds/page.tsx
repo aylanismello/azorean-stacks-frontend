@@ -121,6 +121,24 @@ export default function SeedsPage() {
     }
   };
 
+  const handleRemoveEpisode = async (seedId: string, episodeId: string) => {
+    try {
+      const res = await fetch(`/api/seeds?seed_id=${seedId}&episode_id=${episodeId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to remove episode");
+      setSeeds((prev) =>
+        prev.map((s) =>
+          s.id === seedId
+            ? { ...s, episodes: (s.episodes || []).filter((ep) => ep.id !== episodeId) }
+            : s
+        )
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove episode");
+    }
+  };
+
   const reseeds = seeds.filter(isReseed);
   const displaySeeds = tab === "reseeds" ? reseeds : seeds;
 
@@ -204,6 +222,8 @@ export default function SeedsPage() {
               seed={seed}
               onToggle={handleToggle}
               onDelete={handleDelete}
+              onRemoveEpisode={handleRemoveEpisode}
+              onRefresh={fetchSeeds}
             />
           ))}
         </div>
@@ -250,10 +270,14 @@ function SeedCard({
   seed,
   onToggle,
   onDelete,
+  onRemoveEpisode,
+  onRefresh,
 }: {
   seed: Seed;
   onToggle: (id: string, active: boolean) => void;
   onDelete: (id: string) => void;
+  onRemoveEpisode: (seedId: string, episodeId: string) => void;
+  onRefresh: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const episodes = seed.episodes || [];
@@ -350,7 +374,15 @@ function SeedCard({
             if (a.match_type !== "full" && b.match_type === "full") return 1;
             return 0;
           }).map((ep) => (
-            <SeedEpisodeRow key={ep.id} episode={ep} seedArtist={seed.artist} seedTitle={seed.title} />
+            <SeedEpisodeRow
+              key={ep.id}
+              episode={ep}
+              seedId={seed.id}
+              seedArtist={seed.artist}
+              seedTitle={seed.title}
+              onRemove={onRemoveEpisode}
+              onRefresh={onRefresh}
+            />
           ))}
         </div>
       )}
@@ -372,14 +404,47 @@ function SeedCard({
   );
 }
 
-function SeedEpisodeRow({ episode: ep, seedArtist, seedTitle }: {
+function EnrichmentStatusIcon({ trackCount, enrichedCount }: { trackCount: number; enrichedCount: number }) {
+  if (trackCount === 0) return null;
+  if (enrichedCount === trackCount) {
+    return (
+      <span className="text-green-400" title="All tracks have audio">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </span>
+    );
+  }
+  if (enrichedCount > 0) {
+    return (
+      <span className="text-amber-400 text-[9px]" title={`${enrichedCount}/${trackCount} tracks have audio`}>
+        {enrichedCount}/{trackCount}
+      </span>
+    );
+  }
+  return (
+    <span className="text-muted/40" title="No tracks have audio yet">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+      </svg>
+    </span>
+  );
+}
+
+function SeedEpisodeRow({ episode: ep, seedId, seedArtist, seedTitle, onRemove, onRefresh }: {
   episode: { id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[]; track_count?: number; enriched_count?: number };
+  seedId: string;
   seedArtist?: string;
   seedTitle?: string;
+  onRemove: (seedId: string, episodeId: string) => void;
+  onRefresh: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [tracks, setTracks] = useState<EpisodeTrack[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshed, setRefreshed] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState(false);
 
   const handleToggle = async () => {
     if (open) { setOpen(false); return; }
@@ -392,6 +457,42 @@ function SeedEpisodeRow({ episode: ep, seedArtist, seedTitle }: {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRefresh = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (refreshing) return;
+    setRefreshing(true);
+    setRefreshed(false);
+    try {
+      await fetch("/api/commands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "enrich_episode", payload: { episode_id: ep.id } }),
+      });
+      setRefreshed(true);
+      setTimeout(() => setRefreshed(false), 2000);
+    } catch {
+      // non-blocking
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleRemoveClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPendingRemove(true);
+  };
+
+  const handleConfirmRemove = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPendingRemove(false);
+    onRemove(seedId, ep.id);
+  };
+
+  const handleCancelRemove = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPendingRemove(false);
   };
 
   const statusDot = (s: string) => {
@@ -408,60 +509,116 @@ function SeedEpisodeRow({ episode: ep, seedArtist, seedTitle }: {
     return "text-muted";
   };
 
+  const trackCount = ep.track_count ?? 0;
+  const enrichedCount = ep.enriched_count ?? 0;
+
   return (
     <div className="border-b border-surface-3/50 last:border-b-0">
-      <button
-        onClick={handleToggle}
-        className="w-full text-left py-2.5 hover:bg-surface-2/30 transition-colors rounded-lg px-1 -mx-1"
-      >
-        {/* Badges row */}
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-muted uppercase tracking-wider flex-shrink-0">
-            {ep.source}
-          </span>
-          <span className={`text-[9px] px-1 py-0.5 rounded flex-shrink-0 ${
-            ep.match_type === "full"
-              ? "bg-accent/15 text-accent"
-              : "bg-amber-500/15 text-amber-400"
-          }`}>
-            {ep.match_type === "full" ? "exact" : seedTitle ? `via ${decodeEntities(seedTitle)}` : "artist only"}
-          </span>
-          {ep.aired_date && (
-            <span className="text-[10px] text-muted flex-shrink-0">
-              {ep.aired_date}
-            </span>
-          )}
-          <div className="flex-1" />
-          <span className="text-muted text-xs">{open ? "▾" : "▸"}</span>
+      {/* Remove confirm inline */}
+      {pendingRemove ? (
+        <div className="py-2.5 px-1 flex items-center gap-2">
+          <p className="text-[11px] text-muted flex-1">Remove this episode from the seed?</p>
+          <button
+            onClick={handleCancelRemove}
+            className="text-[10px] px-2 py-0.5 rounded bg-surface-2 text-muted hover:text-foreground transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirmRemove}
+            className="text-[10px] px-2 py-0.5 rounded bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors"
+          >
+            Remove
+          </button>
         </div>
-        {/* Title */}
-        <p className="text-sm text-foreground/80 leading-snug">
-          {ep.title || ep.url}
-        </p>
-        {ep.match_type !== "full" && ep.matched_tracks && ep.matched_tracks.length > 0 && (
-          <p className="text-[10px] text-amber-400/60 mt-0.5 truncate">
-            found: {ep.matched_tracks.map((t) => t.title).join(", ")}
-          </p>
-        )}
-        {/* Enrichment status */}
-        {typeof ep.track_count === "number" && ep.track_count > 0 && (
-          <div className="flex items-center gap-1.5 mt-1">
-            <span className="text-[10px] text-muted">
-              {ep.track_count} track{ep.track_count !== 1 ? "s" : ""}
+      ) : (
+        <button
+          onClick={handleToggle}
+          className="w-full text-left py-2.5 hover:bg-surface-2/30 transition-colors rounded-lg px-1 -mx-1"
+        >
+          {/* Badges row */}
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-muted uppercase tracking-wider flex-shrink-0">
+              {ep.source}
             </span>
-            {ep.enriched_count === ep.track_count ? (
-              <span className="text-[10px] text-green-400" title="All tracks have audio">✓</span>
-            ) : ep.enriched_count && ep.enriched_count > 0 ? (
-              <span className="text-[10px] text-amber-400" title={`${ep.enriched_count}/${ep.track_count} tracks have audio`}>
-                {ep.enriched_count}/{ep.track_count}
+            <span className={`text-[9px] px-1 py-0.5 rounded flex-shrink-0 ${
+              ep.match_type === "full"
+                ? "bg-accent/15 text-accent"
+                : "bg-amber-500/15 text-amber-400"
+            }`}>
+              {ep.match_type === "full" ? "exact" : seedTitle ? `via ${decodeEntities(seedTitle)}` : "artist only"}
+            </span>
+            {ep.aired_date && (
+              <span className="text-[10px] text-muted flex-shrink-0">
+                {ep.aired_date}
               </span>
-            ) : null}
+            )}
+            <div className="flex-1" />
+            {/* Enrichment status icon */}
+            <EnrichmentStatusIcon trackCount={trackCount} enrichedCount={enrichedCount} />
+            {/* Refresh button */}
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className={`p-0.5 rounded transition-all ${
+                refreshed
+                  ? "text-green-400"
+                  : refreshing
+                  ? "text-muted/40 animate-spin"
+                  : "text-muted/40 hover:text-amber-400 hover:bg-surface-3"
+              }`}
+              title="Re-enrich this episode"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                <path d="M21 3v5h-5" />
+                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                <path d="M8 16H3v5" />
+              </svg>
+            </button>
+            {/* Remove episode button */}
+            <button
+              onClick={handleRemoveClick}
+              className="p-0.5 rounded text-muted/30 hover:text-red-400 hover:bg-surface-3 transition-colors"
+              title="Remove episode from this seed"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+            <span className="text-muted text-xs">{open ? "▾" : "▸"}</span>
           </div>
-        )}
-      </button>
+          {/* Title */}
+          <p className="text-sm text-foreground/80 leading-snug">
+            {ep.title || ep.url}
+          </p>
+          {ep.match_type !== "full" && ep.matched_tracks && ep.matched_tracks.length > 0 && (
+            <p className="text-[10px] text-amber-400/60 mt-0.5 truncate">
+              found: {ep.matched_tracks.map((t) => t.title).join(", ")}
+            </p>
+          )}
+          {/* Enrichment count summary */}
+          {trackCount > 0 && (
+            <div className="flex items-center gap-1.5 mt-1">
+              <span className="text-[10px] text-muted">
+                {trackCount} track{trackCount !== 1 ? "s" : ""}
+              </span>
+              {enrichedCount === trackCount ? (
+                <span className="text-[10px] text-green-400" title="All tracks have audio">✓ all enriched</span>
+              ) : enrichedCount > 0 ? (
+                <span className="text-[10px] text-amber-400" title={`${enrichedCount}/${trackCount} tracks have audio`}>
+                  {enrichedCount}/{trackCount} enriched
+                </span>
+              ) : (
+                <span className="text-[10px] text-muted/50">none enriched</span>
+              )}
+            </div>
+          )}
+        </button>
+      )}
 
       {/* Expanded: track list */}
-      {open && (
+      {open && !pendingRemove && (
         <div className="pl-2 pr-1 pb-3">
           {/* Action buttons */}
           <div className="flex items-center gap-2 mb-2">
@@ -591,6 +748,51 @@ function SeedTrackRow({
         {local.artist} — {local.title}
       </span>
       <div className="flex gap-1.5 flex-shrink-0 items-center">
+        {/* Spotify icon */}
+        <span
+          title={local.spotify_url ? "On Spotify" : "Not on Spotify"}
+          className={local.spotify_url ? "text-green-400" : "text-muted/25"}
+        >
+          {local.spotify_url ? (
+            <a href={local.spotify_url} target="_blank" rel="noopener noreferrer">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 0 1-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 1 1-.277-1.215c3.809-.87 7.076-.496 9.712 1.115a.623.623 0 0 1 .207.857zm1.224-2.723a.78.78 0 0 1-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 0 1-.973-.519.781.781 0 0 1 .519-.972c3.632-1.102 8.147-.568 11.234 1.328a.78.78 0 0 1 .257 1.072zm.105-2.835C14.692 9.15 9.375 8.977 6.297 9.9a.937.937 0 0 1-.583-1.782c3.532-1.157 9.404-.933 13.115 1.338a.937.937 0 0 1-.914 1.63z"/>
+              </svg>
+            </a>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.622.622 0 0 1-.857.207c-2.348-1.435-5.304-1.76-8.785-.964a.622.622 0 1 1-.277-1.215c3.809-.87 7.076-.496 9.712 1.115a.623.623 0 0 1 .207.857zm1.224-2.723a.78.78 0 0 1-1.072.257c-2.687-1.652-6.785-2.131-9.965-1.166a.78.78 0 0 1-.973-.519.781.781 0 0 1 .519-.972c3.632-1.102 8.147-.568 11.234 1.328a.78.78 0 0 1 .257 1.072zm.105-2.835C14.692 9.15 9.375 8.977 6.297 9.9a.937.937 0 0 1-.583-1.782c3.532-1.157 9.404-.933 13.115 1.338a.937.937 0 0 1-.914 1.63z"/>
+            </svg>
+          )}
+        </span>
+        {/* YouTube icon */}
+        <span
+          title={local.youtube_url ? "On YouTube" : "Not on YouTube"}
+          className={local.youtube_url ? "text-red-400" : "text-muted/25"}
+        >
+          {local.youtube_url ? (
+            <button onClick={() => openYouTube(local.youtube_url!)}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+              </svg>
+            </button>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+            </svg>
+          )}
+        </span>
+        {/* Download/storage icon */}
+        <span
+          title={local.storage_path ? "Audio downloaded" : "No audio"}
+          className={local.storage_path ? "text-blue-400" : "text-muted/25"}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+        </span>
         {showFetch && (
           <button
             onClick={handleFetchAudio}
@@ -636,16 +838,6 @@ function SeedTrackRow({
         >
           {seeding ? "·" : "SD"}
         </button>
-        {t.spotify_url && (
-          <a href={t.spotify_url} target="_blank" rel="noopener noreferrer" className="text-[9px] text-green-400/60 hover:text-green-400">
-            SP
-          </a>
-        )}
-        {t.youtube_url && (
-          <button onClick={() => openYouTube(t.youtube_url!)} className="text-[9px] text-red-400/60 hover:text-red-400">
-            YT
-          </button>
-        )}
       </div>
     </div>
   );

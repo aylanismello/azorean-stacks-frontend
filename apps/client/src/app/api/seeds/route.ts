@@ -168,6 +168,62 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(seedsWithCounts);
 }
 
+// DELETE /api/seeds?seed_id=...&episode_id=...
+export async function DELETE(req: NextRequest) {
+  const supabase = getServiceClient();
+  const auth = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return req.cookies.getAll();
+        },
+        setAll() {},
+      },
+    }
+  );
+  const {
+    data: { user },
+  } = await auth.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(req.url);
+  const seed_id = searchParams.get("seed_id");
+  const episode_id = searchParams.get("episode_id");
+
+  if (!seed_id || !episode_id) {
+    return NextResponse.json({ error: "seed_id and episode_id are required" }, { status: 400 });
+  }
+
+  // Verify the seed belongs to this user
+  const { data: seed } = await supabase
+    .from("seeds")
+    .select("id")
+    .eq("id", seed_id)
+    .or(`user_id.eq.${user.id},user_id.is.null`)
+    .maybeSingle();
+
+  if (!seed) {
+    return NextResponse.json({ error: "Seed not found or unauthorized" }, { status: 403 });
+  }
+
+  const { error } = await supabase
+    .from("episode_seeds")
+    .delete()
+    .eq("seed_id", seed_id)
+    .eq("episode_id", episode_id);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
 // Resolve a Spotify URL to artist + title (no API key needed)
 async function resolveSpotifyUrl(url: string): Promise<{ artist: string; title: string } | null> {
   try {
