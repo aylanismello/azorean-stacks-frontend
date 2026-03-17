@@ -14,6 +14,9 @@ interface TrackListItem {
   preview_url: string | null;
   audio_url?: string | null;
   storage_path: string | null;
+  is_seed?: boolean;
+  is_re_seed?: boolean;
+  super_liked?: boolean;
 }
 
 interface BaseTracklistProps {
@@ -206,8 +209,16 @@ export function EpisodeTracklist(props: TracklistProps) {
                       : "hover:bg-surface-2 border border-transparent"
                   } ${!hasAudio ? "opacity-60" : ""}`}
                 >
-                  {/* Status dot */}
-                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(t.status)}`} />
+                  {/* Seed/Re-seed emoji OR status dot */}
+                  {t.is_seed ? (
+                    <span className="flex-shrink-0 text-[10px] leading-none" title="Seed track">🌱</span>
+                  ) : t.is_re_seed ? (
+                    <span className="flex-shrink-0 text-[10px] leading-none" title="Re-seeded">🌱<span className="text-[8px]">++</span></span>
+                  ) : t.super_liked ? (
+                    <span className="flex-shrink-0 text-[10px] leading-none text-amber-400" title="Super liked">⭐</span>
+                  ) : (
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(t.status)}`} />
+                  )}
 
                   {/* Cover art + now playing indicator */}
                   {isPlaying && globalPlayer.currentTrack?.coverArtUrl ? (
@@ -238,7 +249,15 @@ export function EpisodeTracklist(props: TracklistProps) {
 
                   {/* Track info */}
                   <div className="min-w-0 flex-1">
-                    <p className={`text-xs truncate ${isPlaying ? "text-accent font-medium" : statusText(t.status)}`}>
+                    <p className={`text-xs truncate ${
+                      isPlaying
+                        ? "text-accent font-medium"
+                        : t.is_seed || t.is_re_seed
+                          ? "text-green-400/90 font-medium"
+                          : t.super_liked
+                            ? "text-amber-300/90 font-medium"
+                            : statusText(t.status)
+                    }`}>
                       {t.title}
                     </p>
                     <p className="text-[10px] text-muted truncate">{t.artist}</p>

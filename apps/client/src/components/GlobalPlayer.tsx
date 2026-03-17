@@ -99,10 +99,27 @@ export function GlobalPlayer() {
         {/* Album art / gradient — click to return to where playback started */}
         <button
           onClick={() => {
-            // Navigate back to the origin URL where the user started playing
-            // This preserves FYP, seed stack, genre, or episode context
+            // Navigate back to the origin URL where the user started playing.
+            // If the playbackOrigin contains an episode_id that doesn't match the
+            // current track's episode, it's stale — build a fresh URL instead.
             if (playbackOrigin) {
-              router.push(playbackOrigin);
+              try {
+                const originUrl = new URL(playbackOrigin, window.location.origin);
+                const originEpId = originUrl.searchParams.get("episode_id");
+                // If origin has an episode_id and it matches the current track's episode, use it
+                // If origin has no episode_id (e.g. /stacks, For You), use it as-is
+                // If origin episode_id doesn't match current track, build fresh URL
+                if (originEpId && currentTrack.episodeId && originEpId !== currentTrack.episodeId) {
+                  const params = new URLSearchParams();
+                  params.set("episode_id", currentTrack.episodeId);
+                  if (currentTrack.episodeTitle) params.set("episode_title", currentTrack.episodeTitle);
+                  router.push(`/?${params.toString()}`);
+                } else {
+                  router.push(playbackOrigin);
+                }
+              } catch {
+                router.push(playbackOrigin);
+              }
             } else if (currentTrack.episodeId) {
               const params = new URLSearchParams();
               params.set("episode_id", currentTrack.episodeId);
