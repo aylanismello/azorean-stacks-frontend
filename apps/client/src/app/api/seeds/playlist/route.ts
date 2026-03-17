@@ -52,7 +52,7 @@ async function fetchPlaylistTracks(
   while (url) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
-    const res = await fetch(url, {
+    const res: Response = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
       signal: controller.signal,
     });
