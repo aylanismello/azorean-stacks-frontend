@@ -237,6 +237,7 @@ export default function SeedsPage() {
             <SeedCard
               key={seed.id}
               seed={seed}
+              allSeeds={seeds}
               onToggle={handleToggle}
               onDelete={handleDelete}
               onRemoveEpisode={handleRemoveEpisode}
@@ -376,12 +377,14 @@ function PipelineStatusBar({ status }: { status: PipelineStatus }) {
 
 function SeedCard({
   seed,
+  allSeeds,
   onToggle,
   onDelete,
   onRemoveEpisode,
   onRefresh,
 }: {
   seed: Seed;
+  allSeeds: Seed[];
   onToggle: (id: string, active: boolean) => void;
   onDelete: (id: string) => void;
   onRemoveEpisode: (seedId: string, episodeId: string) => void;
@@ -493,6 +496,7 @@ function SeedCard({
               seedId={seed.id}
               seedArtist={seed.artist}
               seedTitle={seed.title}
+              allSeeds={allSeeds}
               onRemove={onRemoveEpisode}
               onRefresh={onRefresh}
             />
@@ -553,11 +557,12 @@ function EnrichmentStatusIcon({ trackCount, enrichedCount }: { trackCount: numbe
   );
 }
 
-function SeedEpisodeRow({ episode: ep, seedId, seedArtist, seedTitle, onRemove, onRefresh }: {
+function SeedEpisodeRow({ episode: ep, seedId, seedArtist, seedTitle, allSeeds, onRemove, onRefresh }: {
   episode: { id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[]; track_count?: number; enriched_count?: number };
   seedId: string;
   seedArtist?: string;
   seedTitle?: string;
+  allSeeds?: Seed[];
   onRemove: (seedId: string, episodeId: string) => void;
   onRefresh: () => void;
 }) {
@@ -780,7 +785,7 @@ function SeedEpisodeRow({ episode: ep, seedId, seedArtist, seedTitle, onRemove, 
                 return (
                   <div key={`seed-${seedTrack.id}`} className="border-b border-surface-3/40 pb-1 mb-1">
                     <p className="text-[9px] text-emerald-400/60 uppercase tracking-wider mb-0.5">Seed track</p>
-                    <SeedTrackRow track={seedTrack} statusDot={statusDot} statusColor={statusColor} />
+                    <SeedTrackRow track={seedTrack} statusDot={statusDot} statusColor={statusColor} isSeedTrack />
                   </div>
                 );
               })()}
@@ -790,9 +795,16 @@ function SeedEpisodeRow({ episode: ep, seedId, seedArtist, seedTitle, onRemove, 
                   if (!seedArtist || !seedTitle) return true;
                   return !(t.artist.toLowerCase().trim() === seedArtist.toLowerCase().trim() && t.title.toLowerCase().trim() === seedTitle.toLowerCase().trim());
                 })
-                .map((t) => (
-                  <SeedTrackRow key={t.id} track={t} statusDot={statusDot} statusColor={statusColor} />
-                ))}
+                .map((t) => {
+                  const tArtistL = t.artist.toLowerCase().trim();
+                  const tTitleL = t.title.toLowerCase().trim();
+                  const isReseedTrack = !!(allSeeds?.some((s) =>
+                    s.artist.toLowerCase().trim() === tArtistL &&
+                    s.title.toLowerCase().trim() === tTitleL &&
+                    !(s.artist.toLowerCase().trim() === seedArtist?.toLowerCase().trim() && s.title.toLowerCase().trim() === seedTitle?.toLowerCase().trim())
+                  ));
+                  return <SeedTrackRow key={t.id} track={t} statusDot={statusDot} statusColor={statusColor} isReseedTrack={isReseedTrack} />;
+                })}
             </div>
           )}
         </div>
@@ -805,10 +817,14 @@ function SeedTrackRow({
   track: t,
   statusDot,
   statusColor,
+  isSeedTrack = false,
+  isReseedTrack = false,
 }: {
   track: EpisodeTrack;
   statusDot: (s: string) => string;
   statusColor: (s: string) => string;
+  isSeedTrack?: boolean;
+  isReseedTrack?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -861,13 +877,15 @@ function SeedTrackRow({
 
   return (
     <div className="flex items-center gap-2 py-1 text-[13px]">
-      {local.cover_art_url ? (
+      {isSeedTrack ? (
+        <span className="flex-shrink-0 text-sm leading-none">🌱</span>
+      ) : local.cover_art_url ? (
         <img src={local.cover_art_url} alt="" className="w-5 h-5 rounded flex-shrink-0 object-cover" />
       ) : (
         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(local.status)}`} />
       )}
       <span className={`flex-1 min-w-0 truncate ${statusColor(local.status)}`}>
-        {local.artist} — {local.title}
+        {local.artist} — {local.title}{isReseedTrack ? " 🌱++" : ""}
       </span>
       <div className="flex gap-1.5 flex-shrink-0 items-center">
         {/* Spotify icon */}
