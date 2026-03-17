@@ -38,6 +38,9 @@ const GARBAGE_TITLES = new Set(["unknown track", "untitled", "id", "?", "unknown
 
 let watcherConnectedAt: string | null = null;
 let lastEventAt: string | null = null;
+let lastRealtimeEventAt: string | null = null;
+let currentChannel: ReturnType<typeof db.channel> | null = null;
+let intervalsStarted = false;
 
 function updateStatusFile() {
   try {
@@ -448,6 +451,41 @@ async function enqueueBacklogSuperLikes() {
     log("info", "All super-liked tracks already downloaded");
   } else {
     log("info", `Recovered ${enqueued} super-liked track(s) missing from local directory`);
+  }
+}
+
+async function pollForMissingSuperLikes() {
+  try {
+    const { data: superLiked, error } = await db.from("user_tracks")
+      .select("track_id, tracks(artist, title)")
+      .eq("super_liked", true);
+
+    if (error || !superLiked?.length) return;
+
+    let existingFiles: Set<string>;
+    try {
+      existingFiles = new Set(readdirSync(SUPER_LIKE_DIR));
+    } catch {
+      existingFiles = new Set();
+    }
+
+    let enqueued = 0;
+    for (const row of superLiked) {
+      const track = Array.isArray(row.tracks) ? row.tracks[0] : row.tracks;
+      if (!track?.artist || !track?.title) continue;
+      const expected = `${sanitizeFilename(track.artist)} - ${sanitizeFilename(track.title)}.mp3`;
+      if (!existingFiles.has(expected)) {
+        enqueueSuperLike(row.track_id);
+        enqueued++;
+      }
+    }
+
+    if (enqueued > 0) {
+      log("info", `[Poll] ${enqueued} super-like(s) missing locally — enqueuing`);
+      processSuperLikeQueue();
+    }
+  } catch (err) {
+    log("fail", `pollForMissingSuperLikes error: ${err instanceof Error ? err.message : err}`);
   }
 }
 
@@ -1078,11 +1116,12 @@ async function processRepairQueue() {
 function startWatcher() {
   log("info", "Connecting to Supabase Realtime...");
 
-  const channel = db.channel("seeds-watcher")
+  currentChannel = db.channel("seeds-watcher")
     .on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "seeds" },
       (payload) => {
+        lastRealtimeEventAt = new Date().toISOString();
         const seedId = payload.new?.id;
         if (!seedId) {
           log("warn", "Received INSERT event without seed ID");
@@ -1097,6 +1136,7 @@ function startWatcher() {
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "user_tracks" },
       (payload) => {
+        lastRealtimeEventAt = new Date().toISOString();
         const trackId = payload.new?.track_id;
         if (!trackId) {
           log("warn", "Received user_track INSERT without track_id");
@@ -1111,6 +1151,7 @@ function startWatcher() {
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "user_tracks", filter: "super_liked=eq.true" },
       (payload) => {
+        lastRealtimeEventAt = new Date().toISOString();
         const trackId = payload.new?.track_id;
         if (!trackId) {
           log("warn", "Received super_liked INSERT without track_id");
@@ -1125,6 +1166,7 @@ function startWatcher() {
       "postgres_changes",
       { event: "UPDATE", schema: "public", table: "user_tracks", filter: "super_liked=eq.true" },
       (payload) => {
+        lastRealtimeEventAt = new Date().toISOString();
         const trackId = payload.new?.track_id;
         if (!trackId) {
           log("warn", "Received super_liked UPDATE without track_id");
@@ -1151,6 +1193,34 @@ function startWatcher() {
         processRepairQueue();
         processSuperLikeQueue();
         processPriorityQueue();
+
+        // Start polling + health-check intervals only once (survive reconnects)
+        if (!intervalsStarted) {
+          intervalsStarted = true;
+
+          // Poll every 60s for super-likes missing from local directory
+          setInterval(async () => {
+            if (shuttingDown) return;
+            await pollForMissingSuperLikes();
+          }, 60_000);
+
+          // Every 10 min: warn + resubscribe if no Realtime events received
+          setInterval(() => {
+            if (shuttingDown) return;
+            const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+            if (!lastRealtimeEventAt || new Date(lastRealtimeEventAt).getTime() < tenMinutesAgo) {
+              log("warn", "[Health] No Realtime events in 10 min — attempting resubscribe");
+              logEngineEvent("watcher_reconnect", "info", {
+                message: "Proactive resubscribe: no Realtime events in 10 minutes",
+              });
+              if (currentChannel) {
+                db.removeChannel(currentChannel);
+                currentChannel = null;
+              }
+              startWatcher();
+            }
+          }, 10 * 60 * 1000);
+        }
       } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
         log("warn", `Realtime channel ${status} — will attempt reconnect`);
         logEngineEvent("watcher_disconnected", "info", {
@@ -1159,7 +1229,7 @@ function startWatcher() {
         // Manual reconnect fallback after 5s
         setTimeout(() => {
           log("info", "Attempting manual reconnect...");
-          channel.subscribe();
+          currentChannel?.subscribe();
         }, 5_000);
       }
     });

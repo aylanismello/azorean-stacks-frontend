@@ -188,6 +188,19 @@ export interface Stats {
   recent_runs: DiscoveryRun[];
 }
 
+export interface PipelineEngineEvent {
+  type: string;
+  status: string;
+  created_at: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface PipelineStats {
+  super_likes: { total: number; downloaded: number; pending: number };
+  watcher: { connected_at: string | null; last_event: string | null };
+  last_events: PipelineEngineEvent[];
+}
+
 // =============================================================================
 // Auth Types
 // =============================================================================
