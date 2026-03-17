@@ -132,8 +132,17 @@ export async function DELETE(
   await supabase.from("episode_seeds").delete().eq("seed_id", params.id);
 
   // 5. Clean up orphaned episodes (no remaining seed links)
+  // Skip independently-crawled sources (e.g. lotradio) — they exist regardless of seeds
   if (episodeLinks?.length) {
     for (const link of episodeLinks) {
+      const { data: episode } = await supabase
+        .from("episodes")
+        .select("source")
+        .eq("id", link.episode_id)
+        .single();
+
+      if (episode?.source === "lotradio") continue;
+
       const { count } = await supabase
         .from("episode_seeds")
         .select("*", { count: "exact", head: true })

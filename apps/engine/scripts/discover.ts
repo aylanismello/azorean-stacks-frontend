@@ -207,13 +207,24 @@ async function discoverFromSource(
     try {
       const seedArtistLower = seedArtist.toLowerCase().trim();
       const seedTitleLower = seedTitle.toLowerCase().trim();
-      const { data: dbEpisodes } = await db
-        .from("episodes")
-        .select("url, title, aired_date, metadata")
-        .eq("source", "lotradio")
-        .not("metadata", "is", null);
+      const allDbEpisodes: any[] = [];
+      const PAGE_SIZE = 1000;
+      let from = 0;
+      while (true) {
+        const { data: page } = await db
+          .from("episodes")
+          .select("url, title, aired_date, metadata")
+          .eq("source", "lotradio")
+          .not("metadata", "is", null)
+          .range(from, from + PAGE_SIZE - 1);
+        if (!page || page.length === 0) break;
+        allDbEpisodes.push(...page);
+        if (page.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
+      }
+      const dbEpisodes = allDbEpisodes;
 
-      if (dbEpisodes) {
+      if (dbEpisodes.length > 0) {
         for (const ep of dbEpisodes as any[]) {
           const tracklist: Array<{ artist: string; title: string }> = ep.metadata?.tracklist || [];
           if (tracklist.length === 0) continue;
