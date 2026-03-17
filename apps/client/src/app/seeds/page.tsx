@@ -24,7 +24,8 @@ export default function SeedsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [enriching, setEnriching] = useState(false);
-  const [discoverResult, setDiscoverResult] = useState<{ tracks_found: number } | null>(null);
+  const [enrichingLabel, setEnrichingLabel] = useState<string | null>(null);
+  const [discoverResult, setDiscoverResult] = useState<{ tracks_found: number; message?: string } | null>(null);
   const [tab, setTab] = useState<"all" | "reseeds">("all");
   const [pendingDelete, setPendingDelete] = useState<{ id: string; artist: string; title: string } | null>(null);
   const { user } = useAuth();
@@ -65,11 +66,44 @@ export default function SeedsPage() {
   }, [fetchSeeds, pollRate]);
 
   const handleAddSeed = async (input: string) => {
+    const trimmed = input.trim();
+
+    // Playlist import flow
+    if (trimmed.includes("/playlist/")) {
+      setEnriching(true);
+      setEnrichingLabel("Importing playlist...");
+      setDiscoverResult(null);
+      try {
+        const res = await fetch("/api/seeds/playlist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ playlist_url: trimmed }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error || "Failed to import playlist");
+        }
+        const result = await res.json();
+        const msg = result.added > 0
+          ? `Added ${result.added} seed${result.added !== 1 ? "s" : ""} from playlist${result.skipped > 0 ? ` (${result.skipped} already existed)` : ""}`
+          : `All ${result.skipped} tracks already in your seeds`;
+        setDiscoverResult({ tracks_found: result.added, message: msg });
+        fetchSeeds();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to import playlist");
+      } finally {
+        setEnriching(false);
+        setEnrichingLabel(null);
+      }
+      return;
+    }
+
+    // Single track flow (existing)
     try {
       const res = await fetch("/api/seeds", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input }),
+        body: JSON.stringify({ input: trimmed }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
@@ -81,6 +115,7 @@ export default function SeedsPage() {
       // Trigger fast NTS track discovery, then engine enriches in background
       if (user?.id && seed?.id) {
         setEnriching(true);
+        setEnrichingLabel(null);
         setDiscoverResult(null);
         try {
           const discoverRes = await fetch("/api/discover", {
@@ -97,6 +132,7 @@ export default function SeedsPage() {
           // Discovery failure is non-blocking — the engine will pick it up
         } finally {
           setEnriching(false);
+          setEnrichingLabel(null);
         }
       }
     } catch (err) {
@@ -185,18 +221,20 @@ export default function SeedsPage() {
         </button>
       </div>
 
-      {/* Enriching banner */}
+      {/* Enriching / importing banner */}
       {enriching && (
         <div className="mb-4 p-3 bg-accent/10 border border-accent/20 rounded-lg text-sm text-accent flex items-center gap-2">
           <span className="w-3.5 h-3.5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-          Finding tracks...
+          {enrichingLabel ?? "Finding tracks..."}
         </div>
       )}
 
       {discoverResult && (
         <div className="mb-4 p-3 bg-accent/10 border border-accent/20 rounded-lg text-sm text-accent flex items-center justify-between">
           <span>
-            {discoverResult.tracks_found > 0
+            {discoverResult.message
+              ? discoverResult.message
+              : discoverResult.tracks_found > 0
               ? `Found ${discoverResult.tracks_found} tracks — Pico is enriching them in the background`
               : "No tracks found yet — engine will pick this up shortly"}
           </span>
