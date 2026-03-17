@@ -301,6 +301,11 @@ function EpisodeRow({
       {/* Progress bar */}
       <ProgressBar episode={episode} />
 
+      {/* Seed track indicator */}
+      {episode.match_type === "full" && (
+        <p className="text-[10px] text-green-400/60 mt-1.5">🌱 Seed track in tracklist</p>
+      )}
+
       {/* Artist-only match info */}
       {episode.match_type !== "full" && episode.matched_tracks && episode.matched_tracks.length > 0 && (
         <p className="text-[10px] text-amber-400/60 mt-1.5 truncate">

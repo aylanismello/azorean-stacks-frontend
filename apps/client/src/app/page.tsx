@@ -835,6 +835,16 @@ function StackPageContent() {
     );
   }
 
+  // Mark seed tracks for the For You / taste / seed sidebar
+  const sessionTracksWithSeedFlag = sessionTracks.map((t) => {
+    if (t.seed_id && t.seed_track &&
+        t.seed_track.artist.toLowerCase() === t.artist.toLowerCase() &&
+        t.seed_track.title.toLowerCase() === t.title.toLowerCase()) {
+      return { ...t, is_seed: true };
+    }
+    return t;
+  });
+
   // ── Main stack view ──
   return (
     <div className={`px-4 pt-2 pb-0 h-[calc(100dvh-3.5rem-env(safe-area-inset-bottom,0px))] flex flex-col overflow-hidden ${desktopPlayerFrameClass}`}>
@@ -906,7 +916,7 @@ function StackPageContent() {
             />
           ) : (
             <EpisodeTracklist
-              directTracks={sessionTracks as any}
+              directTracks={sessionTracksWithSeedFlag as any}
               listTitle={seedName || genreFilter || "For You"}
               onTrackSelect={handleTrackSelect}
             />
@@ -932,7 +942,7 @@ function StackPageContent() {
         episodeId={currentEpisodeId || undefined}
         episodeTitle={currentEpisodeTitle}
         listTitle={currentEpisodeId ? currentEpisodeTitle : (seedName || genreFilter || "For You")}
-        directTracks={currentEpisodeId ? undefined : (sessionTracks as any)}
+        directTracks={currentEpisodeId ? undefined : (sessionTracksWithSeedFlag as any)}
         refreshKey={voteCount}
         open={tracklistOpen}
         onClose={() => setTracklistOpen(false)}
