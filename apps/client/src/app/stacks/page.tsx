@@ -150,15 +150,19 @@ export default function StacksPage() {
         <h2 className="text-sm font-semibold text-muted uppercase tracking-wider mb-3">Seeds</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {stacks.map((seed) => (
-            <StackTile key={seed.id} seed={seed} onClick={() => {
-              const params = new URLSearchParams();
-              params.set("source", "seed");
-              params.set("seed_artist", seed.artist);
-              params.set("seed_name", `${decodeEntities(seed.artist)} — ${decodeEntities(seed.title)}`);
-              params.set("from", "stacks");
-              params.set("seed_id", seed.id);
-              router.push(`/?${params.toString()}`);
-            }} />
+            <StackTile
+              key={seed.id}
+              seed={seed}
+              onClick={() => {
+                const params = new URLSearchParams();
+                params.set("source", "ranked");
+                params.set("seed_id", seed.id);
+                params.set("seed_name", `${decodeEntities(seed.artist)} — ${decodeEntities(seed.title)}`);
+                params.set("from", "stacks");
+                router.push(`/?${params.toString()}`);
+              }}
+              onDetailClick={() => router.push(`/stacks/${seed.id}`)}
+            />
           ))}
         </div>
       </div>
@@ -202,7 +206,15 @@ function GenreSection({ genres, router }: { genres: GenreEntry[]; router: Return
   );
 }
 
-function StackTile({ seed, onClick }: { seed: StackSeed; onClick: () => void }) {
+function StackTile({
+  seed,
+  onClick,
+  onDetailClick,
+}: {
+  seed: StackSeed;
+  onClick: () => void;
+  onDetailClick: () => void;
+}) {
   const hue = hueFromString(`${seed.artist}-${seed.title}`);
 
   return (
@@ -266,6 +278,16 @@ function StackTile({ seed, onClick }: { seed: StackSeed; onClick: () => void }) 
               {seed.total_approved} kept
             </span>
           )}
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { e.stopPropagation(); onDetailClick(); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onDetailClick(); } }}
+            className="text-[9px] text-white/25 hover:text-white/60 font-mono ml-auto transition-colors cursor-pointer"
+            title="Browse episodes"
+          >
+            eps →
+          </span>
         </div>
       </div>
     </button>

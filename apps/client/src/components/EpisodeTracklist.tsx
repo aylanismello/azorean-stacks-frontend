@@ -17,6 +17,9 @@ interface TrackListItem {
   is_seed?: boolean;
   is_re_seed?: boolean;
   super_liked?: boolean;
+  // Ranked queue scoring metadata
+  _match_type?: "full" | "artist" | "unknown";
+  _ranked_score?: number;
 }
 
 interface BaseTracklistProps {
@@ -260,7 +263,12 @@ export function EpisodeTracklist(props: TracklistProps) {
                     }`}>
                       {t.title}
                     </p>
-                    <p className="text-[10px] text-muted truncate">{t.artist}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-[10px] text-muted truncate">{t.artist}</p>
+                      {t._match_type === "full" && (
+                        <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-green-400/70" title="Exact seed match" />
+                      )}
+                    </div>
                   </div>
                 </button>
               );

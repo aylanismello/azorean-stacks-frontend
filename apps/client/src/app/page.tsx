@@ -64,14 +64,15 @@ function StackPageContent() {
   const fromSeedId = searchParams.get("seed_id");
   const fromEpisodes = searchParams.get("from") === "episodes";
 
-  // Stack source: "taste" (For You), "genre", "seed", "episode" (legacy)
+  // Stack source: "taste" (For You), "genre", "seed", "episode" (legacy), "ranked" (new)
   // Default to taste mode when no source/episode params are set
   const stackSource = searchParams.get("source");
   const genreFilter = searchParams.get("genre");
   const seedFilter = searchParams.get("seed_artist");
   const seedName = searchParams.get("seed_name"); // "Artist — Title" for display
   const isSeedMode = stackSource === "seed";
-  const isTasteMode = stackSource === "taste" || stackSource === "genre" || isSeedMode || (!stackSource && !episodeId);
+  const isRankedMode = stackSource === "ranked";
+  const isTasteMode = stackSource === "taste" || stackSource === "genre" || isSeedMode || isRankedMode || (!stackSource && !episodeId);
 
   const [tracks, setTracks] = useState<Track[]>([]);
   const [sessionTracks, setSessionTracks] = useState<Track[]>([]);
@@ -164,12 +165,14 @@ function StackPageContent() {
     return [...front, ...rest];
   }, []);
 
-  const buildUrl = useCallback((extra?: string) => {
+  const buildUrl = useCallback((_extra?: string) => {
     // Episode mode: fetch ALL tracks in episode order (not just pending)
     if (episodeId) {
-      let url = `/api/tracks?episode_id=${encodeURIComponent(episodeId)}&limit=100`;
-      if (extra) url += extra;
-      return url;
+      return `/api/tracks?episode_id=${encodeURIComponent(episodeId)}&limit=100`;
+    }
+    // Ranked mode: call the seed's ranked queue endpoint (returns all pending, taste-weighted)
+    if (isRankedMode && fromSeedId) {
+      return `/api/stacks/${encodeURIComponent(fromSeedId)}/queue`;
     }
     // Taste/genre/seed mode: fetch pending tracks ranked by taste_score
     let url = `/api/tracks?status=pending&limit=20`;
@@ -185,9 +188,8 @@ function StackPageContent() {
     if (seedFilter) {
       url += `&seed_artist=${encodeURIComponent(seedFilter)}`;
     }
-    if (extra) url += extra;
     return url;
-  }, [episodeId, isTasteMode, hideLowScored, genreFilter, seedFilter]);
+  }, [episodeId, isRankedMode, fromSeedId, isTasteMode, hideLowScored, genreFilter, seedFilter]);
 
   const fetchTracks = useCallback(async () => {
     reconciledTrackId.current = null;
@@ -196,8 +198,8 @@ function StackPageContent() {
       if (!res.ok) throw new Error(`Failed to load tracks (${res.status})`);
       const data = await res.json();
       let newTracks: Track[] = data.tracks || [];
-      // Client-side reordering in taste/genre/seed modes only
-      if (!episodeId && isTasteMode) {
+      // Client-side reordering in taste/genre/seed modes only (not ranked — API handles ordering)
+      if (!episodeId && isTasteMode && !isRankedMode) {
         newTracks = reorderByMomentum(newTracks);
         newTracks = boostByChain(newTracks);
       }
@@ -277,9 +279,9 @@ function StackPageContent() {
       }
 
       // Not in list — prepend a synthetic track from player state
-      // Guard: in seed mode, only prepend if the player track is from this seed context.
+      // Guard: in seed/ranked mode, only prepend if the player track is from this seed context.
       // If it's not in the seed-filtered list, it belongs to a different stack.
-      if (isSeedMode) return prev;
+      if (isSeedMode || isRankedMode) return prev;
 
       const synthetic: Track = {
         id: playerTrack.id,
@@ -296,7 +298,7 @@ function StackPageContent() {
 
     setSessionTracks((prev) => {
       if (prev.some((track) => track.id === playerTrack.id)) return prev;
-      if (isSeedMode) return prev;
+      if (isSeedMode || isRankedMode) return prev;
 
       const synthetic: Track = {
         id: playerTrack.id,
@@ -316,7 +318,7 @@ function StackPageContent() {
     if (!episodeId && !hasEpisodeTracks) {
       userHasInteracted.current = true;
     }
-  }, [globalPlayer.currentTrack, episodeId, hasEpisodeTracks, isSeedMode]);
+  }, [globalPlayer.currentTrack, episodeId, hasEpisodeTracks, isSeedMode, isRankedMode]);
 
   // Fire reconciliation when tracks finish loading and player has a current track
   const playerTrackId = globalPlayer.currentTrack?.id ?? null;
@@ -455,11 +457,13 @@ function StackPageContent() {
         setTracks((prev) => {
           const remaining = prev.filter((t) => t.id !== id);
           let ordered = remaining;
-          if (isTasteMode) {
+          // In ranked mode, preserve server-side ordering — no client reordering
+          if (isTasteMode && !isRankedMode) {
             ordered = reorderByMomentum(ordered);
             ordered = boostByChain(ordered);
           }
-          if (ordered.length <= 3) {
+          // Ranked mode: full queue is loaded upfront, no refetch needed
+          if (!isRankedMode && ordered.length <= 3) {
             const votedId = id;
             const existingIds = new Set(ordered.map((t) => t.id));
             fetch(buildUrl())
@@ -474,7 +478,7 @@ function StackPageContent() {
                     const currIds = new Set(curr.map((t: Track) => t.id));
                     const fresh = newTracks.filter((t: Track) => !currIds.has(t.id));
                     let combined = [...curr, ...fresh];
-                    if (isTasteMode) {
+                    if (isTasteMode && !isRankedMode) {
                       combined = reorderByMomentum(combined);
                       combined = boostByChain(combined);
                     }
@@ -686,7 +690,8 @@ function StackPageContent() {
     setTracks((prev) => {
       if (prev.length < 2) return prev;
       const remaining = prev.slice(1);
-      if (remaining.length <= 3) {
+      // Ranked mode: full queue is loaded upfront, no refetch needed
+      if (!isRankedMode && remaining.length <= 3) {
         const existingIds = new Set(remaining.map((t) => t.id));
         fetch(buildUrl())
           .then((r) => r.ok ? r.json() : null)
@@ -700,7 +705,7 @@ function StackPageContent() {
                 const currIds = new Set(curr.map((t: Track) => t.id));
                 const fresh = newTracks.filter((t: Track) => !currIds.has(t.id));
                 let combined = [...curr, ...fresh];
-                if (isTasteMode) {
+                if (isTasteMode && !isRankedMode) {
                   combined = reorderByMomentum(combined);
                   combined = boostByChain(combined);
                 }
@@ -713,7 +718,7 @@ function StackPageContent() {
       }
       return remaining;
     });
-  }, [globalPlayer.trackEndedCount, tracks, globalPlayer.currentTrack?.id, buildUrl, hasEpisodeTracks]);
+  }, [globalPlayer.trackEndedCount, tracks, globalPlayer.currentTrack?.id, buildUrl, hasEpisodeTracks, isRankedMode]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -881,7 +886,9 @@ function StackPageContent() {
           <span className="text-[10px] font-mono text-muted/60 pointer-events-auto">
             {hasEpisodeTracks
               ? `${safeEpisodePos + 1} / ${total}`
-              : `${total} pending`}
+              : isRankedMode
+                ? `ranked queue — ${total} tracks`
+                : `${total} pending`}
           </span>
         </button>
 
