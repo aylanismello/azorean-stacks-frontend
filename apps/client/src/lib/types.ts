@@ -102,6 +102,23 @@ export interface UserTrack {
   super_liked?: boolean;
 }
 
+export interface PipelineStatus {
+  state: "queued" | "discovering" | "enriching" | "downloading" | "done" | "error";
+  progress?: string;
+  episode_title?: string;
+  log?: Array<{ t: string; msg: string }>;
+  started_at?: string;
+  completed_at?: string;
+  error?: string;
+}
+
+export interface SeedStats {
+  episodes: number;
+  tracks: number;
+  enriched: number;
+  downloaded: number;
+}
+
 export interface Seed {
   id: string;
   user_id: string | null;
@@ -115,6 +132,8 @@ export interface Seed {
   episodes?: Array<{ id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[]; track_count?: number; enriched_count?: number }>;
   curated_count?: number;
   last_run?: { tracks_found: number; tracks_added: number; started_at: string } | null;
+  pipeline_status?: PipelineStatus | null;
+  stats?: SeedStats;
 }
 
 export interface Curator {

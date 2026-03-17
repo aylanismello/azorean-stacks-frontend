@@ -83,13 +83,13 @@ export async function GET(req: NextRequest) {
   // Also collect artist-matched tracks for artist-only episodes
   const artistTracksByEpisode: Record<string, { artist: string; title: string }[]> = {};
 
-  const episodeTrackStats: Record<string, { total: number; with_audio: number }> = {};
+  const episodeTrackStats: Record<string, { total: number; with_audio: number; enriched: number }> = {};
 
   if (allEpisodeIds.length > 0) {
     // Get tracks for these episodes via junction table
     const { data: etLinks } = await supabase
       .from("episode_tracks")
-      .select("episode_id, tracks(status, artist, title, storage_path)")
+      .select("episode_id, tracks(status, artist, title, storage_path, spotify_url, youtube_url)")
       .in("episode_id", allEpisodeIds);
 
     // Flatten junction rows into a tracks-like array
@@ -99,6 +99,8 @@ export async function GET(req: NextRequest) {
       artist: row.tracks?.artist,
       title: row.tracks?.title,
       storage_path: row.tracks?.storage_path,
+      spotify_url: row.tracks?.spotify_url,
+      youtube_url: row.tracks?.youtube_url,
     })).filter((t: any) => t.status);
 
     const episodesWithPending = new Set<string>();
@@ -114,9 +116,10 @@ export async function GET(req: NextRequest) {
       }
       // Track enrichment stats per episode
       if (t.episode_id) {
-        if (!episodeTrackStats[t.episode_id]) episodeTrackStats[t.episode_id] = { total: 0, with_audio: 0 };
+        if (!episodeTrackStats[t.episode_id]) episodeTrackStats[t.episode_id] = { total: 0, with_audio: 0, enriched: 0 };
         episodeTrackStats[t.episode_id].total++;
         if (t.storage_path) episodeTrackStats[t.episode_id].with_audio++;
+        if (t.spotify_url || t.youtube_url) episodeTrackStats[t.episode_id].enriched++;
       }
     }
 
@@ -156,12 +159,30 @@ export async function GET(req: NextRequest) {
       track_count: episodeTrackStats[ep.id]?.total ?? 0,
       enriched_count: episodeTrackStats[ep.id]?.with_audio ?? 0,
     }));
+
+    // Aggregate stats across all episodes for this seed
+    let totalTracks = 0, totalEnriched = 0, totalDownloaded = 0;
+    for (const ep of episodes) {
+      const epStats = episodeTrackStats[ep.id];
+      if (epStats) {
+        totalTracks += epStats.total;
+        totalEnriched += epStats.enriched;
+        totalDownloaded += epStats.with_audio;
+      }
+    }
+
     return {
       ...seed,
       discovery_count: seed.track_id ? (trackCounts[seed.track_id] || 0) : 0,
       episodes,
       curated_count: curatedCountBySeed[seed.id] || 0,
       last_run: lastRunBySeed[seed.id] || null,
+      stats: {
+        episodes: episodes.length,
+        tracks: totalTracks,
+        enriched: totalEnriched,
+        downloaded: totalDownloaded,
+      },
     };
   });
 
@@ -364,6 +385,14 @@ export async function POST(req: NextRequest) {
 
   const source = body.source?.trim() || null;
 
+  const now = new Date();
+  const timeStr = now.toTimeString().slice(0, 8);
+  const pipelineStatus = {
+    state: "queued",
+    started_at: now.toISOString(),
+    log: [{ t: timeStr, msg: "seed created, queued for discovery" }],
+  };
+
   const { data, error } = await supabase
     .from("seeds")
     .insert({
@@ -372,6 +401,7 @@ export async function POST(req: NextRequest) {
       track_id: existingTrack?.id || null,
       user_id: user.id,
       source: source || "manual",
+      pipeline_status: pipelineStatus,
     })
     .select()
     .single();

@@ -598,6 +598,370 @@ function enqueueSuperLike(trackId: string) {
   superLikeQueue.push(trackId);
 }
 
+// ─── PRIORITY PIPELINE ──────────────────────────────────────
+
+async function updatePipelineStatus(
+  seedId: string,
+  updates: Record<string, unknown>,
+  logMsg?: string,
+) {
+  try {
+    const { data: seed } = await db.from("seeds").select("pipeline_status").eq("id", seedId).single();
+    const current = (seed?.pipeline_status as Record<string, unknown>) || {};
+    const timeStr = new Date().toTimeString().slice(0, 8);
+    const newLogs = logMsg
+      ? [...((current.log as unknown[]) || []), { t: timeStr, msg: logMsg }]
+      : (current.log as unknown[]) || [];
+    const newStatus = { ...current, ...updates, log: newLogs };
+    await db.from("seeds").update({ pipeline_status: newStatus }).eq("id", seedId);
+  } catch (err) {
+    log("fail", `updatePipelineStatus failed for ${seedId}: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
+async function processPrioritySeed(seedId: string) {
+  const { data: seed, error: seedErr } = await db.from("seeds").select("*").eq("id", seedId).single();
+  if (seedErr || !seed) {
+    log("fail", `Priority: could not read seed ${seedId}`);
+    return;
+  }
+
+  const seedLabel = `${seed.artist} – ${seed.title}`;
+  log("info", `\n━━━ PRIORITY: Pipeline starting for ${seedLabel} ━━━`);
+
+  await updatePipelineStatus(seedId, { state: "discovering" }, `searching for "${seedLabel}"`);
+
+  type Candidate = {
+    url: string;
+    title: string;
+    date: string | null;
+    sourceName: string;
+    existingEpisodeId: string | null;
+    trackCount: number;
+    rawTracklist: Array<{ artist: string; title: string }>;
+  };
+
+  const candidates: Candidate[] = [];
+
+  for (const source of SOURCES) {
+    let sourceEpisodes: Array<{ url: string; title: string; date: string | null }> = [];
+
+    if (source.name === "lotradio") {
+      const seedArtistLower = seed.artist.toLowerCase().trim();
+      const seedTitleLower = seed.title.toLowerCase().trim();
+
+      // Paginated scan of all lotradio episodes in DB
+      let page = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data: dbEpisodes } = await db.from("episodes")
+          .select("url, title, aired_date, metadata")
+          .eq("source", "lotradio")
+          .not("metadata", "is", null)
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+
+        if (!dbEpisodes || dbEpisodes.length === 0) break;
+
+        for (const ep of dbEpisodes as any[]) {
+          const tracklist: Array<{ artist: string; title: string }> = ep.metadata?.tracklist || [];
+          if (tracklist.length === 0) continue;
+          const hasMatch = tracklist.some((t) =>
+            t.artist?.toLowerCase().trim() === seedArtistLower &&
+            t.title?.toLowerCase().trim() === seedTitleLower
+          );
+          if (hasMatch) {
+            sourceEpisodes.push({ url: ep.url, title: ep.title || ep.url, date: ep.aired_date || null });
+          }
+        }
+
+        if (dbEpisodes.length < pageSize) break;
+        page++;
+      }
+
+      await updatePipelineStatus(seedId, {}, `lot radio: ${sourceEpisodes.length} matches`);
+    } else {
+      try {
+        const results = await source.searchForSeed(seed.artist, seed.title);
+        sourceEpisodes = results.map((e) => ({ url: e.url, title: e.title, date: e.date }));
+        await updatePipelineStatus(seedId, {}, `${source.name}: ${sourceEpisodes.length} episodes found`);
+      } catch (err) {
+        log("fail", `Priority: ${source.name} search error: ${err instanceof Error ? err.message : err}`);
+        continue;
+      }
+    }
+
+    // Score episodes by track count
+    for (const ep of sourceEpisodes.slice(0, CONCURRENCY.ntsMaxEpisodes)) {
+      const { data: existingEp } = await db.from("episodes")
+        .select("id").eq("url", ep.url).limit(1).maybeSingle();
+
+      let trackCount = 0;
+      let rawTracklist: Array<{ artist: string; title: string }> = [];
+      const existingEpisodeId = existingEp?.id || null;
+
+      if (existingEp) {
+        const { count } = await db.from("tracks")
+          .select("*", { count: "exact", head: true })
+          .eq("episode_id", existingEp.id);
+        trackCount = count || 0;
+      }
+
+      if (trackCount === 0) {
+        try {
+          rawTracklist = await source.getTracklist(ep.url);
+          trackCount = rawTracklist.length;
+        } catch {
+          continue;
+        }
+      }
+
+      if (trackCount > 0) {
+        candidates.push({
+          url: ep.url,
+          title: ep.title,
+          date: ep.date,
+          sourceName: source.name,
+          existingEpisodeId,
+          trackCount,
+          rawTracklist,
+        });
+      }
+    }
+  }
+
+  if (candidates.length === 0) {
+    await updatePipelineStatus(
+      seedId,
+      { state: "done", completed_at: new Date().toISOString() },
+      "no episodes found",
+    );
+    log("warn", `Priority: no episodes found for ${seedLabel}`);
+    return;
+  }
+
+  // Pick best: most tracks
+  const best = candidates.sort((a, b) => b.trackCount - a.trackCount)[0];
+  await updatePipelineStatus(seedId, { episode_title: best.title }, `best episode: "${best.title}" (${best.trackCount} tracks)`);
+
+  const sourceObj = SOURCES.find((s) => s.name === best.sourceName)!;
+  let episodeId = best.existingEpisodeId;
+
+  // Create episode if it doesn't exist
+  if (!episodeId) {
+    const artworkUrl = await sourceObj.getArtwork(best.url);
+    const { data: newEp, error: epErr } = await db.from("episodes").insert({
+      url: best.url,
+      title: best.title || null,
+      source: best.sourceName,
+      aired_date: best.date || null,
+      artwork_url: artworkUrl,
+    }).select("id").single();
+
+    if (!newEp) {
+      await updatePipelineStatus(
+        seedId,
+        { state: "error", error: `Episode insert failed: ${epErr?.message}` },
+        "episode insert failed",
+      );
+      return;
+    }
+    episodeId = newEp.id;
+  }
+
+  await db.from("episode_seeds").upsert(
+    { episode_id: episodeId, seed_id: seedId },
+    { onConflict: "episode_id,seed_id" },
+  );
+
+  // Insert new tracks (skip if episode already has tracks in DB)
+  let tracksToProcess: any[] = [];
+
+  if (best.rawTracklist.length > 0) {
+    const context = `${best.title}${best.date ? ` (${best.date})` : ""}`;
+    for (let pos = 0; pos < best.rawTracklist.length; pos++) {
+      const track = best.rawTracklist[pos];
+      if (isSameTrack(track, { artist: seed.artist, title: seed.title })) continue;
+      const lTitle = track.title.toLowerCase().trim();
+      const lArtist = track.artist.toLowerCase().trim();
+      if (GARBAGE_TITLES.has(lTitle) || lTitle.length <= 1 || lArtist.length <= 1) continue;
+
+      const { data: existing } = await db.from("tracks")
+        .select("id").ilike("artist", track.artist.trim()).ilike("title", track.title.trim()).limit(1);
+      if (existing && existing.length > 0) continue;
+
+      const { data: inserted } = await db.from("tracks").insert({
+        artist: track.artist.trim(),
+        title: track.title.trim(),
+        source: best.sourceName,
+        source_url: best.url,
+        source_context: context,
+        metadata: { co_occurrence: 1, seed_artist: seed.artist, seed_title: seed.title },
+        status: "pending",
+        episode_id: episodeId,
+        seed_track_id: seed.track_id || null,
+      }).select("*").single();
+
+      if (!inserted) continue;
+
+      await db.from("episode_tracks").upsert(
+        { episode_id: episodeId, track_id: inserted.id, position: pos },
+        { onConflict: "episode_id,track_id" },
+      );
+      tracksToProcess.push(inserted);
+    }
+  } else {
+    // Episode already existed — fetch its unenriched tracks
+    const { data: existingTracks } = await db.from("tracks")
+      .select("*")
+      .eq("episode_id", episodeId)
+      .eq("status", "pending");
+    tracksToProcess = existingTracks || [];
+  }
+
+  if (tracksToProcess.length === 0) {
+    await updatePipelineStatus(
+      seedId,
+      { state: "done", completed_at: new Date().toISOString() },
+      "no tracks to enrich",
+    );
+    return;
+  }
+
+  // Phase 2: Enrich all tracks
+  await updatePipelineStatus(
+    seedId,
+    { state: "enriching", progress: `0/${tracksToProcess.length}` },
+    `enriching ${tracksToProcess.length} tracks`,
+  );
+
+  let enriched = 0;
+  for (let i = 0; i < tracksToProcess.length; i += CONCURRENCY.enrich) {
+    const batch = tracksToProcess.slice(i, i + CONCURRENCY.enrich);
+    const results = await Promise.allSettled(batch.map(enrichTrack));
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value) enriched++;
+    }
+    await updatePipelineStatus(seedId, { progress: `${Math.min(i + CONCURRENCY.enrich, tracksToProcess.length)}/${tracksToProcess.length}` });
+  }
+
+  await updatePipelineStatus(seedId, {}, `enriched ${enriched}/${tracksToProcess.length} tracks`);
+
+  // Phase 3: Download first 5 tracks with YouTube URLs
+  const { data: downloadable } = await db.from("tracks")
+    .select("*")
+    .in("id", tracksToProcess.map((t) => t.id))
+    .not("youtube_url", "is", null)
+    .is("storage_path", null)
+    .limit(5);
+
+  if (downloadable && downloadable.length > 0) {
+    await updatePipelineStatus(
+      seedId,
+      { state: "downloading", progress: `0/${downloadable.length}` },
+      `downloading ${downloadable.length} tracks`,
+    );
+
+    let downloaded = 0;
+    for (let i = 0; i < downloadable.length; i += CONCURRENCY.download) {
+      const batch = downloadable.slice(i, i + CONCURRENCY.download);
+      const results = await Promise.allSettled(batch.map(async (track) => {
+        const ok = await downloadTrack(track);
+        log(ok ? "ok" : "fail", `Priority DL: ${track.artist} – ${track.title}`);
+        return ok;
+      }));
+      downloaded += results.filter((r) => r.status === "fulfilled" && r.value).length;
+      await updatePipelineStatus(seedId, { progress: `${Math.min(i + CONCURRENCY.download, downloadable.length)}/${downloadable.length}` });
+    }
+
+    await updatePipelineStatus(seedId, {}, `downloaded ${downloaded}/${downloadable.length} tracks`);
+  }
+
+  await updatePipelineStatus(
+    seedId,
+    { state: "done", completed_at: new Date().toISOString() },
+    "pipeline complete",
+  );
+
+  log("ok", `Priority pipeline done for ${seedLabel}`);
+}
+
+async function processPriorityQueue() {
+  while (true) {
+    if (shuttingDown) break;
+    await sleep(3000);
+    if (shuttingDown) break;
+
+    try {
+      const { data: queuedSeeds } = await db.from("seeds")
+        .select("id")
+        .filter("pipeline_status->>state", "eq", "queued")
+        .limit(1);
+
+      if (!queuedSeeds || queuedSeeds.length === 0) continue;
+
+      const seedId = queuedSeeds[0].id;
+      log("info", `Priority queue: picked up seed ${seedId}`);
+
+      // Mark as in-progress (CAS on 'queued' to avoid double-processing)
+      const timeStr = new Date().toTimeString().slice(0, 8);
+      const { data: updated } = await db.from("seeds")
+        .update({
+          pipeline_status: {
+            state: "discovering",
+            started_at: new Date().toISOString(),
+            log: [{ t: timeStr, msg: "pipeline started" }],
+          },
+        })
+        .eq("id", seedId)
+        .filter("pipeline_status->>state", "eq", "queued")
+        .select("id")
+        .maybeSingle();
+
+      if (!updated) {
+        // Another processor may have grabbed it already
+        continue;
+      }
+
+      try {
+        await processPrioritySeed(seedId);
+      } catch (err) {
+        await updatePipelineStatus(
+          seedId,
+          { state: "error", error: err instanceof Error ? err.message : String(err) },
+          `error: ${err instanceof Error ? err.message : err}`,
+        );
+        log("fail", `Priority pipeline error for ${seedId}: ${err instanceof Error ? err.message : err}`);
+      }
+    } catch (err) {
+      log("fail", `Priority queue loop error: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+}
+
+async function resetStalePipelineStatuses() {
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  try {
+    const { data: stale } = await db.from("seeds")
+      .select("id, pipeline_status")
+      .not("pipeline_status", "is", null)
+      .not("pipeline_status->>state", "eq", "done")
+      .not("pipeline_status->>state", "eq", "error")
+      .lt("pipeline_status->>started_at", fiveMinutesAgo);
+
+    if (!stale || stale.length === 0) return;
+
+    for (const seed of stale) {
+      await db.from("seeds").update({
+        pipeline_status: { state: "queued" },
+      }).eq("id", seed.id);
+    }
+
+    log("info", `Reset ${stale.length} stale pipeline status(es) to "queued"`);
+  } catch (err) {
+    log("fail", `resetStalePipelineStatuses error: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
 // ─── INDEPENDENT QUEUE PROCESSORS ───────────────────────────
 
 let seedProcessing = false;
@@ -725,10 +1089,12 @@ function startWatcher() {
           message: "Watcher connected to Supabase Realtime",
         });
         updateStatusFile();
+        await resetStalePipelineStatuses();
         await enqueueBacklogSeeds();
         await enqueueBacklogTracks();
         processSeedQueue();
         processRepairQueue();
+        processPriorityQueue();
       } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
         log("warn", `Realtime channel ${status} — will attempt reconnect`);
         logEngineEvent("watcher_disconnected", "info", {

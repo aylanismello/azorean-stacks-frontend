@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Seed, EpisodeTrack } from "@/lib/types";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Seed, EpisodeTrack, PipelineStatus } from "@/lib/types";
 import { SeedForm } from "@/components/SeedForm";
 import { useAuth } from "@/components/AuthProvider";
 import { isReseed } from "@/lib/seeds";
@@ -46,6 +46,23 @@ export default function SeedsPage() {
   useEffect(() => {
     fetchSeeds();
   }, [fetchSeeds]);
+
+  // Adaptive polling: fast (3s) when any seed has an active pipeline, slow (30s) otherwise
+  const [pollRate, setPollRate] = useState(30000);
+  const pollRateRef = useRef(pollRate);
+  pollRateRef.current = pollRate;
+
+  useEffect(() => {
+    const hasActive = seeds.some(
+      (s) => s.pipeline_status?.state && !["done", "error"].includes(s.pipeline_status.state)
+    );
+    setPollRate(hasActive ? 3000 : 30000);
+  }, [seeds]);
+
+  useEffect(() => {
+    const id = setInterval(fetchSeeds, pollRate);
+    return () => clearInterval(id);
+  }, [fetchSeeds, pollRate]);
 
   const handleAddSeed = async (input: string) => {
     try {
@@ -266,6 +283,97 @@ export default function SeedsPage() {
   );
 }
 
+function PipelineStatusBar({ status }: { status: PipelineStatus }) {
+  const [showLog, setShowLog] = useState(false);
+  const logRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (showLog && logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [showLog, status.log]);
+
+  // "done" only shows if completed within the last 10s
+  if (status.state === "done") {
+    if (!status.completed_at) return null;
+    const age = Date.now() - new Date(status.completed_at).getTime();
+    if (age > 10000) return null;
+    return (
+      <div className="px-4 pb-2 flex items-center gap-1.5">
+        <span className="text-green-400">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+        </span>
+        <span className="text-[10px] text-green-400">Pipeline complete</span>
+      </div>
+    );
+  }
+
+  const stateDisplay: Record<string, { label: string; indicator: React.ReactNode }> = {
+    queued: {
+      label: "Queued...",
+      indicator: <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />,
+    },
+    discovering: {
+      label: "Discovering episodes...",
+      indicator: (
+        <svg className="animate-spin flex-shrink-0" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+      ),
+    },
+    enriching: {
+      label: status.progress ? `Enriching ${status.progress}...` : "Enriching...",
+      indicator: (
+        <svg className="animate-spin flex-shrink-0" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+      ),
+    },
+    downloading: {
+      label: status.progress ? `Downloading ${status.progress}...` : "Downloading...",
+      indicator: (
+        <svg className="animate-spin flex-shrink-0" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+      ),
+    },
+    error: {
+      label: status.error || "Pipeline error",
+      indicator: <span className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" />,
+    },
+  };
+
+  const display = stateDisplay[status.state];
+  if (!display) return null;
+
+  const isError = status.state === "error";
+  const textColor = isError ? "text-red-400" : status.state === "queued" ? "text-amber-400" : "text-muted";
+
+  return (
+    <div className="px-4 pb-2">
+      <div className="flex items-center gap-1.5">
+        <span className={textColor}>{display.indicator}</span>
+        <span className={`text-[10px] ${textColor} flex-1 min-w-0 truncate`}>{display.label}</span>
+        {status.log && status.log.length > 0 && (
+          <button
+            onClick={() => setShowLog(!showLog)}
+            className="text-[9px] text-muted/40 hover:text-muted transition-colors flex-shrink-0"
+          >
+            {showLog ? "hide log" : "show log"}
+          </button>
+        )}
+      </div>
+      {showLog && status.log && status.log.length > 0 && (
+        <div
+          ref={logRef}
+          className="mt-1.5 max-h-24 overflow-y-auto rounded bg-surface-2/60 p-2 font-mono"
+        >
+          {status.log.map((entry, i) => (
+            <div key={i} className="text-[9px] text-muted/70 leading-relaxed">
+              <span className="text-muted/40">{entry.t}</span>{" "}
+              <span>{entry.msg}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SeedCard({
   seed,
   onToggle,
@@ -287,6 +395,8 @@ function SeedCard({
   const isEnriching = seed.created_at &&
     (Date.now() - new Date(seed.created_at).getTime()) < 2 * 60 * 60 * 1000 &&
     totalFound === 0;
+  const ps = seed.pipeline_status;
+  const hasPipelineActivity = ps && ps.state !== null;
 
   return (
     <div
@@ -319,7 +429,7 @@ function SeedCard({
                 🌱 re-seed
               </span>
             )}
-            {isEnriching && (
+            {isEnriching && !hasPipelineActivity && (
               <span className="flex-shrink-0 flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20" title="Pico is enriching this seed">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                 enriching
@@ -357,6 +467,9 @@ function SeedCard({
           ✕
         </button>
       </div>
+
+      {/* Pipeline status bar */}
+      {hasPipelineActivity && <PipelineStatusBar status={ps!} />}
 
       {/* No-match banner */}
       {noMatches && seed.active && (
@@ -398,6 +511,15 @@ function SeedCard({
       {expanded && episodes.length === 0 && !seed.source && (
         <div className="border-t border-surface-3 px-4 py-3">
           <p className="text-[11px] text-muted/50">No episodes linked to this seed yet</p>
+        </div>
+      )}
+
+      {/* Aggregate stats */}
+      {seed.stats && (seed.stats.tracks > 0 || seed.stats.episodes > 0) && (
+        <div className="border-t border-surface-3/50 px-4 py-2">
+          <p className="text-[10px] text-muted/50">
+            {seed.stats.episodes} episode{seed.stats.episodes !== 1 ? "s" : ""} · {seed.stats.tracks} track{seed.stats.tracks !== 1 ? "s" : ""} · {seed.stats.enriched} enriched · {seed.stats.downloaded} downloaded
+          </p>
         </div>
       )}
     </div>
