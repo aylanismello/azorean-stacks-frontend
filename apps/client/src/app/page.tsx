@@ -576,8 +576,6 @@ function StackPageContent() {
       if (episodeId) {
         if (fromEpisodes) {
           router.push("/episodes");
-        } else if (fromSeedId) {
-          router.push(`/stacks/${fromSeedId}`);
         } else {
           router.push("/stacks");
         }
@@ -597,12 +595,8 @@ function StackPageContent() {
   };
 
   const handleGoToStacks = useCallback(() => {
-    if (fromSeedId) {
-      router.push(`/stacks/${fromSeedId}`);
-    } else {
-      router.push("/stacks");
-    }
-  }, [router, fromSeedId]);
+    router.push("/stacks");
+  }, [router]);
 
   const handleGoBack = useCallback(() => {
     if (fromEpisodes) {

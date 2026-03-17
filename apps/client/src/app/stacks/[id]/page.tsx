@@ -171,7 +171,6 @@ export default function StackDetailPage() {
     params.set("episode_id", ep.id);
     if (ep.title) params.set("episode_title", ep.title);
     params.set("from", "stacks");
-    params.set("seed_id", seedId);
     router.push(`/?${params.toString()}`);
   };
 
