@@ -1149,6 +1149,7 @@ function startWatcher() {
         await enqueueBacklogSuperLikes();
         processSeedQueue();
         processRepairQueue();
+        processSuperLikeQueue();
         processPriorityQueue();
       } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
         log("warn", `Realtime channel ${status} — will attempt reconnect`);
