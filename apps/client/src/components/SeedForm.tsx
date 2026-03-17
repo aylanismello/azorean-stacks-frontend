@@ -6,12 +6,21 @@ interface SeedFormProps {
   onSubmit: (input: string) => Promise<void>;
 }
 
+function detectUrlType(url: string): "track" | "playlist" | null {
+  if (!url) return null;
+  if (url.includes("/playlist/")) return "playlist";
+  if (url.includes("/track/")) return "track";
+  return null;
+}
+
 export function SeedForm({ onSubmit }: SeedFormProps) {
   const [mode, setMode] = useState<"manual" | "spotify">("manual");
   const [title, setTitle] = useState("");
   const [artist, setArtist] = useState("");
   const [spotifyUrl, setSpotifyUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const urlType = mode === "spotify" ? detectUrlType(spotifyUrl.trim()) : null;
 
   const canSubmit = mode === "spotify"
     ? spotifyUrl.trim().length > 0
@@ -83,20 +92,31 @@ export function SeedForm({ onSubmit }: SeedFormProps) {
             />
           </>
         ) : (
-          <input
-            type="text"
-            placeholder="https://open.spotify.com/track/..."
-            value={spotifyUrl}
-            onChange={(e) => setSpotifyUrl(e.target.value)}
-            className="flex-1 px-4 py-2.5 bg-surface-2 border border-surface-3 rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-green-400/50 transition-colors"
-          />
+          <div className="flex-1 relative">
+            <input
+              type="text"
+              placeholder="https://open.spotify.com/track/... or /playlist/..."
+              value={spotifyUrl}
+              onChange={(e) => setSpotifyUrl(e.target.value)}
+              className="w-full px-4 py-2.5 bg-surface-2 border border-surface-3 rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-green-400/50 transition-colors"
+            />
+            {urlType && (
+              <span className={`absolute right-2 top-1/2 -translate-y-1/2 text-[10px] px-1.5 py-0.5 rounded font-medium pointer-events-none ${
+                urlType === "playlist"
+                  ? "bg-green-400/15 text-green-400"
+                  : "bg-surface-3 text-muted"
+              }`}>
+                {urlType}
+              </span>
+            )}
+          </div>
         )}
         <button
           type="submit"
           disabled={!canSubmit || submitting}
           className="px-5 py-2.5 bg-accent text-surface-0 rounded-lg text-sm font-medium hover:bg-accent-bright transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
         >
-          {submitting ? "..." : "Add"}
+          {submitting ? "..." : urlType === "playlist" ? "Import" : "Add"}
         </button>
       </form>
     </div>
