@@ -90,11 +90,12 @@ async function computeCuratorAffinities(): Promise<CuratorAffinity[]> {
   log("info", "Computing curator affinity scores from voting history...");
 
   // Get all reviewed tracks from curator-trackable sources (nts, lotradio)
+  // Use the explicit FK hint to avoid ambiguity (tracks has both episode_id FK and episode_tracks junction)
   const { data: reviewedTracks, error } = await db
     .from("tracks")
-    .select("episode_id, status, episodes!inner(url, title, source)")
+    .select("episode_id, status, episode:episodes!episode_id(url, title, source)")
     .in("status", ["approved", "rejected"])
-    .in("episodes.source", ["nts", "lotradio"]);
+    .not("episode_id", "is", null);
 
   if (error) {
     log("fail", `Failed to fetch reviewed tracks: ${error.message}`);
@@ -110,8 +111,10 @@ async function computeCuratorAffinities(): Promise<CuratorAffinity[]> {
   const showStats = new Map<string, { approved: number; rejected: number; source: string; showSlug: string }>();
 
   for (const track of reviewedTracks as any[]) {
-    const ep = Array.isArray(track.episodes) ? track.episodes[0] : track.episodes;
+    const ep = Array.isArray(track.episode) ? track.episode[0] : track.episode;
     if (!ep?.url) continue;
+    // Filter to NTS/lotradio sources client-side (couldn't do in query due to FK ambiguity)
+    if (ep.source !== "nts" && ep.source !== "lotradio") continue;
 
     const curatorKey = getCuratorKey({ source: ep.source, url: ep.url, title: ep.title ?? null });
     if (!curatorKey) continue;
