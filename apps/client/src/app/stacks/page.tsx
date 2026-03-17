@@ -97,6 +97,10 @@ export default function StacksPage() {
 
   return (
     <div className="px-4 md:px-6 pt-4 md:pt-8 max-w-5xl mx-auto pb-24">
+      {/* TODO: radar-discovered shows should eventually get their own section/filter here,
+          separate from seed-discovered stacks. e.g. a "Curator Radar" row showing
+          high-affinity NTS/Lot Radio shows with pending tracks. */}
+
       {/* ─── FOR YOU ─────────────────────────── */}
       <button
         onClick={() => router.push("/?source=taste")}

@@ -160,7 +160,8 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
 
   const gradient = generateGradient(track.artist, track.title);
   const coverUrl = safeCoverUrl(track.cover_art_url) || safeCoverUrl(track.episode?.artwork_url ?? null);
-  const meta = (track.metadata ?? {}) as Record<string, string | undefined>;
+  const meta = (track.metadata ?? {}) as Record<string, any>;
+  const isRadarTrack = meta.discovery_method === "radar:curator";
   const hasAudio = !!(track.audio_url || track.preview_url);
   const hasPlayableSource = hasAudio || (!!track.spotify_url && spotify.connected && !!spotify.deviceId);
   const isCurrentTrack = globalPlayer.currentTrack?.id === track.id;
@@ -367,8 +368,8 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
     )
   );
 
-  const seedArtist = track.seed_track?.artist || (track.metadata as any)?.seed_artist;
-  const seedTitle = track.seed_track?.title || (track.metadata as any)?.seed_title;
+  const seedArtist = track.seed_track?.artist || meta.seed_artist;
+  const seedTitle = track.seed_track?.title || meta.seed_title;
   const discoveryContext = seedArtist && (
     <p className="text-xs text-foreground/50 leading-relaxed truncate">
       via{" "}
@@ -379,7 +380,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
           <span className="text-foreground/60">{seedTitle}</span>
         </>
       )}
-      {(track.metadata as any)?.co_occurrence > 1 && ` · ${(track.metadata as any).co_occurrence} sets`}
+      {meta.co_occurrence > 1 && ` · ${meta.co_occurrence} sets`}
     </p>
   );
 
@@ -550,6 +551,13 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
       >
         {/* Vignette overlays */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/30 z-[1]" />
+
+        {/* Radar discovery badge */}
+        {isRadarTrack && (
+          <div className="absolute top-3 right-3 z-20 text-base leading-none" title="Curator Radar discovery">
+            🔭
+          </div>
+        )}
 
         {/* Swipe direction indicator */}
         {Math.abs(swipeX) > 30 && (
@@ -889,6 +897,11 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
           <span className="px-2.5 py-1 bg-surface-2 rounded-lg text-xs text-muted">
             {sourceLabel(track.source)}
           </span>
+          {isRadarTrack && (
+            <span className="px-2 py-1 bg-surface-2 rounded-lg text-xs text-muted" title="Curator Radar discovery">
+              🔭
+            </span>
+          )}
           {typeof track.taste_score === "number" && track.taste_score !== 0 && (
             <span
               className={`px-2 py-1 rounded-lg text-xs font-mono font-semibold ${

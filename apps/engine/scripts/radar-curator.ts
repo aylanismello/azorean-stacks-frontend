@@ -2,12 +2,12 @@
 /**
  * The Stacks — Curator Affinity Engine (Radar)
  *
- * Identifies trusted NTS curators based on voting patterns, then auto-follows
- * them to pull in new tracks from their shows.
+ * Identifies trusted curators (NTS shows, Lot Radio shows) based on voting
+ * patterns, then auto-follows them to pull in new tracks.
  *
- * Step 1: Compute curator affinity scores from approved/rejected votes on NTS episode tracks
+ * Step 1: Compute curator affinity scores from approved/rejected votes on episode tracks
  * Step 2: Determine auto-follow tier (high/medium affinity)
- * Step 3: Fetch new episodes from NTS shows API and scrape tracklists
+ * Step 3: Fetch new episodes — NTS via API, Lot Radio via DB
  * Step 4: Insert tracks with discovery_method: "radar:curator" metadata
  *
  * Usage: bun run radar-curator
@@ -30,7 +30,9 @@ const GARBAGE_TITLES = new Set(["unknown track", "untitled", "id", "?", "unknown
 // ─── TYPES ──────────────────────────────────────────────────
 
 interface CuratorAffinity {
-  showSlug: string;
+  curatorKey: string;    // canonical key: "nts:show-slug" or "lotradio:show-title"
+  source: string;        // "nts" or "lotradio"
+  showSlug: string;      // display identifier (slug for NTS, title for Lot Radio)
   approved: number;
   rejected: number;
   total: number;
@@ -53,10 +55,17 @@ interface NtsApiEpisode {
 
 // ─── HELPERS ────────────────────────────────────────────────
 
-function extractShowSlug(episodeUrl: string): string | null {
-  // https://www.nts.live/shows/{show-slug}/episodes/...
-  const match = episodeUrl.match(/\/shows\/([^/]+)\//);
-  return match ? match[1] : null;
+function getCuratorKey(episode: { source: string; url: string; title: string | null }): string | null {
+  if (episode.source === "nts") {
+    const match = episode.url.match(/\/shows\/([^/]+)\//);
+    return match ? `nts:${match[1]}` : null;
+  }
+  if (episode.source === "lotradio") {
+    // Lot Radio shows are identified by episode title (e.g. "DJ Python", "Eris Drew")
+    return episode.title ? `lotradio:${episode.title}` : null;
+  }
+  // Generic fallback
+  return episode.title ? `${episode.source}:${episode.title}` : null;
 }
 
 async function fetchShowEpisodes(showSlug: string, limit: number): Promise<NtsApiEpisode[]> {
@@ -80,12 +89,12 @@ async function fetchShowEpisodes(showSlug: string, limit: number): Promise<NtsAp
 async function computeCuratorAffinities(): Promise<CuratorAffinity[]> {
   log("info", "Computing curator affinity scores from voting history...");
 
-  // Get all NTS episodes that have reviewed tracks (approved or rejected)
+  // Get all reviewed tracks from curator-trackable sources (nts, lotradio)
   const { data: reviewedTracks, error } = await db
     .from("tracks")
-    .select("episode_id, status, episodes!inner(url, source)")
+    .select("episode_id, status, episodes!inner(url, title, source)")
     .in("status", ["approved", "rejected"])
-    .eq("episodes.source", "nts");
+    .in("episodes.source", ["nts", "lotradio"]);
 
   if (error) {
     log("fail", `Failed to fetch reviewed tracks: ${error.message}`);
@@ -93,32 +102,34 @@ async function computeCuratorAffinities(): Promise<CuratorAffinity[]> {
   }
 
   if (!reviewedTracks || reviewedTracks.length === 0) {
-    log("info", "No reviewed NTS tracks found — skipping curator affinity");
+    log("info", "No reviewed tracks found — skipping curator affinity");
     return [];
   }
 
-  // Group by show slug
-  const showStats = new Map<string, { approved: number; rejected: number }>();
+  // Group by curator key (source-agnostic)
+  const showStats = new Map<string, { approved: number; rejected: number; source: string; showSlug: string }>();
 
   for (const track of reviewedTracks as any[]) {
     const ep = Array.isArray(track.episodes) ? track.episodes[0] : track.episodes;
     if (!ep?.url) continue;
 
-    const slug = extractShowSlug(ep.url);
-    if (!slug) continue;
+    const curatorKey = getCuratorKey({ source: ep.source, url: ep.url, title: ep.title ?? null });
+    if (!curatorKey) continue;
 
-    if (!showStats.has(slug)) {
-      showStats.set(slug, { approved: 0, rejected: 0 });
+    if (!showStats.has(curatorKey)) {
+      // showSlug is the display identifier (slug for NTS, title for Lot Radio)
+      const showSlug = curatorKey.substring(curatorKey.indexOf(":") + 1);
+      showStats.set(curatorKey, { approved: 0, rejected: 0, source: ep.source, showSlug });
     }
 
-    const stats = showStats.get(slug)!;
+    const stats = showStats.get(curatorKey)!;
     if (track.status === "approved") stats.approved++;
     else if (track.status === "rejected") stats.rejected++;
   }
 
   const affinities: CuratorAffinity[] = [];
 
-  for (const [showSlug, stats] of showStats) {
+  for (const [curatorKey, stats] of showStats) {
     const total = stats.approved + stats.rejected;
     if (total < 3) continue; // Need at least 3 reviewed tracks
 
@@ -134,7 +145,9 @@ async function computeCuratorAffinities(): Promise<CuratorAffinity[]> {
 
     if (tier) {
       affinities.push({
-        showSlug,
+        curatorKey,
+        source: stats.source,
+        showSlug: stats.showSlug,
         approved: stats.approved,
         rejected: stats.rejected,
         total,
@@ -149,7 +162,7 @@ async function computeCuratorAffinities(): Promise<CuratorAffinity[]> {
 
   log("info", `Found ${affinities.length} curator(s) meeting affinity thresholds`);
   for (const a of affinities) {
-    log("info", `  [${a.tier}] ${a.showSlug}: ${a.approved}/${a.total} approved (${Math.round(a.approvalRate * 100)}%)`);
+    log("info", `  [${a.tier}] ${a.curatorKey}: ${a.approved}/${a.total} approved (${Math.round(a.approvalRate * 100)}%)`);
   }
 
   return affinities;
@@ -246,6 +259,7 @@ async function processEpisode(
         metadata: {
           discovery_method: "radar:curator",
           curator_slug: affinity.showSlug,
+          curator_source: affinity.source,
           curator_affinity: Math.round(affinity.approvalRate * 100) / 100,
           curator_tier: affinity.tier,
           taste_score_multiplier: 0.9,
@@ -265,13 +279,13 @@ async function processEpisode(
     tracksAdded++;
   }
 
-  log("ok", `${episodeTitle} — ${rawTracks.length} tracks scraped, ${tracksAdded} new`);
+  log("ok", `${episodeTitle || episodeUrl} — ${rawTracks.length} tracks scraped, ${tracksAdded} new`);
   return tracksAdded;
 }
 
-async function processShow(affinity: CuratorAffinity): Promise<{ episodesChecked: number; tracksAdded: number }> {
+async function processNtsShow(affinity: CuratorAffinity): Promise<{ episodesChecked: number; tracksAdded: number }> {
   const episodeLimit = affinity.tier === "high" ? 10 : 12; // fetch 12 for medium (new episodes only anyway)
-  log("info", `[${affinity.tier}] Fetching episodes for show: ${affinity.showSlug}`);
+  log("info", `[${affinity.tier}] Fetching NTS episodes for show: ${affinity.showSlug}`);
 
   const episodes = await fetchShowEpisodes(affinity.showSlug, episodeLimit);
   if (episodes.length === 0) {
@@ -341,6 +355,59 @@ async function processShow(affinity: CuratorAffinity): Promise<{ episodesChecked
   }
 
   return { episodesChecked, tracksAdded: totalTracksAdded };
+}
+
+async function processLotRadioShow(affinity: CuratorAffinity): Promise<{ episodesChecked: number; tracksAdded: number }> {
+  log("info", `[${affinity.tier}] Checking Lot Radio episodes for: ${affinity.showSlug}`);
+
+  // Lot Radio episodes are crawled externally — query DB for episodes matching this show (by title)
+  const episodeLimit = affinity.tier === "high" ? 10 : 5;
+  const { data: episodes } = await db
+    .from("episodes")
+    .select("id, url, title, aired_date, artwork_url")
+    .eq("source", "lotradio")
+    .ilike("title", affinity.showSlug)
+    .order("aired_date", { ascending: false })
+    .limit(episodeLimit);
+
+  if (!episodes || episodes.length === 0) {
+    log("info", `No Lot Radio episodes found in DB for: ${affinity.showSlug}`);
+    return { episodesChecked: 0, tracksAdded: 0 };
+  }
+
+  let totalTracksAdded = 0;
+  let episodesChecked = 0;
+
+  for (let i = 0; i < episodes.length; i += CONCURRENCY.episodes) {
+    const batch = episodes.slice(i, i + CONCURRENCY.episodes);
+    const results = await Promise.allSettled(
+      batch.map((ep: any) =>
+        processEpisode(ep.url, ep.title, ep.aired_date, ep.artwork_url, affinity)
+      )
+    );
+
+    for (const result of results) {
+      episodesChecked++;
+      if (result.status === "fulfilled") {
+        totalTracksAdded += result.value;
+      } else {
+        log("fail", `Episode processing error: ${result.reason}`);
+      }
+    }
+  }
+
+  return { episodesChecked, tracksAdded: totalTracksAdded };
+}
+
+async function processShow(affinity: CuratorAffinity): Promise<{ episodesChecked: number; tracksAdded: number }> {
+  if (affinity.source === "nts") {
+    return processNtsShow(affinity);
+  }
+  if (affinity.source === "lotradio") {
+    return processLotRadioShow(affinity);
+  }
+  log("warn", `No handler for source "${affinity.source}", skipping ${affinity.curatorKey}`);
+  return { episodesChecked: 0, tracksAdded: 0 };
 }
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────

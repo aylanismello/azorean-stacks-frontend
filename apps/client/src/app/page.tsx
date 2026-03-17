@@ -1000,6 +1000,8 @@ function TrackContextModal({
   const seedTitle = (track.seed_track?.title || meta.seed_title) as string | undefined;
   const coOccurrence = meta.co_occurrence as number | undefined;
   const genre = meta.genre as string | undefined;
+  const discoveryMethod = meta.discovery_method as string | undefined;
+  const curatorSlug = meta.curator_slug as string | undefined;
 
   const modeLabel = () => {
     if (episodeTitle) return `Episode: ${episodeTitle}${episodePos && episodeTotal ? ` — track ${episodePos} of ${episodeTotal}` : ""}`;
@@ -1049,6 +1051,18 @@ function TrackContextModal({
             )}
           </div>
         )}
+
+        {/* Discovery Method */}
+        <div>
+          <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Discovery Method</p>
+          {discoveryMethod === "radar:curator" ? (
+            <p className="text-sm text-foreground/80">
+              🔭 Curator Radar{curatorSlug && <span className="text-foreground/50"> · {curatorSlug}</span>}
+            </p>
+          ) : (
+            <p className="text-sm text-foreground/80">🌱 Seed Discovery</p>
+          )}
+        </div>
 
         {/* Seed connection */}
         {seedArtist && (
