@@ -354,7 +354,7 @@ export default function TracksPage() {
   }, [router]);
 
   return (
-    <div className="px-4 md:px-6 pt-4 md:pt-8 max-w-4xl mx-auto pb-32 md:pb-8">
+    <div className="px-4 md:px-6 pt-4 md:pt-8 max-w-4xl mx-auto pb-32 md:pb-8 overflow-x-hidden">
       {/* Sync to Spotify + result banner */}
       <div className="flex items-center justify-between mb-4">
         <div />
@@ -392,7 +392,7 @@ export default function TracksPage() {
       )}
 
       {/* Tabs — always show counts */}
-      <div className="flex items-center gap-2 mb-6">
+      <div className="flex items-center gap-1.5 mb-6 overflow-x-auto scrollbar-hide pb-0.5">
         {(Object.keys(TAB_CONFIG) as Tab[]).map((t) => {
           const cfg = TAB_CONFIG[t];
           const count = tabCounts[t];
@@ -401,7 +401,7 @@ export default function TracksPage() {
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap flex-shrink-0 ${
                 isActive ? cfg.activeBg : "text-muted hover:text-foreground/70 hover:bg-surface-1"
               }`}
             >
@@ -633,7 +633,7 @@ export default function TracksPage() {
           </div>
 
           {/* Mobile: cards */}
-          <div className="md:hidden space-y-1.5">
+          <div className="md:hidden space-y-1.5 overflow-hidden">
             {tracks.map((track) => {
               const isPlaying = globalPlayer.currentTrack?.id === track.id;
               const isExpanded = expandedTrack === track.id;
@@ -645,7 +645,7 @@ export default function TracksPage() {
                   }`}
                 >
                   <div
-                    className="p-3.5 flex items-center gap-3 cursor-pointer"
+                    className="px-3 py-2.5 flex items-center gap-3 cursor-pointer"
                     onClick={() => setExpandedTrack(isExpanded ? null : track.id)}
                   >
                     {/* Cover art / play button */}
@@ -654,7 +654,7 @@ export default function TracksPage() {
                         e.stopPropagation();
                         handlePlay(track);
                       }}
-                      className="w-11 h-11 rounded-lg flex-shrink-0 flex items-center justify-center overflow-hidden"
+                      className="w-10 h-10 rounded-lg flex-shrink-0 flex items-center justify-center overflow-hidden relative"
                       style={
                         safeCoverUrl(track.cover_art_url)
                           ? {
@@ -667,19 +667,19 @@ export default function TracksPage() {
                             }
                       }
                     >
-                      <span className={`w-7 h-7 flex items-center justify-center rounded-full backdrop-blur-sm transition-all ${
-                        isPlaying ? "bg-accent/90 text-surface-0" : "bg-black/40 text-foreground/80"
+                      <span className={`w-6 h-6 flex items-center justify-center rounded-full backdrop-blur-sm transition-all ${
+                        isPlaying ? "bg-accent/90 text-surface-0" : "bg-black/50 text-white/90 opacity-0 group-hover:opacity-100"
                       }`}>
                         {isPlaying && globalPlayer.playing ? (
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+                          <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
                         ) : (
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+                          <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
                         )}
                       </span>
                     </button>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">{track.artist}</p>
-                      <p className="text-xs text-foreground/50 truncate">{track.title}</p>
+                    <div className="flex-1 min-w-0 pr-2">
+                      <p className="text-sm font-medium text-foreground leading-snug" style={{overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical"}}>{track.artist}</p>
+                      <p className="text-xs text-foreground/50 mt-0.5 leading-snug" style={{overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical"}}>{track.title}</p>
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <span className="text-[10px] text-muted/40 font-mono">

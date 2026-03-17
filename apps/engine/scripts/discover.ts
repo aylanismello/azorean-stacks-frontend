@@ -270,18 +270,35 @@ async function discoverFromSource(
 
     if (existingEp) {
       episodeId = existingEp.id;
-      await db.from("episode_seeds").upsert(
-        { episode_id: episodeId, seed_id: seedId },
-        { onConflict: "episode_id,seed_id" }
-      );
 
       const { count: trackCount } = await db.from("tracks")
         .select("*", { count: "exact", head: true })
         .eq("episode_id", episodeId);
 
       if (trackCount && trackCount > 0) {
-        log("skip", `Already crawled (${trackCount} tracks): ${context}`);
+        // Verify match type against the actual tracklist in the DB
+        const seedArtistLower = seedArtist.toLowerCase().trim();
+        const seedTitleLower = seedTitle.toLowerCase().trim();
+        const { data: epTracks } = await db.from("tracks")
+          .select("artist, title")
+          .eq("episode_id", episodeId);
+        const epTrackList = epTracks || [];
+        const hasFullMatch = epTrackList.some(
+          (t) => t.artist?.toLowerCase().trim() === seedArtistLower && t.title?.toLowerCase().trim() === seedTitleLower
+        );
+        const hasArtistMatch = !hasFullMatch && epTrackList.some(
+          (t) => t.artist?.toLowerCase().trim() === seedArtistLower
+        );
+        const verifiedMatchType = hasFullMatch ? "full" : hasArtistMatch ? "artist" : "artist";
+        await db.from("episode_seeds").upsert(
+          { episode_id: episodeId, seed_id: seedId, match_type: verifiedMatchType },
+          { onConflict: "episode_id,seed_id" }
+        );
+        log("skip", `Already crawled (${trackCount} tracks, match=${verifiedMatchType}): ${context}`);
         stats.skipped++;
+        if (verifiedMatchType === "full") {
+          stats.fullMatchEpisodeIds.push(episodeId);
+        }
         continue;
       }
 
