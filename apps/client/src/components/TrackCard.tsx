@@ -552,6 +552,18 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
         {/* Vignette overlays */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/30 z-[1]" />
 
+        {/* Seed indicator badge */}
+        {track.is_seed && (
+          <div className="absolute top-3 left-3 z-20 text-base leading-none" title="Seed track">
+            🌱
+          </div>
+        )}
+        {track.is_re_seed && !track.is_seed && (
+          <div className="absolute top-3 left-3 z-20 text-base leading-none" title="Re-seeded track">
+            🌱<span className="text-xs">++</span>
+          </div>
+        )}
+
         {/* Radar discovery badge */}
         {isRadarTrack && (
           <div className="absolute top-3 right-3 z-20 text-base leading-none" title="Curator Radar discovery">
@@ -897,6 +909,16 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
           <span className="px-2.5 py-1 bg-surface-2 rounded-lg text-xs text-muted">
             {sourceLabel(track.source)}
           </span>
+          {track.is_seed && (
+            <span className="px-2 py-1 bg-green-500/15 rounded-lg text-xs text-green-400 font-medium" title="Seed track">
+              🌱 seed
+            </span>
+          )}
+          {track.is_re_seed && !track.is_seed && (
+            <span className="px-2 py-1 bg-emerald-500/15 rounded-lg text-xs text-emerald-400 font-medium" title="Re-seeded track">
+              🌱 re-seed
+            </span>
+          )}
           {isRadarTrack && (
             <span className="px-2 py-1 bg-surface-2 rounded-lg text-xs text-muted" title="Curator Radar discovery">
               🔭

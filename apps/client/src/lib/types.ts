@@ -43,6 +43,11 @@ export interface Track {
 
   // Convenience alias — true when this user has super-liked the track
   super_liked?: boolean;
+
+  // Set by API/page when this track is the seed that triggered the episode
+  is_seed?: boolean;
+  // Set when this track was discovered via a re-seed chain
+  is_re_seed?: boolean;
 }
 
 export interface Episode {
