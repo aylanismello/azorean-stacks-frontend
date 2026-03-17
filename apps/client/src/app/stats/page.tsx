@@ -1,21 +1,28 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Stats } from "@/lib/types";
+import { Stats, PipelineStats } from "@/lib/types";
 
 export default function StatsPage() {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [pipeline, setPipeline] = useState<PipelineStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/stats")
-      .then((res) => {
+    Promise.all([
+      fetch("/api/stats").then((res) => {
         if (!res.ok) throw new Error(`Failed to load stats (${res.status})`);
         return res.json();
-      })
-      .then((data) => {
-        setStats(data);
+      }),
+      fetch("/api/stats/pipeline").then((res) => {
+        if (!res.ok) throw new Error(`Failed to load pipeline stats (${res.status})`);
+        return res.json();
+      }),
+    ])
+      .then(([statsData, pipelineData]) => {
+        setStats(statsData);
+        setPipeline(pipelineData);
         setError(null);
       })
       .catch((err) => {
@@ -49,6 +56,7 @@ export default function StatsPage() {
   if (!stats) return null;
 
   const maxSourceCount = Math.max(...stats.source_breakdown.map((s) => s.count), 1);
+
   const maxArtistCount = Math.max(...stats.top_artists.map((a) => a.count), 1);
 
   const sourceLabel = (s: string) => {
@@ -199,6 +207,74 @@ export default function StatsPage() {
           </div>
         )}
       </div>
+
+      {/* Pipeline Health */}
+      {pipeline && (
+        <div className="mt-10 mb-10">
+          <h2 className="text-sm font-medium text-muted mb-4 uppercase tracking-wider">
+            Pipeline Health
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <StatCard label="Super-Liked" value={pipeline.super_likes.total} />
+            <StatCard label="Downloaded" value={pipeline.super_likes.downloaded} />
+            <StatCard
+              label="Pending DL"
+              value={pipeline.super_likes.pending}
+              accent={pipeline.super_likes.pending > 0}
+            />
+            <div className="bg-surface-1 rounded-xl p-4">
+              <p className="text-xs text-muted mb-1">Watcher</p>
+              <p className={`text-sm font-semibold ${pipeline.watcher.connected_at ? "text-green-400" : "text-red-400"}`}>
+                {pipeline.watcher.connected_at ? "Connected" : "Offline"}
+              </p>
+              {pipeline.watcher.connected_at && (
+                <p className="text-[10px] text-muted mt-1 font-mono">
+                  since {formatDate(pipeline.watcher.connected_at)}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {pipeline.watcher.last_event && (
+            <p className="text-xs text-muted mb-4">
+              Last event:{" "}
+              <span className="font-mono text-foreground/60">
+                {formatDate(pipeline.watcher.last_event)}
+              </span>
+            </p>
+          )}
+
+          {pipeline.last_events.length > 0 && (
+            <div className="space-y-1">
+              {pipeline.last_events.map((ev, i) => (
+                <div
+                  key={i}
+                  className="bg-surface-1 rounded-lg px-4 py-2 flex items-center gap-3"
+                >
+                  <span
+                    className={`text-[10px] font-mono shrink-0 px-1.5 py-0.5 rounded ${
+                      ev.status === "completed"
+                        ? "bg-green-400/10 text-green-400"
+                        : ev.status === "failed"
+                          ? "bg-red-400/10 text-red-400"
+                          : "bg-accent/10 text-accent"
+                    }`}
+                  >
+                    {ev.status}
+                  </span>
+                  <span className="text-xs text-foreground/70 truncate flex-1">
+                    {ev.type.replace(/_/g, " ")}
+                    {ev.metadata?.message ? ` — ${ev.metadata.message}` : ""}
+                  </span>
+                  <span className="text-[10px] text-muted font-mono shrink-0">
+                    {formatDate(ev.created_at)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
