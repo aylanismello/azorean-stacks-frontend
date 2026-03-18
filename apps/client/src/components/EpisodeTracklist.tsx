@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useGlobalPlayer } from "./GlobalPlayerProvider";
+import { supabase } from "@/lib/supabase";
 
 interface TrackListItem {
   id: string;
@@ -14,6 +15,7 @@ interface TrackListItem {
   preview_url: string | null;
   audio_url?: string | null;
   storage_path: string | null;
+  dl_failed_at?: string | null;
   is_seed?: boolean;
   is_re_seed?: boolean;
   is_artist_seed?: boolean;
@@ -74,10 +76,17 @@ export function EpisodeTracklist(props: TracklistProps) {
   const globalPlayer = useGlobalPlayer();
   const playingRef = useRef<HTMLButtonElement>(null);
   const prevEpisodeIdRef = useRef(episodeId);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
-  // Fetch tracks from API when in episode mode
+  // Fetch tracks from API when in episode mode, then subscribe to realtime updates
   useEffect(() => {
     if (isDirectMode || !episodeId) return;
+
+    // Tear down any existing realtime subscription
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
 
     const isNewEpisode = prevEpisodeIdRef.current !== episodeId;
     prevEpisodeIdRef.current = episodeId;
@@ -85,17 +94,62 @@ export function EpisodeTracklist(props: TracklistProps) {
       setLoading(true);
     }
     setError(null);
+
+    let mounted = true;
+
     fetch(`/api/episodes/${episodeId}/tracks?_t=${Date.now()}`)
       .then((r) => {
         if (!r.ok) throw new Error(`Failed to load tracks (${r.status})`);
         return r.json();
       })
-      .then((data) => setFetchedTracks(Array.isArray(data) ? data : []))
+      .then((data) => {
+        if (!mounted) return;
+        const tracks: TrackListItem[] = Array.isArray(data) ? data : [];
+        setFetchedTracks(tracks);
+
+        // Subscribe to realtime updates for these specific tracks
+        if (tracks.length > 0) {
+          const trackIds = tracks.map((t) => t.id);
+          const channel = supabase
+            .channel(`tracks-ep-${episodeId}`)
+            .on(
+              "postgres_changes",
+              {
+                event: "UPDATE",
+                schema: "public",
+                table: "tracks",
+                filter: `id=in.(${trackIds.join(",")})`,
+              },
+              (payload) => {
+                setFetchedTracks((prev) =>
+                  prev.map((t) =>
+                    t.id === (payload.new as TrackListItem).id
+                      ? { ...t, ...(payload.new as Partial<TrackListItem>) }
+                      : t
+                  )
+                );
+              }
+            )
+            .subscribe();
+          channelRef.current = channel;
+        }
+      })
       .catch((err) => {
+        if (!mounted) return;
         setFetchedTracks([]);
         setError(err instanceof Error ? err.message : "Failed to load tracklist");
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodeId, refreshKey, isDirectMode]);
 
@@ -130,13 +184,6 @@ export function EpisodeTracklist(props: TracklistProps) {
     }
   };
 
-  const statusDot = (s: string) => {
-    if (s === "approved") return "bg-green-500";
-    if (s === "rejected") return "bg-red-500/60";
-    if (s === "skipped") return "bg-amber-400/60";
-    return "bg-foreground/20";
-  };
-
   const statusText = (s: string) => {
     if (s === "approved") return "text-foreground/80";
     if (s === "rejected") return "text-foreground/30 line-through";
@@ -144,10 +191,21 @@ export function EpisodeTracklist(props: TracklistProps) {
     return "text-foreground/60";
   };
 
-  const approved = tracks.filter((t) => t.status === "approved").length;
-  const rejected = tracks.filter((t) => t.status === "rejected").length;
-  const skipped = tracks.filter((t) => t.status === "skipped").length;
-  const pending = tracks.filter((t) => t.status === "pending").length;
+  const downloadDot = (t: TrackListItem) => {
+    if (t.storage_path)
+      return <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" title="Downloaded" />;
+    if (t.dl_failed_at)
+      return <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" title="Download failed" />;
+    if (t.spotify_url || t.youtube_url)
+      return <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="Enriched" />;
+    return <span className="w-1.5 h-1.5 rounded-full bg-foreground/20 animate-pulse flex-shrink-0" title="Pending" />;
+  };
+
+  // Download-based header stats
+  const ready = tracks.filter((t) => !!t.storage_path).length;
+  const enrichedCount = tracks.filter((t) => !t.storage_path && !!(t.spotify_url || t.youtube_url)).length;
+  const failed = tracks.filter((t) => !!t.dl_failed_at).length;
+  const dlPending = tracks.filter((t) => !t.storage_path && !t.spotify_url && !t.youtube_url && !t.dl_failed_at).length;
 
   const displayTitle = listTitle || episodeTitle || "Tracklist";
 
@@ -163,10 +221,10 @@ export function EpisodeTracklist(props: TracklistProps) {
             {!loading && (
               <div className="flex items-center gap-3 mt-1 text-[10px] font-mono text-muted">
                 <span>{tracks.length} tracks</span>
-                {approved > 0 && <span className="text-green-400/70">{approved} kept</span>}
-                {rejected > 0 && <span className="text-red-400/50">{rejected} nope</span>}
-                {skipped > 0 && <span className="text-amber-400/50">{skipped} skipped</span>}
-                {pending > 0 && <span className="text-foreground/40">{pending} pending</span>}
+                {ready > 0 && <span className="text-green-400/70">{ready} ready</span>}
+                {enrichedCount > 0 && <span className="text-amber-400/70">{enrichedCount} enriched</span>}
+                {failed > 0 && <span className="text-red-400/70">{failed} failed</span>}
+                {dlPending > 0 && <span className="text-foreground/40">{dlPending} pending</span>}
               </div>
             )}
           </div>
@@ -207,74 +265,85 @@ export function EpisodeTracklist(props: TracklistProps) {
                     handlePlay(t);
                   }}
                   disabled={false}
-                  className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-2.5 transition-colors group ${
+                  className={`w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2.5 transition-colors group border ${
                     isPlaying
-                      ? "bg-accent/10 border border-accent/20"
-                      : "hover:bg-surface-2 border border-transparent"
-                  } ${!hasAudio ? "opacity-60" : ""}`}
+                      ? "bg-accent/10 border-accent/20"
+                      : t.storage_path
+                        ? "hover:bg-surface-2 border-surface-3/60"
+                        : "hover:bg-surface-2/50 border-transparent"
+                  }`}
                 >
-                  {/* Seed/Re-seed emoji OR status dot */}
-                  {t.is_seed ? (
-                    <span className="flex-shrink-0 text-[10px] leading-none" title="Seed track">🌱</span>
-                  ) : t.is_artist_seed ? (
-                    <span className="flex-shrink-0 text-[10px] leading-none" title="Artist match">🌿</span>
-                  ) : t.is_re_seed ? (
-                    <span className="flex-shrink-0 text-[10px] leading-none" title="Re-seeded">🌱<span className="text-[8px]">++</span></span>
-                  ) : t.super_liked ? (
-                    <span className="flex-shrink-0 text-[10px] leading-none text-amber-400" title="Super liked">⭐</span>
-                  ) : (
-                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(t.status)}`} />
-                  )}
-
-                  {/* Cover art + now playing indicator */}
-                  {isPlaying && globalPlayer.currentTrack?.coverArtUrl ? (
-                    <span className="relative w-8 h-8 flex-shrink-0 rounded overflow-hidden">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={globalPlayer.currentTrack.coverArtUrl}
-                        alt=""
-                        className="w-full h-full object-cover"
-                      />
-                      <span className="absolute inset-0 flex items-center justify-center bg-black/30">
-                        <span className="flex gap-0.5 items-end h-3">
-                          <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "40%", animationDelay: "0ms" }} />
-                          <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "70%", animationDelay: "150ms" }} />
-                          <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "50%", animationDelay: "300ms" }} />
+                  {/* Cover art thumbnail — 36x36 */}
+                  <span className={`relative w-9 h-9 flex-shrink-0 rounded-md overflow-hidden ${!t.storage_path ? "opacity-30" : ""}`}>
+                    {isPlaying && (globalPlayer.currentTrack?.coverArtUrl || t.cover_art_url) ? (
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={globalPlayer.currentTrack?.coverArtUrl || t.cover_art_url!}
+                          alt=""
+                          className="w-full h-full object-cover"
+                        />
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/40">
+                          <span className="flex gap-0.5 items-end h-3">
+                            <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "40%", animationDelay: "0ms" }} />
+                            <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "70%", animationDelay: "150ms" }} />
+                            <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "50%", animationDelay: "300ms" }} />
+                          </span>
                         </span>
+                      </>
+                    ) : t.cover_art_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={t.cover_art_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="w-full h-full flex items-center justify-center bg-gradient-to-br from-surface-3 to-surface-4">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-foreground/30">
+                          <path d="M9 18V5l12-2v13" />
+                          <circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                        </svg>
                       </span>
-                    </span>
-                  ) : isPlaying ? (
-                    <span className="flex gap-0.5 items-end h-3 w-3 flex-shrink-0">
-                      <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "40%", animationDelay: "0ms" }} />
-                      <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "70%", animationDelay: "150ms" }} />
-                      <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "50%", animationDelay: "300ms" }} />
-                    </span>
-                  ) : (
-                    <span className="w-3 flex-shrink-0" />
-                  )}
+                    )}
+                  </span>
 
                   {/* Track info */}
                   <div className="min-w-0 flex-1">
-                    <p className={`text-xs truncate ${
-                      isPlaying
-                        ? "text-accent font-medium"
-                        : t.is_seed || t.is_re_seed
-                          ? "text-green-400/90 font-medium"
-                          : t.is_artist_seed
-                            ? "text-teal-400/80 font-medium"
-                            : t.super_liked
-                              ? "text-amber-300/90 font-medium"
-                              : statusText(t.status)
-                    }`}>
-                      {t.title}
-                    </p>
+                    <div className="flex items-center gap-1 mb-0.5">
+                      {t.is_seed ? (
+                        <span className="text-[9px] leading-none flex-shrink-0" title="Seed track">🌱</span>
+                      ) : t.is_re_seed ? (
+                        <span className="text-[9px] leading-none flex-shrink-0" title="Re-seeded">🌱<span className="text-[7px]">++</span></span>
+                      ) : t.is_artist_seed ? (
+                        <span className="text-[9px] leading-none flex-shrink-0" title="Artist match">🌿</span>
+                      ) : t.super_liked ? (
+                        <span className="text-[9px] leading-none text-amber-400 flex-shrink-0" title="Super liked">⭐</span>
+                      ) : null}
+                      <p className={`text-xs truncate ${
+                        !t.storage_path
+                          ? "line-through text-foreground/30"
+                          : isPlaying
+                            ? "text-accent font-medium"
+                            : t.is_seed || t.is_re_seed
+                              ? "text-green-400/90 font-medium"
+                              : t.is_artist_seed
+                                ? "text-teal-400/80 font-medium"
+                                : t.super_liked
+                                  ? "text-amber-300/90 font-medium"
+                                  : "text-foreground/85"
+                      }`}>
+                        {t.title}
+                      </p>
+                    </div>
                     <div className="flex items-center gap-1.5">
-                      <p className="text-[10px] text-muted truncate">{t.artist}</p>
-                      {t._match_type === "full" && (
+                      <p className={`text-[10px] truncate ${!t.storage_path ? "line-through text-muted/30" : "text-muted"}`}>{t.artist}</p>
+                      {t._match_type === "full" && t.storage_path && (
                         <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-green-400/70" title="Exact seed match" />
                       )}
                     </div>
                   </div>
+
+                  {/* Right: download status dot */}
+                  <span className="flex-shrink-0">
+                    {downloadDot(t)}
+                  </span>
                 </button>
               );
             })}
