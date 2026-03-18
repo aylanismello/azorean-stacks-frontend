@@ -138,7 +138,7 @@ export async function GET(
   const { data: rawPendingTracks } = await db
     .from("tracks")
     .select(
-      "id, artist, title, source, status, episode_id, cover_art_url, spotify_url, youtube_url, storage_path, preview_url, metadata, created_at, seed_track_id, taste_score, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url)"
+      "id, artist, title, source, source_url, source_context, status, episode_id, cover_art_url, spotify_url, youtube_url, storage_path, preview_url, metadata, created_at, seed_track_id, taste_score, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url, url)"
     )
     .in("episode_id", episodeIds)
     .eq("status", "pending");
