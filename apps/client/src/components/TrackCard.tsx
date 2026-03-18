@@ -14,6 +14,7 @@ interface TrackCardProps {
   onSkipEpisode?: () => void;
   skippingEpisode?: boolean;
   onShowContext?: () => void;
+  seedContext?: { artist: string; title: string } | null;
 }
 
 // Generate a deterministic gradient from artist+title
@@ -49,7 +50,7 @@ function sourceLabel(source: string): string {
   return labels[source] || source;
 }
 
-export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingEpisode, onShowContext }: TrackCardProps) {
+export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingEpisode, onShowContext, seedContext }: TrackCardProps) {
   const [exiting, setExiting] = useState<"left" | "right" | null>(null);
   const [voting, setVoting] = useState(false);
   const votingRef = useRef(false);
@@ -400,8 +401,8 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
     )
   );
 
-  const seedArtist = track.seed_track?.artist || meta.seed_artist;
-  const seedTitle = track.seed_track?.title || meta.seed_title;
+  const seedArtist = seedContext?.artist || track.seed_track?.artist || meta.seed_artist;
+  const seedTitle = seedContext?.title || track.seed_track?.title || meta.seed_title;
   const discoveryContext = seedArtist && (
     <p className="text-xs text-foreground/50 leading-relaxed truncate">
       via{" "}
@@ -719,6 +720,31 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
             </div>
           </div>
 
+          {/* Metadata badges — source, score, enrichment pills */}
+          <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+            <span className="px-1.5 py-0.5 bg-black/30 backdrop-blur-sm rounded text-[10px] text-white/60 font-medium">
+              {sourceLabel(track.source)}
+            </span>
+            {typeof track.taste_score === "number" && track.taste_score !== 0 && (
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold backdrop-blur-sm ${
+                track.taste_score > 0 ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+              }`}>
+                {track.taste_score > 0 ? "+" : ""}{track.taste_score.toFixed(2)}
+              </span>
+            )}
+            {Array.isArray(meta.enrichment_sources) && (meta.enrichment_sources as string[]).map((src: string) => {
+              const labels: Record<string, string> = { spotify: "SP", youtube: "YT", soundcloud: "SC", musicbrainz: "MB" };
+              const colors: Record<string, string> = {
+                spotify: "text-[#1DB954]", youtube: "text-red-400", soundcloud: "text-orange-400", musicbrainz: "text-purple-400",
+              };
+              return (
+                <span key={src} className={`px-1 py-0.5 bg-black/30 backdrop-blur-sm rounded text-[10px] font-mono font-semibold ${colors[src] || "text-white/50"}`} title={src}>
+                  {labels[src] || src.toUpperCase().slice(0, 2)}
+                </span>
+              );
+            })}
+          </div>
+
           {/* Source indicator + external links row */}
           <div className="flex items-center gap-2 mb-3">
             {/* Audio source switcher — tabs when both sources available */}
@@ -983,6 +1009,27 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
             >
               {track.taste_score > 0 ? "+" : ""}{track.taste_score.toFixed(2)}
             </span>
+          )}
+          {/* Enrichment source pills */}
+          {Array.isArray(meta.enrichment_sources) && (meta.enrichment_sources as string[]).length > 0 && (
+            (meta.enrichment_sources as string[]).map((src: string) => {
+              const labels: Record<string, string> = { spotify: "SP", youtube: "YT", soundcloud: "SC", musicbrainz: "MB" };
+              const colors: Record<string, string> = {
+                spotify: "bg-[#1DB954]/15 text-[#1DB954]",
+                youtube: "bg-red-500/15 text-red-400",
+                soundcloud: "bg-orange-500/15 text-orange-400",
+                musicbrainz: "bg-purple-500/15 text-purple-400",
+              };
+              return (
+                <span
+                  key={src}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold ${colors[src] || "bg-surface-2 text-muted"}`}
+                  title={src}
+                >
+                  {labels[src] || src.toUpperCase().slice(0, 2)}
+                </span>
+              );
+            })
           )}
           {meta.genre && (
             <span className="px-2.5 py-1 bg-surface-2 rounded-lg text-xs text-muted">

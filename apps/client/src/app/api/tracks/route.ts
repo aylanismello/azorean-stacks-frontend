@@ -59,6 +59,34 @@ function diversifyTracks(tracks: any[]): any[] {
   return result;
 }
 
+// Enrich tracks with episode_seeds match_type for discovery method differentiation
+async function attachMatchTypes(tracks: any[]) {
+  const episodeIds = Array.from(new Set(tracks.map((t: any) => t.episode_id).filter(Boolean)));
+  if (episodeIds.length === 0) return;
+
+  const { data: esLinks } = await supabase
+    .from("episode_seeds")
+    .select("episode_id, match_type")
+    .in("episode_id", episodeIds);
+
+  if (!esLinks?.length) return;
+
+  // Per episode, prefer 'full' over 'artist' over 'unknown'
+  const matchTypeMap = new Map<string, string>();
+  for (const link of esLinks) {
+    const existing = matchTypeMap.get(link.episode_id);
+    if (!existing || link.match_type === "full") {
+      matchTypeMap.set(link.episode_id, link.match_type || "unknown");
+    }
+  }
+
+  for (const track of tracks) {
+    if (track.episode_id && matchTypeMap.has(track.episode_id)) {
+      track._match_type = matchTypeMap.get(track.episode_id);
+    }
+  }
+}
+
 // GET /api/tracks?status=pending&limit=20
 // TODO(user-isolation): When multi-user taste scoring is implemented, add per-user filtering
 // here so that status, taste_score, and super_liked queries are scoped to the authenticated user.
@@ -147,6 +175,7 @@ export async function GET(req: NextRequest) {
       }
     }
     await Promise.all(signPromises);
+    await attachMatchTypes(tracks);
     return NextResponse.json({ tracks, total: count });
   }
 
@@ -269,6 +298,8 @@ export async function GET(req: NextRequest) {
   const finalTracks = orderBy === "taste_score"
     ? diversifyTracks(tracks).slice(0, limit)
     : tracks;
+
+  await attachMatchTypes(finalTracks);
 
   return NextResponse.json({ tracks: finalTracks, total: count });
 }

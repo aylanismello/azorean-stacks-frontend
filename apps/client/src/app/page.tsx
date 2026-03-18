@@ -923,6 +923,16 @@ function StackPageContent() {
     return t;
   });
 
+  // When viewing a specific seed's stack, derive seed context from URL params
+  // so the "via" line and modal always show the correct seed — not whatever
+  // random seed the track might also be linked to.
+  const parsedSeedContext = (() => {
+    if (!seedName) return null;
+    const parts = seedName.split(" — ");
+    if (parts.length >= 2) return { artist: parts[0], title: parts.slice(1).join(" — ") };
+    return { artist: seedName, title: "" };
+  })();
+
   // ── Main stack view ──
   return (
     <div className={`px-4 pt-2 pb-0 h-[calc(100dvh-3.5rem-env(safe-area-inset-bottom,0px))] flex flex-col overflow-hidden ${desktopPlayerFrameClass}`}>
@@ -1014,6 +1024,7 @@ function StackPageContent() {
             onSkipEpisode={currentEpisodeId ? handleSkipEpisode : undefined}
             skippingEpisode={skippingEpisode}
             onShowContext={() => setContextOpen(true)}
+            seedContext={parsedSeedContext}
           />
         </div>
       </div>
@@ -1046,6 +1057,7 @@ function StackPageContent() {
           stackSource={stackSource}
           genreFilter={genreFilter}
           seedName={seedName}
+          seedContext={parsedSeedContext}
           episodeTitle={hasEpisodeTracks ? currentEpisodeTitle : null}
           episodePos={hasEpisodeTracks ? safeEpisodePos + 1 : null}
           episodeTotal={hasEpisodeTracks ? total : null}
@@ -1063,6 +1075,7 @@ function TrackContextModal({
   stackSource,
   genreFilter,
   seedName,
+  seedContext,
   episodeTitle,
   episodePos,
   episodeTotal,
@@ -1072,18 +1085,20 @@ function TrackContextModal({
   stackSource: string | null;
   genreFilter: string | null;
   seedName: string | null;
+  seedContext?: { artist: string; title: string } | null;
   episodeTitle: string | null;
   episodePos: number | null;
   episodeTotal: number | null;
   onClose: () => void;
 }) {
   const meta = (track.metadata ?? {}) as Record<string, unknown>;
-  const seedArtist = (track.seed_track?.artist || meta.seed_artist) as string | undefined;
-  const seedTitle = (track.seed_track?.title || meta.seed_title) as string | undefined;
+  const seedArtist = (seedContext?.artist || track.seed_track?.artist || meta.seed_artist) as string | undefined;
+  const seedTitle = (seedContext?.title || track.seed_track?.title || meta.seed_title) as string | undefined;
   const coOccurrence = meta.co_occurrence as number | undefined;
   const genre = meta.genre as string | undefined;
   const discoveryMethod = meta.discovery_method as string | undefined;
   const curatorSlug = meta.curator_slug as string | undefined;
+  const matchType = (track as any)._match_type as string | undefined;
 
   const modeLabel = () => {
     if (episodeTitle) return `Episode: ${episodeTitle}${episodePos && episodeTotal ? ` — track ${episodePos} of ${episodeTotal}` : ""}`;
@@ -1144,8 +1159,10 @@ function TrackContextModal({
           <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Discovery Method</p>
           {discoveryMethod === "radar:curator" ? (
             <p className="text-sm text-foreground/80">
-              🔭 Curator Radar{curatorSlug && <span className="text-foreground/50"> · {curatorSlug}</span>}
+              📡 Curator Radar{curatorSlug && <span className="text-foreground/50"> · {curatorSlug}</span>}
             </p>
+          ) : matchType === "artist" ? (
+            <p className="text-sm text-foreground/80">🌿 Re-seed Discovery</p>
           ) : (
             <p className="text-sm text-foreground/80">🌱 Seed Discovery</p>
           )}
