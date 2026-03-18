@@ -122,7 +122,7 @@ while true; do
   # Download
   log "Running download..."
   LAST_DOWNLOAD_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  if output=$("$BUN" run download --duration 25 --limit 60 2>&1); then
+  if output=$("$BUN" run download --duration 55 --limit 200 2>&1); then
     # Parse "  Downloaded: {N}" from download output
     tracks_downloaded=$(echo "$output" | grep -oE 'Downloaded: [0-9]+' | grep -oE '[0-9]+' | head -1)
     if [ -n "$tracks_downloaded" ]; then
@@ -142,7 +142,7 @@ while true; do
   # Truncate log periodically
   truncate_log
 
-  log "Sleeping 5 minutes..."
-  sleep 300 &
+  log "Sleeping 30 seconds..."
+  sleep 30 &
   wait $!
 done
