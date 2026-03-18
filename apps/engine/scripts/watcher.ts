@@ -1407,7 +1407,7 @@ function startWatcher() {
                   .eq("status", "pending")
                   .lt("dl_attempts", 3)
                   .order("created_at", { ascending: true })
-                  .limit(50);
+                  .limit(100);
                 if (error) {
                   log("fail", `[DL Drain] Query failed: ${error.message}`);
                   return;
@@ -1451,8 +1451,8 @@ function startWatcher() {
               } finally {
                 downloadDrainRunning = false;
               }
-            }, 2 * 60_000);
-          }, 60_000); // Offset by 60s to interleave with enrichment drain
+            }, 30_000); // Every 30s — downloads should be nearly continuous
+          }, 10_000); // Start quickly after watcher connects
 
           // Every 10 min: warn + resubscribe if no Realtime events received
           setInterval(() => {
