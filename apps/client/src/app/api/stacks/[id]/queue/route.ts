@@ -4,6 +4,14 @@ import { getServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
+const DEFAULT_WEIGHTS = {
+  seed_proximity: 30,
+  source_quality: 25,
+  artist_familiarity: 20,
+  recency: 15,
+  co_occurrence: 10,
+};
+
 // Weighted scoring for ranked playback queue.
 // Returns a score 0-100 for each pending track based on taste signals.
 function scoreTrack({
@@ -15,6 +23,7 @@ function scoreTrack({
   recencyNorm,
   coOccurrenceCount,
   maxCoOccurrence,
+  weights,
 }: {
   matchType: "full" | "artist" | "unknown";
   episodeApprovalRate: number;
@@ -24,25 +33,26 @@ function scoreTrack({
   recencyNorm: number;
   coOccurrenceCount: number;
   maxCoOccurrence: number;
+  weights: typeof DEFAULT_WEIGHTS;
 }) {
-  // Seed proximity (0-30): full match episodes are stronger signal
-  const proximity = matchType === "full" ? 30 : matchType === "artist" ? 10 : 0;
+  // Seed proximity: full match episodes are stronger signal
+  const proximity = matchType === "full" ? weights.seed_proximity : matchType === "artist" ? weights.seed_proximity / 3 : 0;
 
-  // Source quality (0-25): episodes where A.F.M approved tracks rank higher
+  // Source quality: episodes where A.F.M approved tracks rank higher
   // Default to 50% if fewer than 3 samples to avoid cold-start penalty
   const rate = episodeSampleSize >= 3 ? episodeApprovalRate : 0.5;
-  const quality = rate * 25;
+  const quality = rate * weights.source_quality;
 
-  // Artist familiarity (0-20): known approved artists or seeded artists rank higher
-  const familiarity = artistFamiliar ? 20 : artistInSeeds ? 10 : 0;
+  // Artist familiarity: known approved artists or seeded artists rank higher
+  const familiarity = artistFamiliar ? weights.artist_familiarity : artistInSeeds ? weights.artist_familiarity / 2 : 0;
 
-  // Recency (0-15): newer discoveries get a slight boost
-  const recency = recencyNorm * 15;
+  // Recency: newer discoveries get a slight boost
+  const recency = recencyNorm * weights.recency;
 
-  // Co-occurrence (0-10): artist appearing in more episodes tied to this seed = stronger signal
+  // Co-occurrence: artist appearing in more episodes tied to this seed = stronger signal
   const coOccurrence =
     maxCoOccurrence > 0
-      ? (Math.min(coOccurrenceCount, maxCoOccurrence) / maxCoOccurrence) * 10
+      ? (Math.min(coOccurrenceCount, maxCoOccurrence) / maxCoOccurrence) * weights.co_occurrence
       : 0;
 
   const total = proximity + quality + familiarity + recency + coOccurrence;
@@ -141,7 +151,26 @@ export async function GET(
     });
   }
 
-  // 4. Per-episode approval stats (for quality score)
+  // 4. Load user's latest taste weights (fall back to defaults if not tuned yet)
+  const { data: latestWeights } = await db
+    .from("taste_weights")
+    .select("seed_proximity, source_quality, artist_familiarity, recency, co_occurrence")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const weights: typeof DEFAULT_WEIGHTS = latestWeights
+    ? {
+        seed_proximity: latestWeights.seed_proximity,
+        source_quality: latestWeights.source_quality,
+        artist_familiarity: latestWeights.artist_familiarity,
+        recency: latestWeights.recency,
+        co_occurrence: latestWeights.co_occurrence,
+      }
+    : { ...DEFAULT_WEIGHTS };
+
+  // 5. Per-episode approval stats (for quality score + negative scoring)
   const { data: votedTracks } = await db
     .from("tracks")
     .select("episode_id, status")
@@ -156,7 +185,7 @@ export async function GET(
     episodeStats.set(t.episode_id, s);
   }
 
-  // 5. Approved artists globally (familiarity signal)
+  // 6. Approved artists globally (familiarity signal)
   const { data: approvedArtistRows } = await db
     .from("tracks")
     .select("artist")
@@ -167,7 +196,7 @@ export async function GET(
     (approvedArtistRows || []).map((t: any) => (t.artist || "").toLowerCase())
   );
 
-  // 6. All seed artists (secondary familiarity boost)
+  // 7. All seed artists (secondary familiarity boost)
   const { data: allSeeds } = await db
     .from("seeds")
     .select("artist")
@@ -177,7 +206,7 @@ export async function GET(
     (allSeeds || []).map((s: any) => (s.artist || "").toLowerCase())
   );
 
-  // 7. Co-occurrence: for each artist, how many of this seed's episodes feature them
+  // 8. Co-occurrence: for each artist, how many of this seed's episodes feature them
   const artistEpisodeSets = new Map<string, Set<string>>();
   for (const t of pendingTracks as any[]) {
     const key = (t.artist || "").toLowerCase();
@@ -189,7 +218,7 @@ export async function GET(
     1
   );
 
-  // 8. Recency normalization across all pending tracks
+  // 9. Recency normalization across all pending tracks
   const timestamps = (pendingTracks as any[]).map((t) =>
     new Date(t.created_at).getTime()
   );
@@ -197,7 +226,89 @@ export async function GET(
   const maxTs = Math.max(...timestamps);
   const tsRange = maxTs - minTs || 1;
 
-  // 9. Score and sort
+  // ── Negative signal data ──────────────────────────────────────────────────
+
+  // 10a. Artists the user has rejected (for -10pt penalty)
+  const { data: userRejectedArtistRows } = await db
+    .from("user_tracks")
+    .select("track_id")
+    .eq("user_id", user.id)
+    .eq("status", "rejected");
+
+  const rejectedTrackIds = (userRejectedArtistRows || []).map((r: any) => r.track_id);
+  const rejectedArtistsLower = new Set<string>();
+  if (rejectedTrackIds.length > 0) {
+    const { data: rejectedArtistData } = await db
+      .from("tracks")
+      .select("artist")
+      .in("id", rejectedTrackIds);
+    for (const t of (rejectedArtistData || []) as any[]) {
+      if (t.artist) rejectedArtistsLower.add(t.artist.toLowerCase());
+    }
+  }
+
+  // 10b. Episode rejection rates for user (for -5pt and -15pt penalties)
+  // Map: episode_id → { approved, rejected } from user_tracks
+  const userEpStats = new Map<string, { approved: number; rejected: number }>();
+  if (rejectedTrackIds.length > 0 || approvedArtistsLower.size > 0) {
+    const { data: userEpVotes } = await db
+      .from("user_tracks")
+      .select("track_id, status")
+      .eq("user_id", user.id)
+      .in("status", ["approved", "rejected"]);
+
+    // Get track→episode mapping for voted tracks
+    const votedTrackIds = (userEpVotes || []).map((v: any) => v.track_id);
+    if (votedTrackIds.length > 0) {
+      const { data: votedTrackEpisodes } = await db
+        .from("tracks")
+        .select("id, episode_id")
+        .in("id", votedTrackIds);
+
+      const trackToEp = new Map((votedTrackEpisodes || []).map((t: any) => [t.id, t.episode_id]));
+      for (const v of (userEpVotes || []) as any[]) {
+        const epId = trackToEp.get(v.track_id);
+        if (!epId) continue;
+        const s = userEpStats.get(epId) || { approved: 0, rejected: 0 };
+        if (v.status === "approved") s.approved++;
+        else s.rejected++;
+        userEpStats.set(epId, s);
+      }
+    }
+  }
+
+  // ── Momentum scoring (last 10 actions in current session = 2h) ────────────
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const { data: recentActions } = await db
+    .from("user_tracks")
+    .select("track_id, status, voted_at")
+    .eq("user_id", user.id)
+    .in("status", ["approved", "skipped"])
+    .gte("voted_at", twoHoursAgo)
+    .order("voted_at", { ascending: false })
+    .limit(10);
+
+  // Map: episode_id → { approvals, skips } from this session
+  const sessionEpMomentum = new Map<string, { approvals: number; skips: number }>();
+  if ((recentActions || []).length > 0) {
+    const recentTrackIds = (recentActions || []).map((a: any) => a.track_id);
+    const { data: recentTrackEps } = await db
+      .from("tracks")
+      .select("id, episode_id")
+      .in("id", recentTrackIds);
+
+    const recentTrackToEp = new Map((recentTrackEps || []).map((t: any) => [t.id, t.episode_id]));
+    for (const a of (recentActions || []) as any[]) {
+      const epId = recentTrackToEp.get(a.track_id);
+      if (!epId) continue;
+      const m = sessionEpMomentum.get(epId) || { approvals: 0, skips: 0 };
+      if (a.status === "approved") m.approvals++;
+      else m.skips++;
+      sessionEpMomentum.set(epId, m);
+    }
+  }
+
+  // 11. Score and sort
   const seedLabel = `${seed.artist} — ${seed.title}`;
 
   const scored = (pendingTracks as any[]).map((t) => {
@@ -214,7 +325,7 @@ export async function GET(
     const recencyNorm = (ts - minTs) / tsRange;
     const coCount = artistEpisodeSets.get(artistLower)?.size ?? 1;
 
-    const { total, components } = scoreTrack({
+    const { total: baseTotal, components } = scoreTrack({
       matchType: matchType as "full" | "artist" | "unknown",
       episodeApprovalRate: approvalRate,
       episodeSampleSize: epTotal,
@@ -223,7 +334,43 @@ export async function GET(
       recencyNorm,
       coOccurrenceCount: coCount,
       maxCoOccurrence,
+      weights,
     });
+
+    // ── Negative signal penalties ──────────────────────────────────────────
+    let penalty = 0;
+
+    // Artist previously rejected by user → -10pts
+    if (rejectedArtistsLower.has(artistLower)) {
+      penalty += 10;
+    }
+
+    // Episode has >50% user rejection rate → -15pts (track from bad episode)
+    const userEpStat = userEpStats.get(epId);
+    if (userEpStat) {
+      const userEpTotal = userEpStat.approved + userEpStat.rejected;
+      if (userEpTotal >= 3) {
+        const userRejRate = userEpStat.rejected / userEpTotal;
+        if (userRejRate > 0.5) {
+          penalty += 15;
+        }
+      }
+    }
+
+    // Episode source/curator global rejection rate >50% → -5pts
+    if (epTotal >= 3 && (1 - approvalRate) > 0.5) {
+      penalty += 5;
+    }
+
+    // ── Momentum boost/demotion ────────────────────────────────────────────
+    let momentumDelta = 0;
+    const momentum = sessionEpMomentum.get(epId);
+    if (momentum) {
+      if (momentum.approvals >= 3) momentumDelta = +15;
+      else if (momentum.skips >= 3) momentumDelta = -10;
+    }
+
+    const total = Math.max(0, baseTotal - penalty + momentumDelta);
 
     // Normalize joins
     const seedTrack = Array.isArray(t.seed_track)
@@ -247,7 +394,11 @@ export async function GET(
       episode,
       is_seed: isSeed,
       _ranked_score: Math.round(total),
-      _score_components: components,
+      _score_components: {
+        ...components,
+        penalty: -Math.round(penalty),
+        momentum: Math.round(momentumDelta),
+      },
       _match_type: matchType,
       _seed_name: seedLabel,
     };
@@ -255,7 +406,7 @@ export async function GET(
 
   scored.sort((a: any, b: any) => b._ranked_score - a._ranked_score);
 
-  // 10. Generate signed audio URLs in parallel
+  // 12. Generate signed audio URLs in parallel
   const signPromises: Promise<void>[] = [];
   for (const t of scored) {
     if (t.storage_path) {
@@ -275,5 +426,7 @@ export async function GET(
     tracks: scored,
     total: scored.length,
     seed: { id: seed.id, artist: seed.artist, title: seed.title },
+    weights_used: weights,
+    using_default_weights: !latestWeights,
   });
 }

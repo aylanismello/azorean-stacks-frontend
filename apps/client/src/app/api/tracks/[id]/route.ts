@@ -64,6 +64,19 @@ export async function PATCH(
     );
   }
 
+  // Get authed user for user_tracks write (all votes, not just super_like)
+  const authClient = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return req.cookies.getAll(); },
+        setAll() {},
+      },
+    }
+  );
+  const { data: { user } } = await authClient.auth.getUser();
+
   const updates: Record<string, unknown> = { status };
 
   if (status === "approved" || status === "rejected" || status === "skipped") {
@@ -105,6 +118,16 @@ export async function PATCH(
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // Record vote in user_tracks for all voted statuses (enables weight tuning + engagement analytics)
+  if (user && (status === "approved" || status === "rejected" || status === "skipped")) {
+    await supabase
+      .from("user_tracks")
+      .upsert(
+        { user_id: user.id, track_id: params.id, status, voted_at: updates.voted_at },
+        { onConflict: "user_id,track_id", ignoreDuplicates: false }
+      );
   }
 
   return NextResponse.json(data);

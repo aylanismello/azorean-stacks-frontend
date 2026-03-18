@@ -88,11 +88,32 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
     }
   }, [track.id, track.artist, track.title, seeding]);
 
+  // Report engagement metrics to backend before a vote action.
+  // Fire-and-forget — don't block the vote on this.
+  const reportEngagement = useCallback(() => {
+    if (!globalPlayer.trackStartedAt || globalPlayer.currentTrack?.id !== track.id) return;
+    const duration = globalPlayer.duration;
+    const progress = globalPlayer.progress;
+    const listenPct = duration > 0 ? Math.round((progress / duration) * 100) : null;
+    const listenDurationMs = Math.round(progress * 1000);
+    const actionDelayMs = Date.now() - globalPlayer.trackStartedAt;
+    fetch(`/api/user-tracks/${track.id}/engagement`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        listen_pct: listenPct,
+        listen_duration_ms: listenDurationMs,
+        action_delay_ms: actionDelayMs,
+      }),
+    }).catch(() => {}); // fire-and-forget
+  }, [track.id, globalPlayer]);
+
   const handleSuperLike = useCallback(async () => {
     if (superLiking || votingRef.current) return;
     setSuperLiking(true);
     setSuperLiked(true);
     setKept(true); // super like implies approval — mark heart as done too
+    reportEngagement();
     try {
       if (onSuperLike) {
         await onSuperLike(track.id);
@@ -102,7 +123,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
     } finally {
       setSuperLiking(false);
     }
-  }, [track.id, onSuperLike, superLiking]);
+  }, [track.id, onSuperLike, superLiking, reportEngagement]);
 
   const handleVote = useCallback(
     async (status: "approved" | "rejected" | "skipped", advance: boolean = true) => {
@@ -110,16 +131,18 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
       if (!advance) {
         if (superLiked) return; // already super-liked, don't double-approve
         setKept(true);
+        reportEngagement();
         await onVote(track.id, status, false);
         return;
       }
+      reportEngagement();
       votingRef.current = true;
       setVoting(true);
       setExiting(status === "approved" ? "right" : status === "skipped" ? "right" : "left");
       await new Promise((r) => setTimeout(r, 250));
       await onVote(track.id, status, true);
     },
-    [track.id, onVote]
+    [track.id, onVote, superLiked, reportEngagement]
   );
 
   const handleAdvance = useCallback(async () => {

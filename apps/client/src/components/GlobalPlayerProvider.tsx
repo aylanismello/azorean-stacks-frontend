@@ -32,6 +32,8 @@ interface GlobalPlayerContextType {
   canSwitchSource: boolean;
   /** URL path where playback was initiated from */
   playbackOrigin: string | null;
+  /** Unix ms timestamp when the current track started playing (for engagement tracking) */
+  trackStartedAt: number | null;
   /** Load a track into the player without starting playback */
   loadTrack: (track: PlayerTrack, origin?: string) => void;
   /** Load a track and immediately start playing */
@@ -54,6 +56,7 @@ const GlobalPlayerContext = createContext<GlobalPlayerContextType>({
   trackEndedCount: 0,
   canSwitchSource: false,
   playbackOrigin: null,
+  trackStartedAt: null,
   loadTrack: () => {},
   play: () => {},
   togglePlayPause: () => {},
@@ -78,6 +81,7 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
   const [trackEndedCount, setTrackEndedCount] = useState(0);
   const [noSource, setNoSource] = useState(false);
   const [playbackOrigin, setPlaybackOrigin] = useState<string | null>(null);
+  const [trackStartedAt, setTrackStartedAt] = useState<number | null>(null);
 
   // Create a persistent audio element
   useEffect(() => {
@@ -171,6 +175,7 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     setDuration(0);
     setPlaying(false);
     setLoading(false);
+    setTrackStartedAt(null);
     if (origin !== undefined) setPlaybackOrigin(origin);
 
     // Determine source but don't start playback — prefer downloaded audio over Spotify
@@ -201,6 +206,7 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     setDuration(0);
     setNoSource(false);
     setLoading(true);
+    setTrackStartedAt(Date.now());
     // Always update playbackOrigin when play() is called — use provided origin or
     // fall back to the current page URL so the now-playing button always returns
     // to the correct context.
@@ -325,6 +331,7 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     setSource(null);
     setNoSource(false);
     setPlaybackOrigin(null);
+    setTrackStartedAt(null);
   }, [stopAudio, stopSpotify]);
 
   return (
@@ -340,6 +347,7 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
         trackEndedCount,
         canSwitchSource,
         playbackOrigin,
+        trackStartedAt,
         loadTrack,
         play,
         togglePlayPause,
