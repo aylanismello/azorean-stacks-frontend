@@ -142,7 +142,7 @@ while true; do
   # Truncate log periodically
   truncate_log
 
-  log "Sleeping 30 seconds..."
-  sleep 30 &
+  log "Sleeping 5 seconds..."
+  sleep 5 &
   wait $!
 done
