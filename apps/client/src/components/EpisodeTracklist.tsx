@@ -321,10 +321,10 @@ export function EpisodeTracklist(props: TracklistProps) {
                   {/* Track info */}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1 mb-0.5">
-                      {(t.is_seed || t.is_re_seed) ? (
-                        <span className="text-[9px] leading-none flex-shrink-0" title={t.is_re_seed ? "Re-seed match" : "Seed track"}>🌱</span>
-                      ) : t.is_artist_seed ? (
-                        <span className="text-[9px] leading-none flex-shrink-0" title="Artist match">🌿</span>
+                      {(t.is_seed || t.is_artist_seed) ? (
+                        <span className="text-[9px] leading-none flex-shrink-0" title="Seed">🌱</span>
+                      ) : t.is_re_seed ? (
+                        <span className="text-[9px] leading-none flex-shrink-0" title="Re-seed">🌿</span>
                       ) : t.super_liked ? (
                         <span className="text-[9px] leading-none text-amber-400 flex-shrink-0" title="Super liked">⭐</span>
                       ) : null}
@@ -339,10 +339,10 @@ export function EpisodeTracklist(props: TracklistProps) {
                                 ? "text-foreground/40"
                                 : !t.storage_path
                                   ? "line-through text-foreground/30"
-                                  : (t.is_seed || t.is_re_seed)
+                                  : (t.is_seed || t.is_artist_seed)
                                     ? "text-green-400/90 font-medium"
-                                    : t.is_artist_seed
-                                      ? "text-teal-400/80 font-medium"
+                                    : t.is_re_seed
+                                      ? "text-emerald-400/80 font-medium"
                                       : t.super_liked
                                         ? "text-amber-300/90 font-medium"
                                         : t.vote_status === "approved"
