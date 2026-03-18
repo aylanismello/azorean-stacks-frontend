@@ -39,7 +39,7 @@ function safeCoverUrl(url: string | null): string | null {
 
 function sourceLabel(source: string): string {
   const labels: Record<string, string> = {
-    nts: "NTS Radio",
+    nts: "NTS",
     lotradio: "The Lot Radio",
     "1001tracklists": "1001TL",
     spotify: "Spotify",
@@ -189,20 +189,6 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   const hasAudio = !!(track.audio_url || track.preview_url);
   const hasPlayableSource = hasAudio || (!!track.spotify_url && spotify.connected && !!spotify.deviceId);
   const isCurrentTrack = globalPlayer.currentTrack?.id === track.id;
-
-  // Pipeline status indicators
-  const enrichStatus: "enriched" | "pending" | "failed" =
-    track.spotify_url === ""
-      ? "failed"
-      : track.spotify_url || track.youtube_url
-        ? "enriched"
-        : "pending";
-  const downloadStatus: "downloaded" | "pending" | "n/a" =
-    track.storage_path
-      ? "downloaded"
-      : track.youtube_url
-        ? "pending"
-        : "n/a";
 
   const handleArtworkPlay = useCallback(() => {
     if (isCurrentTrack) {
@@ -715,14 +701,21 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
             </div>
             <div className="flex items-center gap-2">
               <p className="text-sm text-white/80 truncate drop-shadow-lg">{track.artist}</p>
-              <span className="flex items-center gap-1 shrink-0">
-                <span className={`w-1.5 h-1.5 rounded-full ${
-                  enrichStatus === "enriched" ? "bg-green-400" : enrichStatus === "failed" ? "bg-red-400" : "bg-white/30"
-                }`} title={`Enrichment: ${enrichStatus}`} />
-                <span className={`w-1.5 h-1.5 rounded-full ${
-                  downloadStatus === "downloaded" ? "bg-blue-400" : downloadStatus === "pending" ? "bg-white/30" : "bg-white/15"
-                }`} title={`Download: ${downloadStatus}`} />
-              </span>
+              {/* Vote status indicator */}
+              {superLiked && (
+                <span className="flex-shrink-0 text-yellow-400 drop-shadow-lg" title="Super liked">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                </span>
+              )}
+              {kept && !superLiked && (
+                <span className="flex-shrink-0 text-green-400 drop-shadow-lg" title="Liked">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                  </svg>
+                </span>
+              )}
             </div>
           </div>
 
@@ -1001,61 +994,28 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
               {meta.bpm} BPM
             </span>
           )}
-          {/* Enrichment source pills */}
-          {Array.isArray(meta.enrichment_sources) && meta.enrichment_sources.length > 0 && (
-            meta.enrichment_sources.map((src: string) => {
-              const cfg: Record<string, { label: string; bg: string; text: string }> = {
-                spotify: { label: "SP", bg: "bg-green-500/12", text: "text-green-400/70" },
-                youtube: { label: "YT", bg: "bg-red-500/12", text: "text-red-400/70" },
-                soundcloud: { label: "SC", bg: "bg-orange-500/12", text: "text-orange-400/70" },
-                musicbrainz: { label: "MB", bg: "bg-blue-500/12", text: "text-blue-400/70" },
-              };
-              const c = cfg[src] || { label: src.toUpperCase().slice(0, 2), bg: "bg-foreground/5", text: "text-foreground/40" };
-              return (
-                <span key={`enr-${src}`} className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${c.bg} ${c.text}`} title={`Enriched from ${src}`}>
-                  {c.label}
-                </span>
-              );
-            })
-          )}
-          {/* Audio source indicator */}
-          {meta.audio_source && (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-foreground/5 text-foreground/30" title={`Audio from ${meta.audio_source}`}>
-              audio: {meta.audio_source === "youtube" ? "YT" : meta.audio_source === "soundcloud" ? "SC" : meta.audio_source}
-            </span>
-          )}
           {track.user_track?.status === "listened" && (
             <span className="px-2 py-1 bg-foreground/8 rounded-lg text-xs text-foreground/35" title="Heard past 80%">
               👂 heard
             </span>
           )}
-          {/* Pipeline status dots */}
-          <span
-            className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium ${
-              enrichStatus === "enriched" ? "bg-green-500/10 text-green-400/70"
-              : enrichStatus === "failed" ? "bg-red-500/10 text-red-400/70"
-              : "bg-foreground/5 text-foreground/30"
-            }`}
-            title={`Enrichment: ${enrichStatus}`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${
-              enrichStatus === "enriched" ? "bg-green-400" : enrichStatus === "failed" ? "bg-red-400" : "bg-foreground/30"
-            }`} />
-            {enrichStatus === "enriched" ? "enriched" : enrichStatus === "failed" ? "enrich failed" : "enriching"}
-          </span>
-          <span
-            className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium ${
-              downloadStatus === "downloaded" ? "bg-blue-500/10 text-blue-400/70"
-              : downloadStatus === "pending" ? "bg-foreground/5 text-foreground/30"
-              : "bg-foreground/5 text-foreground/20"
-            }`}
-            title={`Download: ${downloadStatus}`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${
-              downloadStatus === "downloaded" ? "bg-blue-400" : downloadStatus === "pending" ? "bg-foreground/30" : "bg-foreground/15"
-            }`} />
-            {downloadStatus === "downloaded" ? "downloaded" : downloadStatus === "pending" ? "dl pending" : "no dl"}
-          </span>
+          {/* Vote status indicators */}
+          {superLiked && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-500/15 rounded-lg text-xs text-yellow-400 font-medium" title="Super liked">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+              super liked
+            </span>
+          )}
+          {kept && !superLiked && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-500/15 rounded-lg text-xs text-green-400 font-medium" title="Liked">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+              </svg>
+              liked
+            </span>
+          )}
           {playingIndicator}
           {noSourceIndicator}
         </div>

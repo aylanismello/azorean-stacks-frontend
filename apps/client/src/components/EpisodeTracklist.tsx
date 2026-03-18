@@ -196,27 +196,15 @@ export function EpisodeTracklist(props: TracklistProps) {
     return "text-foreground/60";
   };
 
-  const downloadDot = (t: TrackListItem) => {
-    if (t.status === "listened")
-      return (
-        <span className="relative flex-shrink-0 w-1.5 h-1.5" title="Heard">
-          <span className="w-1.5 h-1.5 rounded-full bg-foreground/25 block" />
-        </span>
-      );
-    if (t.storage_path)
-      return <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" title="Downloaded" />;
-    if (t.dl_failed_at)
-      return <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" title="Download failed" />;
-    if (t.spotify_url || t.youtube_url)
-      return <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="Enriched" />;
-    return <span className="w-1.5 h-1.5 rounded-full bg-foreground/20 animate-pulse flex-shrink-0" title="Pending" />;
+  const audioDot = (t: TrackListItem) => {
+    const hasAudio = !!(t.storage_path || t.audio_url || t.preview_url || t.spotify_url);
+    if (hasAudio)
+      return <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" title="Playable" />;
+    return null;
   };
 
-  // Download-based header stats
-  const downloaded = tracks.filter((t) => !!t.storage_path).length;
-  const enrichedCount = tracks.filter((t) => !t.storage_path && !t.dl_failed_at && !!(t.spotify_url || t.youtube_url)).length;
-  const failed = tracks.filter((t) => !!t.dl_failed_at && !t.storage_path).length;
-  const dlPending = tracks.filter((t) => !t.storage_path && !t.spotify_url && !t.youtube_url && !t.dl_failed_at).length;
+  // Header stats — just playable count
+  const playable = tracks.filter((t) => !!(t.storage_path || t.audio_url || t.preview_url || t.spotify_url)).length;
 
   const displayTitle = listTitle || episodeTitle || "Tracklist";
 
@@ -232,10 +220,7 @@ export function EpisodeTracklist(props: TracklistProps) {
             {!loading && (
               <div className="flex items-center gap-3 mt-1 text-[10px] font-mono text-muted">
                 <span>{tracks.length} tracks</span>
-                {downloaded > 0 && <span className="text-green-400/70">{downloaded} downloaded</span>}
-                {enrichedCount > 0 && <span className="text-amber-400/70">{enrichedCount} enriched</span>}
-                {failed > 0 && <span className="text-red-400/70">{failed} failed</span>}
-                {dlPending > 0 && <span className="text-foreground/40">{dlPending} pending</span>}
+                {playable > 0 && <span className="text-green-400/70">{playable} playable</span>}
               </div>
             )}
           </div>
@@ -366,24 +351,30 @@ export function EpisodeTracklist(props: TracklistProps) {
 
                   {/* Vote status indicator */}
                   {t.vote_status && t.vote_status !== "pending" && (
-                    <span className="flex-shrink-0 text-[9px] leading-none" title={t.vote_status}>
+                    <span className="flex-shrink-0" title={t.vote_status}>
                       {t.super_liked ? (
-                        <span className="text-amber-400">&#11088;</span>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="#facc15" stroke="#facc15" strokeWidth="1" className="text-yellow-400">
+                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                        </svg>
                       ) : t.vote_status === "approved" ? (
-                        <span className="text-green-400">&#9989;</span>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="#4ade80" className="text-green-400">
+                          <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                        </svg>
                       ) : t.vote_status === "rejected" ? (
-                        <span className="text-red-400/70">&#10060;</span>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-400/50">
+                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
                       ) : t.vote_status === "skipped" ? (
-                        <span className="text-amber-400/60">&#9193;</span>
-                      ) : t.vote_status === "listened" ? (
-                        <span className="text-foreground/30">&#128066;</span>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-amber-400/40">
+                          <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
+                        </svg>
                       ) : null}
                     </span>
                   )}
 
-                  {/* Right: download status dot */}
+                  {/* Right: playable dot */}
                   <span className="flex-shrink-0">
-                    {downloadDot(t)}
+                    {audioDot(t)}
                   </span>
                 </button>
               );
