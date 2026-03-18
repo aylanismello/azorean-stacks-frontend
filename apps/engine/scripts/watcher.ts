@@ -1304,6 +1304,27 @@ function startWatcher() {
             }
           }, SIX_HOURS);
 
+          // Every 2 min: drain pending-enrichment backlog from DB
+          setInterval(async () => {
+            if (shuttingDown) return;
+            if (trackQueue.length > 0) return;
+            const { data: pending, error } = await db.from("tracks")
+              .select("id")
+              .eq("status", "pending")
+              .or("spotify_url.is.null,and(youtube_url.is.null,storage_path.is.null)")
+              .order("created_at", { ascending: true })
+              .limit(30);
+            if (error) {
+              log("fail", `[Drain] Pending track scan failed: ${error.message}`);
+              return;
+            }
+            const toQueue = (pending || []).filter((t: any) => !trackQueue.includes(t.id));
+            if (toQueue.length === 0) return;
+            for (const t of toQueue) enqueueTrack(t.id);
+            log("info", `[Drain] Queued ${toQueue.length} pending tracks for enrichment`);
+            processRepairQueue();
+          }, 2 * 60_000);
+
           // Every 10 min: warn + resubscribe if no Realtime events received
           setInterval(() => {
             if (shuttingDown) return;
