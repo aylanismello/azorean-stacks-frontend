@@ -1001,6 +1001,29 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
               {meta.bpm} BPM
             </span>
           )}
+          {/* Enrichment source pills */}
+          {Array.isArray(meta.enrichment_sources) && meta.enrichment_sources.length > 0 && (
+            meta.enrichment_sources.map((src: string) => {
+              const cfg: Record<string, { label: string; bg: string; text: string }> = {
+                spotify: { label: "SP", bg: "bg-green-500/12", text: "text-green-400/70" },
+                youtube: { label: "YT", bg: "bg-red-500/12", text: "text-red-400/70" },
+                soundcloud: { label: "SC", bg: "bg-orange-500/12", text: "text-orange-400/70" },
+                musicbrainz: { label: "MB", bg: "bg-blue-500/12", text: "text-blue-400/70" },
+              };
+              const c = cfg[src] || { label: src.toUpperCase().slice(0, 2), bg: "bg-foreground/5", text: "text-foreground/40" };
+              return (
+                <span key={`enr-${src}`} className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${c.bg} ${c.text}`} title={`Enriched from ${src}`}>
+                  {c.label}
+                </span>
+              );
+            })
+          )}
+          {/* Audio source indicator */}
+          {meta.audio_source && (
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-foreground/5 text-foreground/30" title={`Audio from ${meta.audio_source}`}>
+              audio: {meta.audio_source === "youtube" ? "YT" : meta.audio_source === "soundcloud" ? "SC" : meta.audio_source}
+            </span>
+          )}
           {track.user_track?.status === "listened" && (
             <span className="px-2 py-1 bg-foreground/8 rounded-lg text-xs text-foreground/35" title="Heard past 80%">
               👂 heard
