@@ -8,6 +8,38 @@ import { isReseed } from "@/lib/seeds";
 import { openYouTube } from "@/lib/youtube";
 import { EpisodeTracklist } from "@/components/EpisodeTracklist";
 
+interface RadarEpisode {
+  id: string;
+  title: string | null;
+  url: string;
+  source: string;
+  aired_date: string | null;
+  artwork_url: string | null;
+  track_count: number;
+  enriched_count: number;
+  downloaded_count: number;
+  pending_count: number;
+  discovery_method: "radar" | "voted" | "backfill" | null;
+}
+
+interface RadarCurator {
+  curator_key: string;
+  source: string;
+  show_slug: string;
+  approved: number;
+  rejected: number;
+  total: number;
+  approval_rate: number;
+  tier: "high" | "medium";
+  episodes: RadarEpisode[];
+  track_stats: {
+    total: number;
+    enriched: number;
+    downloaded: number;
+    pending: number;
+  };
+}
+
 // Decode common HTML entities that may be stored in DB from NTS/external APIs
 function decodeEntities(s: string): string {
   if (!s.includes("&")) return s;
@@ -27,8 +59,10 @@ export default function SeedsPage() {
   const [enriching, setEnriching] = useState(false);
   const [enrichingLabel, setEnrichingLabel] = useState<string | null>(null);
   const [discoverResult, setDiscoverResult] = useState<{ tracks_found: number; message?: string } | null>(null);
-  const [tab, setTab] = useState<"all" | "reseeds">("all");
+  const [tab, setTab] = useState<"all" | "reseeds" | "radar">("all");
   const [pendingDelete, setPendingDelete] = useState<{ id: string; artist: string; title: string } | null>(null);
+  const [radarCurators, setRadarCurators] = useState<RadarCurator[]>([]);
+  const [radarLoading, setRadarLoading] = useState(false);
   const { user } = useAuth();
 
   const fetchSeeds = useCallback(async () => {
@@ -65,6 +99,25 @@ export default function SeedsPage() {
     const id = setInterval(fetchSeeds, pollRate);
     return () => clearInterval(id);
   }, [fetchSeeds, pollRate]);
+
+  // Fetch radar curators when tab switches to radar
+  const fetchRadar = useCallback(async () => {
+    setRadarLoading(true);
+    try {
+      const res = await fetch("/api/radar/curators");
+      if (!res.ok) return;
+      const data = await res.json();
+      setRadarCurators(data.curators || []);
+    } catch {
+      // non-blocking
+    } finally {
+      setRadarLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "radar") fetchRadar();
+  }, [tab, fetchRadar]);
 
   const handleAddSeed = async (input: string) => {
     const trimmed = input.trim();
@@ -202,7 +255,7 @@ export default function SeedsPage() {
         <h1 className="text-xl font-semibold">Seeds</h1>
       </div>
 
-      {/* Tabs: All / Re-seeds */}
+      {/* Tabs: All / Re-seeds / Radar */}
       <div className="flex items-center gap-1 mb-6 bg-surface-2 rounded-lg p-1 w-fit">
         <button
           onClick={() => setTab("all")}
@@ -219,6 +272,14 @@ export default function SeedsPage() {
           }`}
         >
           Re-seeds ({reseeds.length})
+        </button>
+        <button
+          onClick={() => setTab("radar")}
+          className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            tab === "radar" ? "bg-surface-1 text-foreground shadow-sm" : "text-muted hover:text-foreground"
+          }`}
+        >
+          Radar
         </button>
       </div>
 
@@ -262,7 +323,24 @@ export default function SeedsPage() {
         </div>
       )}
 
-      {loading ? (
+      {tab === "radar" ? (
+        radarLoading ? (
+          <div className="flex justify-center py-12">
+            <div className="w-6 h-6 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+          </div>
+        ) : radarCurators.length === 0 ? (
+          <div className="text-center py-12 text-muted text-sm">
+            <p>No curators on your radar yet.</p>
+            <p className="mt-1 text-muted/60 text-xs">Keep voting on tracks — when you approve enough from a show, its curator will appear here.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {radarCurators.map((curator) => (
+              <CuratorCard key={curator.curator_key} curator={curator} />
+            ))}
+          </div>
+        )
+      ) : loading ? (
         <div className="flex justify-center py-12">
           <div className="w-6 h-6 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
         </div>
@@ -1016,6 +1094,304 @@ function SeedTrackRow({
           {seeding ? "·" : "SD"}
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─── Radar: Curator Affinity Cards ────────────────────────────────────────────
+
+function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  // Handle "2025-12-05", "2025-12-05T00:00:00Z", "30 Jan 2026", etc.
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr + "T00:00:00" : dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function formatShowName(curatorKey: string): string {
+  const colonIdx = curatorKey.indexOf(":");
+  const slug = curatorKey.substring(colonIdx + 1);
+  return slug.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function AffinityBar({ rate, approved, total }: { rate: number; approved: number; total: number }) {
+  const pct = Math.round(rate * 100);
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 bg-surface-3 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${
+            pct >= 70 ? "bg-green-400" : pct >= 50 ? "bg-accent" : "bg-amber-400"
+          }`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-[10px] text-muted tabular-nums flex-shrink-0">
+        {approved}/{total} kept ({pct}%)
+      </span>
+    </div>
+  );
+}
+
+function CuratorCard({ curator }: { curator: RadarCurator }) {
+  const [expanded, setExpanded] = useState(false);
+  const [epTracks, setEpTracks] = useState<Record<string, EpisodeTrack[]>>({});
+  const [loadingEp, setLoadingEp] = useState<string | null>(null);
+
+  const name = formatShowName(curator.curator_key);
+  const pct = Math.round(curator.approval_rate * 100);
+  const { track_stats: ts } = curator;
+
+  const votedEps = curator.episodes.filter((e) => e.discovery_method === "voted");
+  const radarEps = curator.episodes.filter((e) => e.discovery_method === "radar");
+  const backfillEps = curator.episodes.filter((e) => e.discovery_method === "backfill");
+
+  const handleLoadTracks = async (epId: string) => {
+    if (epTracks[epId]) return;
+    setLoadingEp(epId);
+    try {
+      const res = await fetch(`/api/episodes/${epId}/tracks`);
+      if (res.ok) {
+        const tracks = await res.json();
+        setEpTracks((prev) => ({ ...prev, [epId]: tracks }));
+      }
+    } finally {
+      setLoadingEp(null);
+    }
+  };
+
+  return (
+    <div className="rounded-xl bg-surface-1 transition-colors">
+      {/* Header */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full text-left p-4"
+      >
+        <div className="flex items-center gap-3">
+          {/* Source badge */}
+          <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider flex-shrink-0 font-medium ${
+            curator.source === "nts" ? "bg-blue-500/15 text-blue-400" : "bg-purple-500/15 text-purple-400"
+          }`}>
+            {curator.source}
+          </span>
+          {/* Tier badge */}
+          <span className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${
+            curator.tier === "high"
+              ? "bg-green-500/15 text-green-400"
+              : "bg-amber-500/15 text-amber-400"
+          }`}>
+            {curator.tier}
+          </span>
+          <div className="flex-1" />
+          <span className="text-muted text-xs">{expanded ? "▾" : "▸"}</span>
+        </div>
+
+        <p className="text-sm font-medium text-foreground mt-2">{name}</p>
+
+        {/* Affinity bar */}
+        <div className="mt-2">
+          <AffinityBar rate={curator.approval_rate} approved={curator.approved} total={curator.total} />
+        </div>
+
+        {/* Stats row */}
+        <div className="flex items-center gap-2 mt-2 flex-wrap">
+          <span className="text-[10px] text-blue-400/80 font-medium">
+            {curator.episodes.length} ep{curator.episodes.length !== 1 ? "s" : ""}
+          </span>
+          <span className="text-surface-4">·</span>
+          <span className="text-[10px] text-foreground/50">{ts.total} tracks</span>
+          {ts.downloaded > 0 && (
+            <>
+              <span className="text-surface-4">·</span>
+              <span className="text-[10px] text-green-400 font-medium">{ts.downloaded} ready</span>
+            </>
+          )}
+          {ts.pending > 0 && (
+            <>
+              <span className="text-surface-4">·</span>
+              <span className="text-[10px] text-muted/50">{ts.pending} pending</span>
+            </>
+          )}
+        </div>
+      </button>
+
+      {/* Expanded: episode breakdown */}
+      {expanded && (
+        <div className="border-t border-surface-3 px-4 py-3">
+          {/* Affinity story */}
+          <div className="mb-3 px-3 py-2 rounded-lg bg-accent/5 border border-accent/10">
+            <p className="text-[11px] text-accent/80 leading-relaxed">
+              You kept <strong>{curator.approved}</strong> of <strong>{curator.total}</strong> tracks
+              from this show ({pct}% approval).
+              {curator.tier === "high"
+                ? " High affinity — radar backfilled their last episodes."
+                : " Medium affinity — radar is watching for new episodes."}
+            </p>
+          </div>
+
+          {/* Play button */}
+          {ts.downloaded > 0 && (
+            <div className="mb-3">
+              <a
+                href={`/?source=curator&curator_key=${encodeURIComponent(curator.curator_key)}`}
+                className="inline-block text-[11px] px-3 py-1.5 rounded-full bg-accent/15 text-accent hover:bg-accent/25 transition-colors font-medium"
+              >
+                Play Radar ({ts.downloaded} tracks) →
+              </a>
+            </div>
+          )}
+
+          {/* Episodes grouped by how they got here */}
+          {votedEps.length > 0 && (
+            <EpisodeGroup
+              label="Episodes you voted on"
+              sublabel="Your votes built this affinity"
+              episodes={votedEps}
+              epTracks={epTracks}
+              loadingEp={loadingEp}
+              onLoadTracks={handleLoadTracks}
+            />
+          )}
+          {radarEps.length > 0 && (
+            <EpisodeGroup
+              label="Pulled by radar"
+              sublabel="Auto-discovered because of your affinity"
+              episodes={radarEps}
+              epTracks={epTracks}
+              loadingEp={loadingEp}
+              onLoadTracks={handleLoadTracks}
+            />
+          )}
+          {backfillEps.length > 0 && (
+            <EpisodeGroup
+              label="Backfilled"
+              sublabel="Older episodes from this curator"
+              episodes={backfillEps}
+              epTracks={epTracks}
+              loadingEp={loadingEp}
+              onLoadTracks={handleLoadTracks}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EpisodeGroup({
+  label,
+  sublabel,
+  episodes,
+  epTracks,
+  loadingEp,
+  onLoadTracks,
+}: {
+  label: string;
+  sublabel: string;
+  episodes: RadarEpisode[];
+  epTracks: Record<string, EpisodeTrack[]>;
+  loadingEp: string | null;
+  onLoadTracks: (epId: string) => void;
+}) {
+  return (
+    <div className="mb-3">
+      <div className="flex items-center gap-2 mb-1.5">
+        <p className="text-[10px] text-muted uppercase tracking-wider font-medium">{label}</p>
+        <span className="text-[10px] text-muted/40">— {sublabel}</span>
+      </div>
+      <div className="space-y-0">
+        {episodes.map((ep) => (
+          <RadarEpisodeRow
+            key={ep.id}
+            episode={ep}
+            tracks={epTracks[ep.id]}
+            loading={loadingEp === ep.id}
+            onLoadTracks={onLoadTracks}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RadarEpisodeRow({
+  episode: ep,
+  tracks,
+  loading,
+  onLoadTracks,
+}: {
+  episode: RadarEpisode;
+  tracks?: EpisodeTrack[];
+  loading: boolean;
+  onLoadTracks: (epId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const handleToggle = () => {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    onLoadTracks(ep.id);
+  };
+
+  return (
+    <div className="border-b border-surface-3/50 last:border-b-0">
+      <button
+        onClick={handleToggle}
+        className="w-full text-left py-2 hover:bg-surface-2/30 transition-colors rounded-lg px-1 -mx-1"
+      >
+        <div className="flex items-center gap-2 mb-0.5">
+          {ep.aired_date && (
+            <span className="text-[10px] text-muted flex-shrink-0">{formatDate(ep.aired_date)}</span>
+          )}
+          <div className="flex-1" />
+          {/* Track stats */}
+          {ep.track_count > 0 && (
+            <div className="flex items-center gap-1">
+              {ep.downloaded_count > 0 && (
+                <span className="text-[9px] text-green-400">{ep.downloaded_count} ready</span>
+              )}
+              {ep.pending_count > 0 && (
+                <span className="text-[9px] text-muted/50">{ep.pending_count} pending</span>
+              )}
+            </div>
+          )}
+          <span className="text-muted text-xs">{open ? "▾" : "▸"}</span>
+        </div>
+        <p className="text-[13px] text-foreground/80 leading-snug truncate">
+          {ep.title || ep.url}
+        </p>
+      </button>
+
+      {open && (
+        <div className="pl-2 pr-1 pb-3">
+          <div className="flex items-center gap-2 mb-2">
+            <a
+              href={ep.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] px-2.5 py-1 rounded-full bg-surface-2 text-accent hover:bg-surface-3 transition-colors"
+            >
+              Open on {ep.source === "nts" ? "NTS" : ep.source} ↗
+            </a>
+            <a
+              href={`/?episode_id=${ep.id}&episode_title=${encodeURIComponent(ep.title || ep.url)}`}
+              className="text-[10px] px-2.5 py-1 rounded-full bg-accent/15 text-accent hover:bg-accent/25 transition-colors font-medium"
+            >
+              Swipe →
+            </a>
+          </div>
+
+          {loading ? (
+            <div className="flex justify-center py-3">
+              <div className="w-3.5 h-3.5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+            </div>
+          ) : tracks && tracks.length > 0 ? (
+            <EpisodeTracklist directTracks={tracks as any} variant="sheet" />
+          ) : tracks ? (
+            <p className="text-[10px] text-muted/50 py-1">No tracks</p>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
