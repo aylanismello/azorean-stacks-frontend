@@ -184,7 +184,8 @@ async function computeCuratorAffinities(userId: string | null = null): Promise<C
     let tier: "high" | "medium" | null = null;
     if (approvalRate > 0.5 && total >= 5) {
       tier = "high";
-    } else if (approvalRate > 0.4 && total >= 3) {
+    } else if (approvalRate > 0.4 && total >= 5) {
+      // Raised minimum from 3 to 5 — 3 samples is too noisy for medium tier
       tier = "medium";
     }
 

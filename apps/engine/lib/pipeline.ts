@@ -126,16 +126,20 @@ type SpotifyTrackItem = {
   album: { name: string; images: Array<{ url: string }> };
 };
 
-async function spotifySearch(query: string, token: string, artist: string, title: string): Promise<SpotifyTrackItem[]> {
+async function spotifySearch(query: string, token: string, artist: string, title: string, retries = 0): Promise<SpotifyTrackItem[]> {
   const q = encodeURIComponent(query);
   const res = await fetch(`${SPOTIFY_API}/search?q=${q}&type=track&limit=5`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (res.status === 429) {
+    if (retries >= 3) {
+      log("fail", `Spotify rate-limited 3 times — giving up for "${query}"`);
+      return [];
+    }
     const waitSec = parseInt(res.headers.get("Retry-After") || "5", 10);
-    log("wait", `Spotify rate-limited — waiting ${waitSec}s`);
+    log("wait", `Spotify rate-limited — waiting ${waitSec}s (retry ${retries + 1}/3)`);
     await sleep(waitSec * 1000);
-    return spotifySearch(query, token, artist, title);
+    return spotifySearch(query, token, artist, title, retries + 1);
   }
   if (!res.ok) return [];
   const data = await res.json() as { tracks: { items: SpotifyTrackItem[] } };
@@ -273,7 +277,7 @@ export async function youtubeLookup(artist: string, title: string): Promise<YouT
 
 // ─── SPOTIFY ARTIST GENRES ──────────────────────────────────
 
-export async function spotifyArtistGenres(artistIds: string[]): Promise<string[]> {
+export async function spotifyArtistGenres(artistIds: string[], retries = 0): Promise<string[]> {
   if (!artistIds.length) return [];
   try {
     const token = await getSpotifyToken();
@@ -282,9 +286,13 @@ export async function spotifyArtistGenres(artistIds: string[]): Promise<string[]
       headers: { Authorization: `Bearer ${token}` },
     });
     if (res.status === 429) {
+      if (retries >= 3) {
+        log("fail", "Spotify artist genres rate-limited 3 times — giving up");
+        return [];
+      }
       const waitSec = parseInt(res.headers.get("Retry-After") || "5", 10);
       await sleep(waitSec * 1000);
-      return spotifyArtistGenres(artistIds);
+      return spotifyArtistGenres(artistIds, retries + 1);
     }
     if (!res.ok) return [];
     const data = await res.json() as { artists: Array<{ genres: string[] }> };

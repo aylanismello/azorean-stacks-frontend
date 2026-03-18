@@ -324,7 +324,7 @@ async function crawlNTS(
         (t) =>
           t.artist.toLowerCase().trim() === seedArtist.toLowerCase().trim()
       );
-    const matchType = hasFullMatch ? "full" : hasArtistMatch ? "artist" : "artist";
+    const matchType = hasFullMatch ? "full" : hasArtistMatch ? "artist" : "unknown";
 
     await db
       .from("episode_seeds")

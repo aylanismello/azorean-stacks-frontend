@@ -289,7 +289,7 @@ async function discoverFromSource(
         const hasArtistMatch = !hasFullMatch && epTrackList.some(
           (t) => t.artist?.toLowerCase().trim() === seedArtistLower
         );
-        const verifiedMatchType = hasFullMatch ? "full" : hasArtistMatch ? "artist" : "artist";
+        const verifiedMatchType = hasFullMatch ? "full" : hasArtistMatch ? "artist" : "unknown";
         await db.from("episode_seeds").upsert(
           { episode_id: episodeId, seed_id: seedId, match_type: verifiedMatchType },
           { onConflict: "episode_id,seed_id" }
@@ -361,14 +361,17 @@ async function discoverFromSource(
         continue;
       }
 
-      const key = `${track.artist.toLowerCase().trim()}::${track.title.toLowerCase().trim()}`;
+      // Apply artist/title swap detection — NTS tracklists sometimes have them swapped
+      const { artist: correctedArtist, title: correctedTitle } = maybeSwapArtistTitle(track.artist.trim(), track.title.trim());
+
+      const key = `${correctedArtist.toLowerCase().trim()}::${correctedTitle.toLowerCase().trim()}`;
       const existing = coMap.get(key);
       if (existing) {
         existing.co_occurrence++;
       } else {
         coMap.set(key, {
-          artist: track.artist.trim(),
-          title: track.title.trim(),
+          artist: correctedArtist,
+          title: correctedTitle,
           source: sourceName,
           source_url: episodeUrl,
           source_context: context,
@@ -455,21 +458,41 @@ async function runDiscover(): Promise<number> {
     log("info", `Top candidates: ${top3.join(", ")}`);
   }
 
-  // Dedup against DB
+  // Dedup against DB — batch query to avoid N+1
   const seen = new Set<string>();
-  const toInsert: Candidate[] = [];
-  let dupCount = 0;
+  const uniqueCandidates: Candidate[] = [];
 
   for (const c of candidates) {
-    if (toInsert.length >= candidateLimit) break;
+    if (uniqueCandidates.length >= candidateLimit) break;
     const key = `${c.artist.toLowerCase()}::${c.title.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    uniqueCandidates.push(c);
+  }
 
-    const { data: existing } = await db.from("tracks")
-      .select("id").ilike("artist", c.artist).ilike("title", c.title).limit(1);
-    if (existing && existing.length > 0) { dupCount++; continue; }
+  // Batch dedup: fetch existing tracks matching any candidate artist (case-insensitive)
+  const candidateArtists = [...new Set(uniqueCandidates.map(c => c.artist.toLowerCase().trim()))];
+  const existingTrackKeys = new Set<string>();
 
+  // Query in batches of 50 artists to stay under query limits
+  for (let i = 0; i < candidateArtists.length; i += 50) {
+    const batch = candidateArtists.slice(i, i + 50);
+    for (const artistName of batch) {
+      const { data: existing } = await db.from("tracks")
+        .select("artist, title")
+        .ilike("artist", artistName);
+      for (const t of existing || []) {
+        existingTrackKeys.add(`${(t.artist || "").toLowerCase().trim()}::${(t.title || "").toLowerCase().trim()}`);
+      }
+    }
+  }
+
+  const toInsert: Candidate[] = [];
+  let dupCount = 0;
+
+  for (const c of uniqueCandidates) {
+    const key = `${c.artist.toLowerCase().trim()}::${c.title.toLowerCase().trim()}`;
+    if (existingTrackKeys.has(key)) { dupCount++; continue; }
     toInsert.push(c);
   }
 
@@ -636,16 +659,20 @@ type SpotifyTrackItem = {
   album: { name: string; images: Array<{ url: string }> };
 };
 
-async function spotifySearch(query: string, token: string, artist: string, title: string): Promise<SpotifyTrackItem[]> {
+async function spotifySearch(query: string, token: string, artist: string, title: string, retries = 0): Promise<SpotifyTrackItem[]> {
   const q = encodeURIComponent(query);
   const res = await fetch(`${SPOTIFY_API}/search?q=${q}&type=track&limit=5`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (res.status === 429) {
+    if (retries >= 3) {
+      log("fail", `Spotify rate-limited 3 times — giving up for "${query}"`);
+      return [];
+    }
     const waitSec = parseInt(res.headers.get("Retry-After") || "5", 10);
-    log("wait", `Spotify rate-limited — waiting ${waitSec}s (${artist} – ${title})`);
+    log("wait", `Spotify rate-limited — waiting ${waitSec}s (${artist} – ${title}, retry ${retries + 1}/3)`);
     await sleep(waitSec * 1000);
-    return spotifySearch(query, token, artist, title);
+    return spotifySearch(query, token, artist, title, retries + 1);
   }
   if (!res.ok) {
     log("fail", `Spotify search HTTP ${res.status} for "${query}"`);
@@ -817,7 +844,7 @@ async function youtubeLookup(artist: string, title: string): Promise<YouTubeResu
   }
 }
 
-async function spotifyArtistGenres(artistIds: string[]): Promise<string[]> {
+async function spotifyArtistGenres(artistIds: string[], retries = 0): Promise<string[]> {
   if (!artistIds.length) return [];
   try {
     const token = await getSpotifyToken();
@@ -827,10 +854,14 @@ async function spotifyArtistGenres(artistIds: string[]): Promise<string[]> {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (res.status === 429) {
+      if (retries >= 3) {
+        log("fail", "Spotify artist genres rate-limited 3 times — giving up");
+        return [];
+      }
       const waitSec = parseInt(res.headers.get("Retry-After") || "5", 10);
-      log("wait", `Spotify artist rate-limited — waiting ${waitSec}s`);
+      log("wait", `Spotify artist rate-limited — waiting ${waitSec}s (retry ${retries + 1}/3)`);
       await sleep(waitSec * 1000);
-      return spotifyArtistGenres(artistIds);
+      return spotifyArtistGenres(artistIds, retries + 1);
     }
     if (!res.ok) {
       log("fail", `Spotify artists HTTP ${res.status}`);
