@@ -183,12 +183,28 @@ async function runOnce(): Promise<{ downloaded: number; failed: number; empty: b
   return { downloaded, failed, empty: false };
 }
 
+async function cleanupStaleTemps() {
+  if (!existsSync(TMP_DIR)) return;
+  try {
+    const files = readdirSync(TMP_DIR);
+    if (files.length > 0) {
+      let cleaned = 0;
+      for (const f of files) {
+        try { unlinkSync(`${TMP_DIR}/${f}`); cleaned++; } catch {}
+      }
+      if (cleaned > 0) console.log(`  Cleaned ${cleaned} stale temp file(s)`);
+    }
+  } catch {}
+}
+
 async function main() {
   const start = Date.now();
   const mode = deadline ? `looping for ${durationMinutes}m` : "single run";
   console.log(`\n  The Stacks — Downloader${force ? " (force retry)" : ""}`);
   console.log(`  ${new Date().toISOString()}`);
   console.log(`  Mode: ${mode}\n`);
+
+  await cleanupStaleTemps();
 
   let totalDownloaded = 0;
   let totalFailed = 0;

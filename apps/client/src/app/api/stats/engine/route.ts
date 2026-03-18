@@ -15,16 +15,11 @@ export async function GET() {
       .from("tracks")
       .select("id", { count: "exact", head: true });
 
-    // Failed: status = 'failed' OR spotify_url = ''
-    const { count: failedByStatus } = await db
+    // Failed: status = 'failed' OR spotify_url = '' (union via .or)
+    const { count: failedUnion } = await db
       .from("tracks")
       .select("id", { count: "exact", head: true })
-      .eq("status", "failed");
-
-    const { count: failedBySpotify } = await db
-      .from("tracks")
-      .select("id", { count: "exact", head: true })
-      .eq("spotify_url", "");
+      .or("status.eq.failed,spotify_url.eq.");
 
     // Downloaded: storage_path IS NOT NULL
     const { count: downloaded } = await db
@@ -54,8 +49,7 @@ export async function GET() {
     const downloadedCount = downloaded ?? 0;
     const enrichedCount = enriched ?? 0;
     const pendingCount = pending ?? 0;
-    // Deduplicate failed count (union of two conditions)
-    const failedCount = Math.max(failedByStatus ?? 0, failedBySpotify ?? 0);
+    const failedCount = failedUnion ?? 0;
 
     const pct = (n: number) =>
       totalCount > 0 ? Math.round((n / totalCount) * 1000) / 10 : 0;

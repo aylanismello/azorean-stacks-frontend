@@ -1032,9 +1032,13 @@ async function processPrioritySeed(seedId: string) {
       .is("youtube_url", null);
 
     if (dangling && dangling.length > 0) {
-      await db.from("tracks")
-        .update({ status: "skipped", metadata: { skip_reason: "no_spotify_or_youtube_match" } })
-        .in("id", dangling.map((t) => t.id));
+      // Update each track individually to preserve existing metadata
+      for (const t of dangling) {
+        const { data: existing } = await db.from("tracks").select("metadata").eq("id", t.id).single();
+        await db.from("tracks")
+          .update({ status: "skipped", metadata: { ...(existing?.metadata || {}), skip_reason: "no_spotify_or_youtube_match" } })
+          .eq("id", t.id);
+      }
       await updatePipelineStatus(seedId, {}, `skipped ${dangling.length} tracks with no match`);
       log("info", `Priority: skipped ${dangling.length} dangling tracks for ${seedLabel}`);
     }
