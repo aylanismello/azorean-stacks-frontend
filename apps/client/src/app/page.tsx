@@ -919,6 +919,7 @@ function StackPageContent() {
               episodeTitle={currentEpisodeTitle}
               listTitle={currentEpisodeTitle}
               refreshKey={voteCount}
+              seedId={fromSeedId}
               onTrackSelect={handleTrackSelect}
             />
           ) : (
@@ -951,6 +952,7 @@ function StackPageContent() {
         listTitle={currentEpisodeId ? currentEpisodeTitle : (seedName || genreFilter || "For You")}
         directTracks={currentEpisodeId ? undefined : (sessionTracksWithSeedFlag as any)}
         refreshKey={voteCount}
+        seedId={fromSeedId}
         open={tracklistOpen}
         onClose={() => setTracklistOpen(false)}
         onTrackSelect={handleTrackSelect}
