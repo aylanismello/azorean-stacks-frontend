@@ -173,7 +173,7 @@ export async function GET(req: NextRequest) {
     }
 
     // For each seed, count approved/rejected tracks from its episodes (via user_tracks)
-    const allEpIds = [...new Set((epSeedLinks || []).map((l: any) => l.episode_id))];
+    const allEpIds = Array.from(new Set((epSeedLinks || []).map((l: any) => l.episode_id)));
     if (allEpIds.length > 0) {
       // Get all tracks from these episodes with user's vote status
       const { data: epTracks } = await db
