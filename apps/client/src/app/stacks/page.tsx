@@ -222,24 +222,13 @@ function StackTile({
       onClick={onClick}
       className="group relative aspect-square rounded-2xl overflow-hidden transition-all duration-200 hover:scale-[1.03] hover:shadow-xl active:scale-[0.98]"
     >
-      {seed.cover_art_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={seed.cover_art_url}
-          alt=""
-          className="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-        />
-      ) : (
-        <div
-          className="absolute inset-0"
-          style={{
-            background: `radial-gradient(circle at 30% 30%,
-              hsl(${hue}, 40%, 20%) 0%,
-              hsl(${hue}, 35%, 12%) 40%,
-              hsl(${hue}, 30%, 6%) 100%)`,
-          }}
-        />
-      )}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={seed.cover_art_url || `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(seed.artist)}`}
+        alt=""
+        className="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+        style={seed.cover_art_url ? undefined : { filter: "brightness(0.4) saturate(1.2)" }}
+      />
 
       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
 
@@ -269,15 +258,18 @@ function StackTile({
         <p className="text-[10px] text-white/50 truncate mt-0.5 drop-shadow">
           {decodeEntities(seed.title)}
         </p>
-        <div className="flex items-center gap-2 mt-1">
+        {/* Stats overlay */}
+        {seed.total > 0 && (
+          <p className="text-[9px] text-white/40 font-mono mt-1">
+            {seed.total_approved > 0 && `${Math.round((seed.total_approved / seed.total) * 100)}% liked`}
+            {seed.total_approved > 0 && seed.total_pending > 0 && " · "}
+            {seed.total_pending > 0 && `${seed.total_pending} pending`}
+          </p>
+        )}
+        <div className="flex items-center gap-2 mt-0.5">
           <span className="text-[9px] text-white/30 font-mono">
-            {seed.episodes.length} ep{seed.episodes.length !== 1 ? "s" : ""}
+            {seed.episodes.length} ep{seed.episodes.length !== 1 ? "s" : ""} · {seed.total} tracks
           </span>
-          {seed.total_approved > 0 && (
-            <span className="text-[9px] text-green-400/40 font-mono">
-              {seed.total_approved} kept
-            </span>
-          )}
           <span
             role="button"
             tabIndex={0}

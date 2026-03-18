@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useGlobalPlayer } from "./GlobalPlayerProvider";
 import { openYouTube } from "@/lib/youtube";
+import { openSpotify } from "@/lib/spotify-link";
 
 function fmt(s: number): string {
   const m = Math.floor(s / 60);
@@ -26,6 +27,20 @@ export function GlobalPlayer() {
   const router = useRouter();
   const progressRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
+
+  // Global spacebar play/pause — works everywhere in the app
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== " ") return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (!currentTrack) return;
+      e.preventDefault();
+      togglePlayPause();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [currentTrack, togglePlayPause]);
 
   const pct = duration > 0 ? (progress / duration) * 100 : 0;
 
@@ -72,7 +87,7 @@ export function GlobalPlayer() {
   return (
     <div className="global-player fixed left-0 right-0 bottom-0 z-40">
       {/* Player bar */}
-      <div className="global-player-shell border-t border-surface-2 px-3 py-2">
+      <div className="global-player-shell border-t border-surface-3 px-3 py-2">
         {/* Progress bar */}
         <div
           ref={progressRef}
@@ -100,26 +115,9 @@ export function GlobalPlayer() {
         <button
           onClick={() => {
             // Navigate back to the origin URL where the user started playing.
-            // If the playbackOrigin contains an episode_id that doesn't match the
-            // current track's episode, it's stale — build a fresh URL instead.
+            // Always trust the stored playbackOrigin — it was set when play() was called.
             if (playbackOrigin) {
-              try {
-                const originUrl = new URL(playbackOrigin, window.location.origin);
-                const originEpId = originUrl.searchParams.get("episode_id");
-                // If origin has an episode_id and it matches the current track's episode, use it
-                // If origin has no episode_id (e.g. /stacks, For You), use it as-is
-                // If origin episode_id doesn't match current track, build fresh URL
-                if (originEpId && currentTrack.episodeId && originEpId !== currentTrack.episodeId) {
-                  const params = new URLSearchParams();
-                  params.set("episode_id", currentTrack.episodeId);
-                  if (currentTrack.episodeTitle) params.set("episode_title", currentTrack.episodeTitle);
-                  router.push(`/?${params.toString()}`);
-                } else {
-                  router.push(playbackOrigin);
-                }
-              } catch {
-                router.push(playbackOrigin);
-              }
+              router.push(playbackOrigin);
             } else if (currentTrack.episodeId) {
               const params = new URLSearchParams();
               params.set("episode_id", currentTrack.episodeId);
@@ -150,17 +148,15 @@ export function GlobalPlayer() {
 
         {/* External links: Spotify + YouTube — clickable */}
         {currentTrack.spotifyUrl && (
-          <a
-            href={currentTrack.spotifyUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={() => openSpotify(currentTrack.spotifyUrl!)}
             className="flex-shrink-0 hover:scale-110 transition-transform active:scale-95"
             title="Open in Spotify"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="#1DB954">
               <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
             </svg>
-          </a>
+          </button>
         )}
         {currentTrack.youtubeUrl && (
           <button
