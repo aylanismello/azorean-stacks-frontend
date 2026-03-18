@@ -71,7 +71,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   }, [track.artist, track.title]);
 
   const handlePlantSeed = useCallback(async () => {
-    if (seeding) return;
+    if (seeding || seeded) return; // one-time, irreversible from this screen
     setSeeding(true);
     try {
       const res = await fetch("/api/seeds/toggle", {
@@ -81,13 +81,13 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
       });
       if (!res.ok) return;
       const data = await res.json();
-      setSeeded(data.action === "created");
+      if (data.action === "created") setSeeded(true);
     } catch {
       // silently fail
     } finally {
       setSeeding(false);
     }
-  }, [track.id, track.artist, track.title, seeding]);
+  }, [track.id, track.artist, track.title, seeding, seeded]);
 
   // Report engagement metrics to backend before a vote action.
   // Fire-and-forget — don't block the vote on this.
@@ -485,20 +485,20 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
         </svg>
       </button>
 
-      {/* Re-seed */}
+      {/* Re-seed — one-time operation, irreversible from this screen */}
       <button
-        onClick={handlePlantSeed}
-        disabled={seeding}
-        className={`flex items-center justify-center w-10 h-10 rounded-full border transition-all active:scale-90 ${
+        onClick={seeded ? undefined : handlePlantSeed}
+        disabled={seeding || seeded}
+        className={`flex items-center justify-center w-10 h-10 rounded-full border transition-all duration-500 ${
           seeded
-            ? "bg-emerald-500/30 border-emerald-400/50 text-emerald-400"
+            ? "bg-emerald-500/20 border-emerald-400/40 text-emerald-400 scale-110 cursor-default opacity-90"
             : seeding
             ? "bg-surface-2 border-emerald-400/30 text-emerald-400/50 animate-pulse"
-            : "bg-surface-2 md:bg-black/40 border-foreground/10 text-foreground/40 hover:border-emerald-400/40 hover:text-emerald-400/70"
+            : "bg-surface-2 md:bg-black/40 border-foreground/10 text-foreground/40 hover:border-emerald-400/40 hover:text-emerald-400/70 active:scale-90"
         }`}
-        title={seeded ? "Remove re-seed" : "Plant as re-seed for future discovery"}
+        title={seeded ? "Re-seeded ✓" : "Plant as re-seed"}
       >
-        <span className={`text-sm ${seeded ? "seed-sprout" : ""}`}>{seeded ? "🌿" : "🌱"}</span>
+        <span className={`text-sm transition-all duration-500 ${seeded ? "scale-125" : ""}`}>{seeded ? "🌿" : "🌱"}</span>
       </button>
 
       {/* Super Like — gold star; after super-liking becomes [->] advance button */}
@@ -578,14 +578,14 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/30 z-[1]" />
 
         {/* Seed indicator badge */}
-        {track.is_seed && (
-          <div className="absolute top-3 left-3 z-20 text-base leading-none" title="Seed track">
+        {(track.is_seed || (track as any).is_artist_seed) && (
+          <div className="absolute top-3 left-3 z-20 text-base leading-none" title="Seed">
             🌱
           </div>
         )}
-        {track.is_re_seed && !track.is_seed && (
-          <div className="absolute top-3 left-3 z-20 text-base leading-none" title="Re-seeded track">
-            🌱<span className="text-xs">++</span>
+        {track.is_re_seed && !track.is_seed && !(track as any).is_artist_seed && (
+          <div className="absolute top-3 left-3 z-20 text-base leading-none" title="Re-seed">
+            🌿
           </div>
         )}
 
@@ -794,20 +794,20 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
               </svg>
             </button>
 
-            {/* Re-seed */}
+            {/* Re-seed — one-time, irreversible from this screen */}
             <button
-              onClick={handlePlantSeed}
-              disabled={seeding}
-              className={`flex items-center justify-center w-9 h-9 rounded-full border backdrop-blur-md transition-all active:scale-90 ${
+              onClick={seeded ? undefined : handlePlantSeed}
+              disabled={seeding || seeded}
+              className={`flex items-center justify-center w-9 h-9 rounded-full border backdrop-blur-md transition-all duration-500 ${
                 seeded
-                  ? "bg-emerald-500/30 border-emerald-400/50 text-emerald-400"
+                  ? "bg-emerald-500/20 border-emerald-400/40 text-emerald-400 scale-110 cursor-default opacity-90"
                   : seeding
                   ? "bg-black/40 border-emerald-400/30 text-emerald-400/50 animate-pulse"
-                  : "bg-black/40 border-white/20 text-white/50"
+                  : "bg-black/40 border-white/20 text-white/50 active:scale-90"
               }`}
-              title={seeded ? "Remove re-seed" : "Plant as re-seed"}
+              title={seeded ? "Re-seeded ✓" : "Plant as re-seed"}
             >
-              <span className={`text-xs ${seeded ? "seed-sprout" : ""}`}>{seeded ? "🌿" : "🌱"}</span>
+              <span className={`text-xs transition-all duration-500 ${seeded ? "scale-125" : ""}`}>{seeded ? "🌿" : "🌱"}</span>
             </button>
 
             {/* Super Like — gold star; after super-liking becomes [->] advance button */}
@@ -933,14 +933,14 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
           <span className="px-2.5 py-1 bg-surface-2 rounded-lg text-xs text-muted">
             {sourceLabel(track.source)}
           </span>
-          {track.is_seed && (
-            <span className="px-2 py-1 bg-green-500/15 rounded-lg text-xs text-green-400 font-medium" title="Seed track">
+          {(track.is_seed || (track as any).is_artist_seed) && (
+            <span className="px-2 py-1 bg-green-500/15 rounded-lg text-xs text-green-400 font-medium" title="Seed">
               🌱 seed
             </span>
           )}
-          {track.is_re_seed && !track.is_seed && (
-            <span className="px-2 py-1 bg-emerald-500/15 rounded-lg text-xs text-emerald-400 font-medium" title="Re-seeded track">
-              🌱 re-seed
+          {track.is_re_seed && !track.is_seed && !(track as any).is_artist_seed && (
+            <span className="px-2 py-1 bg-emerald-500/15 rounded-lg text-xs text-emerald-400 font-medium" title="Re-seed">
+              🌿 re-seed
             </span>
           )}
           {isRadarTrack && (
