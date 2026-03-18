@@ -82,6 +82,8 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
   const [noSource, setNoSource] = useState(false);
   const [playbackOrigin, setPlaybackOrigin] = useState<string | null>(null);
   const [trackStartedAt, setTrackStartedAt] = useState<number | null>(null);
+  // Tracks whether we've already fired the 'listened' mark for the current track session
+  const listenedFiredRef = useRef(false);
 
   // Create a persistent audio element
   useEffect(() => {
@@ -149,6 +151,27 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
 
     return () => clearInterval(interval);
   }, [source, playing]);
+
+  // Reset the listened guard whenever the track changes
+  useEffect(() => {
+    listenedFiredRef.current = false;
+  }, [currentTrack?.id]);
+
+  // Auto-mark as 'listened' when user reaches 80% of a track without taking action.
+  // Fire-and-forget — backend guards against overwriting explicit votes.
+  useEffect(() => {
+    if (listenedFiredRef.current) return;
+    if (!currentTrack?.id) return;
+    if (duration <= 0 || progress <= 0) return;
+    if (progress / duration < 0.8) return;
+
+    listenedFiredRef.current = true;
+    fetch(`/api/tracks/${currentTrack.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "listened" }),
+    }).catch(() => {});
+  }, [progress, duration, currentTrack?.id]);
 
   const stopAudio = useCallback(() => {
     const audio = audioRef.current;

@@ -970,6 +970,11 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
               {meta.bpm} BPM
             </span>
           )}
+          {track.user_track?.status === "listened" && (
+            <span className="px-2 py-1 bg-foreground/8 rounded-lg text-xs text-foreground/35" title="Heard past 80%">
+              👂 heard
+            </span>
+          )}
           {playingIndicator}
           {noSourceIndicator}
         </div>

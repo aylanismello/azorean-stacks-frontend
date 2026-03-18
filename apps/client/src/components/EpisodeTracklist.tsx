@@ -188,10 +188,17 @@ export function EpisodeTracklist(props: TracklistProps) {
     if (s === "approved") return "text-foreground/80";
     if (s === "rejected") return "text-foreground/30 line-through";
     if (s === "skipped") return "text-foreground/40";
+    if (s === "listened") return "text-foreground/40";
     return "text-foreground/60";
   };
 
   const downloadDot = (t: TrackListItem) => {
+    if (t.status === "listened")
+      return (
+        <span className="relative flex-shrink-0 w-1.5 h-1.5" title="Heard">
+          <span className="w-1.5 h-1.5 rounded-full bg-foreground/25 block" />
+        </span>
+      );
     if (t.storage_path)
       return <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" title="Downloaded" />;
     if (t.dl_failed_at)

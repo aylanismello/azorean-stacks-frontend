@@ -102,7 +102,7 @@ export interface UserTrack {
   id: string;
   user_id: string;
   track_id: string;
-  status: "pending" | "approved" | "rejected" | "skipped";
+  status: "pending" | "approved" | "rejected" | "skipped" | "listened";
   rating: number | null;
   notes: string | null;
   voted_at: string | null;
