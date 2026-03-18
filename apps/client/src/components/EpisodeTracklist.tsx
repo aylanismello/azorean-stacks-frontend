@@ -265,75 +265,85 @@ export function EpisodeTracklist(props: TracklistProps) {
                     handlePlay(t);
                   }}
                   disabled={false}
-                  className={`w-full text-left px-3 py-2 rounded-lg flex items-center gap-2.5 transition-colors group ${
+                  className={`w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2.5 transition-colors group border ${
                     isPlaying
-                      ? "bg-accent/10 border border-accent/20"
-                      : "hover:bg-surface-2 border border-transparent"
-                  } ${!hasAudio ? "opacity-60" : ""}`}
+                      ? "bg-accent/10 border-accent/20"
+                      : t.storage_path
+                        ? "hover:bg-surface-2 border-surface-3/60"
+                        : "hover:bg-surface-2/50 border-transparent"
+                  }`}
                 >
-                  {/* Left: seed/super_liked indicator + right: download status dot */}
-                  <span className="flex items-center gap-1 flex-shrink-0">
-                    {t.is_seed ? (
-                      <span className="text-[10px] leading-none" title="Seed track">🌱</span>
-                    ) : t.is_artist_seed ? (
-                      <span className="text-[10px] leading-none" title="Artist match">🌿</span>
-                    ) : t.is_re_seed ? (
-                      <span className="text-[10px] leading-none" title="Re-seeded">🌱<span className="text-[8px]">++</span></span>
-                    ) : t.super_liked ? (
-                      <span className="text-[10px] leading-none text-amber-400" title="Super liked">⭐</span>
-                    ) : null}
-                    {downloadDot(t)}
-                  </span>
-
-                  {/* Cover art + now playing indicator */}
-                  {isPlaying && globalPlayer.currentTrack?.coverArtUrl ? (
-                    <span className="relative w-8 h-8 flex-shrink-0 rounded overflow-hidden">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={globalPlayer.currentTrack.coverArtUrl}
-                        alt=""
-                        className="w-full h-full object-cover"
-                      />
-                      <span className="absolute inset-0 flex items-center justify-center bg-black/30">
-                        <span className="flex gap-0.5 items-end h-3">
-                          <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "40%", animationDelay: "0ms" }} />
-                          <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "70%", animationDelay: "150ms" }} />
-                          <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "50%", animationDelay: "300ms" }} />
+                  {/* Cover art thumbnail — 36x36 */}
+                  <span className={`relative w-9 h-9 flex-shrink-0 rounded-md overflow-hidden ${!t.storage_path ? "opacity-30" : ""}`}>
+                    {isPlaying && (globalPlayer.currentTrack?.coverArtUrl || t.cover_art_url) ? (
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={globalPlayer.currentTrack?.coverArtUrl || t.cover_art_url!}
+                          alt=""
+                          className="w-full h-full object-cover"
+                        />
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/40">
+                          <span className="flex gap-0.5 items-end h-3">
+                            <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "40%", animationDelay: "0ms" }} />
+                            <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "70%", animationDelay: "150ms" }} />
+                            <span className={`w-0.5 bg-white rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "50%", animationDelay: "300ms" }} />
+                          </span>
                         </span>
+                      </>
+                    ) : t.cover_art_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={t.cover_art_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="w-full h-full flex items-center justify-center bg-gradient-to-br from-surface-3 to-surface-4">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-foreground/30">
+                          <path d="M9 18V5l12-2v13" />
+                          <circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                        </svg>
                       </span>
-                    </span>
-                  ) : isPlaying ? (
-                    <span className="flex gap-0.5 items-end h-3 w-3 flex-shrink-0">
-                      <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "40%", animationDelay: "0ms" }} />
-                      <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "70%", animationDelay: "150ms" }} />
-                      <span className={`w-0.5 bg-accent rounded-full ${globalPlayer.playing ? "animate-bounce" : ""}`} style={{ height: "50%", animationDelay: "300ms" }} />
-                    </span>
-                  ) : (
-                    <span className="w-3 flex-shrink-0" />
-                  )}
+                    )}
+                  </span>
 
                   {/* Track info */}
                   <div className="min-w-0 flex-1">
-                    <p className={`text-xs truncate ${
-                      isPlaying
-                        ? "text-accent font-medium"
-                        : t.is_seed || t.is_re_seed
-                          ? "text-green-400/90 font-medium"
-                          : t.is_artist_seed
-                            ? "text-teal-400/80 font-medium"
-                            : t.super_liked
-                              ? "text-amber-300/90 font-medium"
-                              : statusText(t.status)
-                    }`}>
-                      {t.title}
-                    </p>
+                    <div className="flex items-center gap-1 mb-0.5">
+                      {t.is_seed ? (
+                        <span className="text-[9px] leading-none flex-shrink-0" title="Seed track">🌱</span>
+                      ) : t.is_re_seed ? (
+                        <span className="text-[9px] leading-none flex-shrink-0" title="Re-seeded">🌱<span className="text-[7px]">++</span></span>
+                      ) : t.is_artist_seed ? (
+                        <span className="text-[9px] leading-none flex-shrink-0" title="Artist match">🌿</span>
+                      ) : t.super_liked ? (
+                        <span className="text-[9px] leading-none text-amber-400 flex-shrink-0" title="Super liked">⭐</span>
+                      ) : null}
+                      <p className={`text-xs truncate ${
+                        !t.storage_path
+                          ? "line-through text-foreground/30"
+                          : isPlaying
+                            ? "text-accent font-medium"
+                            : t.is_seed || t.is_re_seed
+                              ? "text-green-400/90 font-medium"
+                              : t.is_artist_seed
+                                ? "text-teal-400/80 font-medium"
+                                : t.super_liked
+                                  ? "text-amber-300/90 font-medium"
+                                  : "text-foreground/85"
+                      }`}>
+                        {t.title}
+                      </p>
+                    </div>
                     <div className="flex items-center gap-1.5">
-                      <p className="text-[10px] text-muted truncate">{t.artist}</p>
-                      {t._match_type === "full" && (
+                      <p className={`text-[10px] truncate ${!t.storage_path ? "line-through text-muted/30" : "text-muted"}`}>{t.artist}</p>
+                      {t._match_type === "full" && t.storage_path && (
                         <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-green-400/70" title="Exact seed match" />
                       )}
                     </div>
                   </div>
+
+                  {/* Right: download status dot */}
+                  <span className="flex-shrink-0">
+                    {downloadDot(t)}
+                  </span>
                 </button>
               );
             })}

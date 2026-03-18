@@ -3,10 +3,29 @@
 import { useState, useEffect } from "react";
 import { Stats, PipelineStats, EngineStats } from "@/lib/types";
 
+interface TasteDay {
+  day: string;
+  approved: number;
+  rejected: number;
+  total: number;
+  rate: number | null;
+}
+
+interface TasteMetrics {
+  daily: TasteDay[];
+  summary: {
+    total_votes: number;
+    total_approved: number;
+    last_7d_rate: number | null;
+    last_7d_votes: number;
+  };
+}
+
 export default function StatsPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [pipeline, setPipeline] = useState<PipelineStats | null>(null);
   const [engine, setEngine] = useState<EngineStats | null>(null);
+  const [taste, setTaste] = useState<TasteMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -26,11 +45,16 @@ export default function StatsPage() {
         if (!res.ok) throw new Error(`Failed to load engine stats (${res.status})`);
         return res.json();
       }),
+      fetch("/api/stats/taste").then((res) => {
+        if (!res.ok) return null;
+        return res.json();
+      }).catch(() => null),
     ])
-      .then(([statsData, pipelineData, engineData]) => {
+      .then(([statsData, pipelineData, engineData, tasteData]) => {
         setStats(statsData);
         setPipeline(pipelineData);
         setEngine(engineData);
+        if (tasteData) setTaste(tasteData);
         setLastUpdated(new Date());
         setSecondsAgo(0);
         setError(null);
@@ -130,6 +154,77 @@ export default function StatsPage() {
           value={`${Math.round(stats.approval_rate * 100)}%`}
         />
       </div>
+
+      {/* Taste Metrics */}
+      {taste && (
+        <div className="mb-10">
+          <h2 className="text-sm font-medium text-muted mb-4 uppercase tracking-wider">
+            Taste Trend
+          </h2>
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="bg-surface-1 rounded-xl p-4">
+              <p className="text-xs text-muted mb-1">7-day Approval</p>
+              <p className={`text-2xl font-semibold font-mono ${
+                taste.summary.last_7d_rate === null ? "text-muted" :
+                taste.summary.last_7d_rate >= 50 ? "text-green-400" : "text-red-400"
+              }`}>
+                {taste.summary.last_7d_rate !== null ? `${taste.summary.last_7d_rate}%` : "—"}
+              </p>
+              <p className="text-[10px] text-muted mt-1">{taste.summary.last_7d_votes} votes</p>
+            </div>
+            <div className="bg-surface-1 rounded-xl p-4">
+              <p className="text-xs text-muted mb-1">All-time Approved</p>
+              <p className="text-2xl font-semibold font-mono text-accent">
+                {taste.summary.total_approved.toLocaleString()}
+              </p>
+              <p className="text-[10px] text-muted mt-1">of {taste.summary.total_votes.toLocaleString()} voted</p>
+            </div>
+            <div className="bg-surface-1 rounded-xl p-4">
+              <p className="text-xs text-muted mb-1">All-time Rate</p>
+              <p className={`text-2xl font-semibold font-mono ${
+                taste.summary.total_votes === 0 ? "text-muted" :
+                (taste.summary.total_approved / taste.summary.total_votes) >= 0.5 ? "text-green-400" : "text-red-400"
+              }`}>
+                {taste.summary.total_votes > 0
+                  ? `${Math.round((taste.summary.total_approved / taste.summary.total_votes) * 100)}%`
+                  : "—"}
+              </p>
+            </div>
+          </div>
+
+          {taste.daily.length > 0 && (
+            <div className="bg-surface-1 rounded-xl p-4">
+              <p className="text-xs text-muted uppercase tracking-wider mb-3">Daily Approval Rate (last 30 days)</p>
+              <div className="flex items-end gap-1 h-20">
+                {taste.daily.map((d) => {
+                  const rate = d.rate ?? 0;
+                  const heightPct = Math.max(rate, 4);
+                  const color = rate >= 70 ? "bg-green-400" : rate >= 40 ? "bg-amber-400" : "bg-red-400";
+                  const shortDay = d.day.slice(5); // "MM-DD"
+                  return (
+                    <div key={d.day} className="flex-1 flex flex-col items-center gap-1 group relative">
+                      <div className="w-full flex items-end h-16">
+                        <div
+                          className={`w-full rounded-sm ${color} opacity-70 group-hover:opacity-100 transition-opacity`}
+                          style={{ height: `${heightPct}%` }}
+                          title={`${shortDay}: ${rate}% (${d.approved}/${d.total})`}
+                        />
+                      </div>
+                      {taste.daily.length <= 14 && (
+                        <span className="text-[8px] text-muted/50 font-mono leading-none">{shortDay}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex justify-between mt-2">
+                <span className="text-[10px] text-muted/50">{taste.daily[0]?.day}</span>
+                <span className="text-[10px] text-muted/50">{taste.daily[taste.daily.length - 1]?.day}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Engine Status */}
       {engine && (

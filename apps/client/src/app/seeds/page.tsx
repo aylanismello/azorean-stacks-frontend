@@ -523,7 +523,15 @@ function SeedCard({
       {/* Expanded: related episodes */}
       {expanded && episodes.length > 0 && (
         <div className="border-t border-surface-3 px-4 py-3 space-y-0">
-          <p className="text-[10px] text-muted uppercase tracking-wider mb-2">Related Episodes</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] text-muted uppercase tracking-wider">Related Episodes</p>
+            <a
+              href={`/?source=ranked&seed_id=${seed.id}`}
+              className="text-[10px] px-2.5 py-1 rounded-full bg-accent/15 text-accent hover:bg-accent/25 transition-colors font-medium"
+            >
+              Play Stack →
+            </a>
+          </div>
           {[...episodes].sort((a, b) => {
             if (a.match_type === "full" && b.match_type !== "full") return -1;
             if (a.match_type !== "full" && b.match_type === "full") return 1;
@@ -557,12 +565,40 @@ function SeedCard({
         </div>
       )}
 
-      {/* Aggregate stats */}
+      {/* Aggregate stats footer */}
       {seed.stats && (seed.stats.tracks > 0 || seed.stats.episodes > 0) && (
-        <div className="border-t border-surface-3/50 px-4 py-2">
-          <p className="text-[10px] text-muted/50">
-            {seed.stats.episodes} episode{seed.stats.episodes !== 1 ? "s" : ""} · {seed.stats.tracks} track{seed.stats.tracks !== 1 ? "s" : ""} · {seed.stats.enriched} enriched · {seed.stats.downloaded} downloaded
-          </p>
+        <div className="border-t border-surface-3/50 px-4 py-2.5 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-blue-400/80 font-medium">
+            {seed.stats.episodes} ep{seed.stats.episodes !== 1 ? "s" : ""}
+          </span>
+          <span className="text-surface-4">·</span>
+          <span className="text-xs text-foreground/50">
+            {seed.stats.tracks} tracks
+          </span>
+          {seed.stats.downloaded > 0 && (
+            <>
+              <span className="text-surface-4">·</span>
+              <span className="text-xs text-green-400 font-medium">
+                {seed.stats.downloaded} ✅
+              </span>
+            </>
+          )}
+          {seed.stats.enriched > seed.stats.downloaded && (
+            <>
+              <span className="text-surface-4">·</span>
+              <span className="text-xs text-amber-400 font-medium">
+                {seed.stats.enriched - seed.stats.downloaded} ⏳
+              </span>
+            </>
+          )}
+          {seed.stats.tracks > seed.stats.enriched && (
+            <>
+              <span className="text-surface-4">·</span>
+              <span className="text-xs text-muted/50">
+                {seed.stats.tracks - seed.stats.enriched} pending
+              </span>
+            </>
+          )}
         </div>
       )}
     </div>

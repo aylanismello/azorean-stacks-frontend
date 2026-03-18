@@ -90,7 +90,8 @@ export async function GET(req: NextRequest) {
     const { data: etLinks } = await supabase
       .from("episode_tracks")
       .select("episode_id, tracks(status, artist, title, storage_path, spotify_url, youtube_url)")
-      .in("episode_id", allEpisodeIds);
+      .in("episode_id", allEpisodeIds)
+      .limit(10000);
 
     // Flatten junction rows into a tracks-like array
     const epTracks = (etLinks || []).map((row: any) => ({
