@@ -201,7 +201,13 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     setDuration(0);
     setNoSource(false);
     setLoading(true);
-    if (origin !== undefined) setPlaybackOrigin(origin);
+    // Always update playbackOrigin when play() is called — use provided origin or
+    // fall back to the current page URL so the now-playing button always returns
+    // to the correct context.
+    const newOrigin = origin !== undefined
+      ? origin
+      : (typeof window !== "undefined" ? window.location.pathname + window.location.search : "/");
+    setPlaybackOrigin(newOrigin);
 
     // Decide source: prefer downloaded audio over Spotify
     if (track.audioUrl) {

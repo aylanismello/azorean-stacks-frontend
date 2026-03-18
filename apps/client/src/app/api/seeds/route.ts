@@ -157,7 +157,10 @@ export async function GET(req: NextRequest) {
         ? (artistTracksByEpisode[`${ep.id}::${seedArtistLower}`] || [])
         : [],
       track_count: episodeTrackStats[ep.id]?.total ?? 0,
-      enriched_count: episodeTrackStats[ep.id]?.with_audio ?? 0,
+      // enriched_count = tracks with Spotify/YouTube URLs (metadata enriched)
+      enriched_count: episodeTrackStats[ep.id]?.enriched ?? 0,
+      // downloaded_count = tracks with local audio file (storage_path set)
+      downloaded_count: episodeTrackStats[ep.id]?.with_audio ?? 0,
     }));
 
     // Aggregate stats across all episodes for this seed

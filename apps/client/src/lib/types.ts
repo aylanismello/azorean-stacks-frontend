@@ -135,10 +135,10 @@ export interface Seed {
   artist: string;
   title: string;
   active: boolean;
-  source?: "manual" | "re-seed" | null;
+  source?: "manual" | "re-seed" | "auto:approved" | string | null;
   created_at: string;
   discovery_count?: number;
-  episodes?: Array<{ id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[]; track_count?: number; enriched_count?: number }>;
+  episodes?: Array<{ id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[]; track_count?: number; enriched_count?: number; downloaded_count?: number }>;
   curated_count?: number;
   last_run?: { tracks_found: number; tracks_added: number; started_at: string } | null;
   pipeline_status?: PipelineStatus | null;
@@ -224,7 +224,9 @@ export interface EngineStats {
 }
 
 export interface PipelineEngineEvent {
-  type: string;
+  event_type: string;
+  // Legacy alias — some routes may still return this field name
+  type?: string;
   status: string;
   created_at: string;
   metadata: Record<string, unknown>;

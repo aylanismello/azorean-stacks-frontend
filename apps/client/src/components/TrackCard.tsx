@@ -171,6 +171,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
       globalPlayer.togglePlayPause();
       return;
     }
+    const origin = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/";
     globalPlayer.play({
       id: track.id,
       artist: track.artist,
@@ -181,7 +182,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
       episodeId: track.episode_id,
       episodeTitle: track.episode?.title,
       youtubeUrl: track.youtube_url,
-    });
+    }, origin);
   }, [track, isCurrentTrack, globalPlayer]);
 
   const exitClass = exiting === "left"

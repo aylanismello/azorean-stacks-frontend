@@ -17,7 +17,7 @@ export async function GET() {
     const { data: completedEvents } = await db
       .from("engine_events")
       .select("metadata")
-      .eq("type", "super_like_completed");
+      .eq("event_type", "super_like_completed");
 
     const downloadedTrackIds = new Set(
       (completedEvents || [])
@@ -33,7 +33,7 @@ export async function GET() {
     const { data: connectedEvents } = await db
       .from("engine_events")
       .select("created_at")
-      .eq("type", "watcher_connected")
+      .eq("event_type", "watcher_connected")
       .order("created_at", { ascending: false })
       .limit(1);
 
@@ -42,7 +42,7 @@ export async function GET() {
     // Last engine event of any type
     const { data: lastEventRows } = await db
       .from("engine_events")
-      .select("type, status, created_at, metadata")
+      .select("event_type, status, created_at, metadata")
       .order("created_at", { ascending: false })
       .limit(1);
 
@@ -51,7 +51,7 @@ export async function GET() {
     // Last 10 engine events for display
     const { data: recentEvents } = await db
       .from("engine_events")
-      .select("type, status, created_at, metadata")
+      .select("event_type, status, created_at, metadata")
       .order("created_at", { ascending: false })
       .limit(10);
 

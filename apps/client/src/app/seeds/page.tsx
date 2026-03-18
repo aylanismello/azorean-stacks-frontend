@@ -573,7 +573,7 @@ function EnrichmentStatusIcon({ trackCount, enrichedCount }: { trackCount: numbe
   if (trackCount === 0) return null;
   if (enrichedCount === trackCount) {
     return (
-      <span className="text-green-400" title="All tracks have audio">
+      <span className="text-green-400" title="All tracks enriched (Spotify/YouTube)">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="20 6 9 17 4 12" />
         </svg>
@@ -582,13 +582,13 @@ function EnrichmentStatusIcon({ trackCount, enrichedCount }: { trackCount: numbe
   }
   if (enrichedCount > 0) {
     return (
-      <span className="text-amber-400 text-[9px]" title={`${enrichedCount}/${trackCount} tracks have audio`}>
+      <span className="text-amber-400 text-[9px]" title={`${enrichedCount}/${trackCount} tracks enriched (Spotify/YouTube)`}>
         {enrichedCount}/{trackCount}
       </span>
     );
   }
   return (
-    <span className="text-muted/40" title="No tracks have audio yet">
+    <span className="text-muted/40" title="No tracks enriched yet">
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
       </svg>
@@ -597,7 +597,7 @@ function EnrichmentStatusIcon({ trackCount, enrichedCount }: { trackCount: numbe
 }
 
 function SeedEpisodeRow({ episode: ep, seedId, seedArtist, seedTitle, allSeeds, onRemove, onRefresh }: {
-  episode: { id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[]; track_count?: number; enriched_count?: number };
+  episode: { id: string; title: string | null; url: string; source: string; aired_date: string | null; match_type: string; matched_tracks?: { artist: string; title: string }[]; track_count?: number; enriched_count?: number; downloaded_count?: number };
   seedId: string;
   seedArtist?: string;
   seedTitle?: string;
@@ -663,6 +663,7 @@ function SeedEpisodeRow({ episode: ep, seedId, seedArtist, seedTitle, allSeeds, 
 
   const trackCount = ep.track_count ?? 0;
   const enrichedCount = ep.enriched_count ?? 0;
+  const downloadedCount = ep.downloaded_count ?? 0;
 
   return (
     <div className="border-b border-surface-3/50 last:border-b-0">
@@ -756,13 +757,18 @@ function SeedEpisodeRow({ episode: ep, seedId, seedArtist, seedTitle, allSeeds, 
                 {trackCount} track{trackCount !== 1 ? "s" : ""}
               </span>
               {enrichedCount === trackCount ? (
-                <span className="text-[10px] text-green-400" title="All tracks have audio">✓ all enriched</span>
+                <span className="text-[10px] text-green-400" title="All tracks have Spotify/YouTube">✓ all enriched</span>
               ) : enrichedCount > 0 ? (
-                <span className="text-[10px] text-amber-400" title={`${enrichedCount}/${trackCount} tracks have audio`}>
+                <span className="text-[10px] text-amber-400" title={`${enrichedCount}/${trackCount} tracks have Spotify/YouTube`}>
                   {enrichedCount}/{trackCount} enriched
                 </span>
               ) : (
                 <span className="text-[10px] text-muted/50">none enriched</span>
+              )}
+              {downloadedCount > 0 && (
+                <span className="text-[10px] text-blue-400" title={`${downloadedCount}/${trackCount} tracks have local audio`}>
+                  · {downloadedCount} dl
+                </span>
               )}
             </div>
           )}
@@ -868,7 +874,7 @@ function SeedTrackRow({
   };
 
   const showFetch = !local.storage_path && local.youtube_url;
-  const fetchFailed = !!local.dl_failed_at;
+  const fetchFailed = !!local.dl_failed_at || (local.dl_attempts || 0) >= 3;
 
   return (
     <div className="flex items-center gap-2 py-1 text-[13px]">

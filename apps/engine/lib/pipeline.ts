@@ -393,20 +393,38 @@ export async function downloadTrack(track: any): Promise<boolean> {
   );
 
   const exitCode = await withTimeout(dlProc.exited, DL_TIMEOUT, `${track.artist} - ${track.title}`);
-  if (exitCode !== 0) return false;
+  if (exitCode !== 0) {
+    await db.from("tracks").update({
+      dl_attempts: (track.dl_attempts || 0) + 1,
+      dl_failed_at: new Date().toISOString(),
+    }).eq("id", track.id);
+    return false;
+  }
 
   let localPath = expectedPath;
   if (!existsSync(localPath)) {
     const f = readdirSync(TMP_DIR).find((f) => f.startsWith(videoId));
     if (f) localPath = `${TMP_DIR}/${f}`;
-    else return false;
+    else {
+      await db.from("tracks").update({
+        dl_attempts: (track.dl_attempts || 0) + 1,
+        dl_failed_at: new Date().toISOString(),
+      }).eq("id", track.id);
+      return false;
+    }
   }
 
   const storagePath = `${sanitize(track.artist)}/${sanitize(track.title)}.mp3`;
   const { error } = await db.storage.from("tracks").upload(storagePath, readFileSync(localPath), {
     contentType: "audio/mpeg", upsert: true,
   });
-  if (error) return false;
+  if (error) {
+    await db.from("tracks").update({
+      dl_attempts: (track.dl_attempts || 0) + 1,
+      dl_failed_at: new Date().toISOString(),
+    }).eq("id", track.id);
+    return false;
+  }
 
   const { data: signed } = await db.storage.from("tracks").createSignedUrl(storagePath, 7 * 24 * 3600);
   await db.from("tracks").update({
