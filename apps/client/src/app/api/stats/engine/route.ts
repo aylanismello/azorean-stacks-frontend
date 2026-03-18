@@ -88,6 +88,33 @@ export async function GET() {
 
     const lastDownloadEvent = downloadEvents?.[0] ?? null;
 
+    // Enrichment + download rates (based on last 10 minutes of engine_events)
+    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+    const { count: enrichEventsCount } = await db
+      .from("engine_events")
+      .select("id", { count: "exact", head: true })
+      .in("event_type", ["enrich_completed"])
+      .gte("created_at", tenMinAgo);
+
+    const { count: downloadEventsCount } = await db
+      .from("engine_events")
+      .select("id", { count: "exact", head: true })
+      .in("event_type", ["download_drain_completed", "batch_download_completed", "super_like_completed"])
+      .gte("created_at", tenMinAgo);
+
+    const enrichRate = Math.round(((enrichEventsCount ?? 0) / 10) * 10) / 10;
+    const downloadRate = Math.round(((downloadEventsCount ?? 0) / 10) * 10) / 10;
+
+    const etaEnrichment = enrichRate > 0
+      ? Math.round(pendingCount / enrichRate)
+      : null;
+
+    // "enriched but not downloaded" count is what download drain will process
+    const etaDownload = downloadRate > 0
+      ? Math.round(enrichedCount / downloadRate)
+      : null;
+
     return NextResponse.json({
       tracks: {
         total: totalCount,
@@ -119,6 +146,10 @@ export async function GET() {
               1,
           }
         : null,
+      enrichment_rate: enrichRate,
+      download_rate: downloadRate,
+      eta_enrichment: etaEnrichment,
+      eta_download: etaDownload,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error";

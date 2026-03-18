@@ -1391,6 +1391,69 @@ function startWatcher() {
             processRepairQueue();
           }, 2 * 60_000);
 
+          // Every 2 min (offset by 60s): drain pending downloads independently
+          // Downloads operate on tracks that have youtube_url but no storage_path yet
+          let downloadDrainRunning = false;
+          setTimeout(() => {
+            setInterval(async () => {
+              if (shuttingDown || downloadDrainRunning) return;
+              downloadDrainRunning = true;
+              try {
+                const { data: downloadable, error } = await db.from("tracks")
+                  .select("*")
+                  .not("youtube_url", "is", null)
+                  .neq("youtube_url", "")
+                  .is("storage_path", null)
+                  .eq("status", "pending")
+                  .lt("dl_attempts", 3)
+                  .order("created_at", { ascending: true })
+                  .limit(50);
+                if (error) {
+                  log("fail", `[DL Drain] Query failed: ${error.message}`);
+                  return;
+                }
+                if (!downloadable?.length) return;
+                log("info", `[DL Drain] Found ${downloadable.length} tracks to download`);
+                await logEngineEvent("download_drain_started", "started", {
+                  message: `Downloading ${downloadable.length} tracks`,
+                  metadata: { count: downloadable.length },
+                });
+                let downloaded = 0;
+                // Process in batches of 15 concurrently
+                for (let i = 0; i < downloadable.length; i += PRIORITY_DOWNLOAD_CONCURRENCY) {
+                  if (shuttingDown) break;
+                  const batch = downloadable.slice(i, i + PRIORITY_DOWNLOAD_CONCURRENCY);
+                  const results = await Promise.allSettled(
+                    batch.map(async (track: any) => {
+                      try {
+                        const ok = await downloadTrack(track);
+                        if (ok) {
+                          downloaded++;
+                          log("ok", `[DL Drain] Downloaded: ${track.artist} – ${track.title}`);
+                        }
+                        return ok;
+                      } catch (err) {
+                        log("fail", `[DL Drain] Error: ${track.artist} – ${track.title}: ${err instanceof Error ? err.message : err}`);
+                        return false;
+                      }
+                    }),
+                  );
+                }
+                if (downloaded > 0) {
+                  await logEngineEvent("download_drain_completed", "completed", {
+                    message: `Downloaded ${downloaded}/${downloadable.length} tracks`,
+                    metadata: { downloaded, total: downloadable.length },
+                  });
+                  log("ok", `[DL Drain] Completed: ${downloaded}/${downloadable.length} downloaded`);
+                }
+              } catch (err) {
+                log("fail", `[DL Drain] Error: ${err instanceof Error ? err.message : err}`);
+              } finally {
+                downloadDrainRunning = false;
+              }
+            }, 2 * 60_000);
+          }, 60_000); // Offset by 60s to interleave with enrichment drain
+
           // Every 10 min: warn + resubscribe if no Realtime events received
           setInterval(() => {
             if (shuttingDown) return;

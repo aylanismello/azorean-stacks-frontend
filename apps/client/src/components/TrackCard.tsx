@@ -190,6 +190,20 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   const hasPlayableSource = hasAudio || (!!track.spotify_url && spotify.connected && !!spotify.deviceId);
   const isCurrentTrack = globalPlayer.currentTrack?.id === track.id;
 
+  // Pipeline status indicators
+  const enrichStatus: "enriched" | "pending" | "failed" =
+    track.spotify_url === ""
+      ? "failed"
+      : track.spotify_url || track.youtube_url
+        ? "enriched"
+        : "pending";
+  const downloadStatus: "downloaded" | "pending" | "n/a" =
+    track.storage_path
+      ? "downloaded"
+      : track.youtube_url
+        ? "pending"
+        : "n/a";
+
   const handleArtworkPlay = useCallback(() => {
     if (isCurrentTrack) {
       globalPlayer.togglePlayPause();
@@ -699,7 +713,17 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
                 </button>
               )}
             </div>
-            <p className="text-sm text-white/80 truncate drop-shadow-lg">{track.artist}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-white/80 truncate drop-shadow-lg">{track.artist}</p>
+              <span className="flex items-center gap-1 shrink-0">
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  enrichStatus === "enriched" ? "bg-green-400" : enrichStatus === "failed" ? "bg-red-400" : "bg-white/30"
+                }`} title={`Enrichment: ${enrichStatus}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  downloadStatus === "downloaded" ? "bg-blue-400" : downloadStatus === "pending" ? "bg-white/30" : "bg-white/15"
+                }`} title={`Download: ${downloadStatus}`} />
+              </span>
+            </div>
           </div>
 
           {/* Source indicator + external links row */}
@@ -982,6 +1006,33 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
               👂 heard
             </span>
           )}
+          {/* Pipeline status dots */}
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium ${
+              enrichStatus === "enriched" ? "bg-green-500/10 text-green-400/70"
+              : enrichStatus === "failed" ? "bg-red-500/10 text-red-400/70"
+              : "bg-foreground/5 text-foreground/30"
+            }`}
+            title={`Enrichment: ${enrichStatus}`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${
+              enrichStatus === "enriched" ? "bg-green-400" : enrichStatus === "failed" ? "bg-red-400" : "bg-foreground/30"
+            }`} />
+            {enrichStatus === "enriched" ? "enriched" : enrichStatus === "failed" ? "enrich failed" : "enriching"}
+          </span>
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium ${
+              downloadStatus === "downloaded" ? "bg-blue-500/10 text-blue-400/70"
+              : downloadStatus === "pending" ? "bg-foreground/5 text-foreground/30"
+              : "bg-foreground/5 text-foreground/20"
+            }`}
+            title={`Download: ${downloadStatus}`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${
+              downloadStatus === "downloaded" ? "bg-blue-400" : downloadStatus === "pending" ? "bg-foreground/30" : "bg-foreground/15"
+            }`} />
+            {downloadStatus === "downloaded" ? "downloaded" : downloadStatus === "pending" ? "dl pending" : "no dl"}
+          </span>
           {playingIndicator}
           {noSourceIndicator}
         </div>

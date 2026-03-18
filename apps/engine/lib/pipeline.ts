@@ -306,6 +306,78 @@ export async function spotifyArtistGenres(artistIds: string[], retries = 0): Pro
   }
 }
 
+// ─── MUSICBRAINZ ────────────────────────────────────────────
+
+const MB_API = "https://musicbrainz.org/ws/2";
+const MB_USER_AGENT = "AzoreanStacks/1.0 (picoisazorean@gmail.com)";
+let lastMbRequestAt = 0;
+
+export interface MusicBrainzResult {
+  artist: string;
+  title: string;
+  album?: string;
+  release_date?: string;
+  genres?: string[];
+  isrc?: string;
+  musicbrainz_id: string;
+}
+
+export async function musicbrainzLookup(artist: string, title: string): Promise<MusicBrainzResult | null> {
+  // Rate limit: 1 request per second (MusicBrainz enforces this strictly)
+  const now = Date.now();
+  const elapsed = now - lastMbRequestAt;
+  if (elapsed < 1100) await sleep(1100 - elapsed);
+  lastMbRequestAt = Date.now();
+
+  const { primaryArtist, cleanTitle } = normalizeForSearch(artist, title);
+  const query = encodeURIComponent(`artist:"${primaryArtist}" AND recording:"${cleanTitle}"`);
+  const url = `${MB_API}/recording?query=${query}&fmt=json&limit=3`;
+
+  const res = await fetch(url, {
+    headers: { "User-Agent": MB_USER_AGENT },
+  });
+
+  if (!res.ok) {
+    log("fail", `MusicBrainz ${res.status} for ${artist} – ${title}`);
+    return null;
+  }
+
+  const data = await res.json() as {
+    recordings?: Array<{
+      id: string;
+      title: string;
+      "artist-credit"?: Array<{ name: string }>;
+      releases?: Array<{ title: string; date?: string }>;
+      tags?: Array<{ name: string; count: number }>;
+      isrcs?: string[];
+    }>;
+  };
+
+  const recordings = data.recordings;
+  if (!recordings?.length) return null;
+
+  const rec = recordings[0];
+  const mbArtist = rec["artist-credit"]?.map((a) => a.name).join(", ") || artist;
+  const release = rec.releases?.[0];
+
+  // Extract genres from tags (sorted by count)
+  const genres = rec.tags
+    ?.filter((t) => t.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .map((t) => t.name)
+    .slice(0, 5);
+
+  return {
+    artist: mbArtist,
+    title: rec.title || title,
+    album: release?.title,
+    release_date: release?.date,
+    genres: genres?.length ? genres : undefined,
+    isrc: rec.isrcs?.[0],
+    musicbrainz_id: rec.id,
+  };
+}
+
 // ─── ENRICH ONE TRACK ───────────────────────────────────────
 
 export async function enrichTrack(track: any): Promise<boolean> {
@@ -315,9 +387,10 @@ export async function enrichTrack(track: any): Promise<boolean> {
   let spotFound = !!track.spotify_url;
   let ytFound = !!track.youtube_url;
 
-  // Run Spotify and YouTube lookups in PARALLEL — YouTube is never blocked by Spotify rate limits
-  // Spotify has a 15s timeout — if rate limited, we don't block YouTube
-  const [spotResult, ytResult] = await Promise.allSettled([
+  // Run Spotify, YouTube, and MusicBrainz lookups in PARALLEL
+  // Spotify has a 15s timeout, MusicBrainz 5s — neither blocks YouTube
+  let mbResult: MusicBrainzResult | null = null;
+  const [spotResult, ytResult, _mbResult] = await Promise.allSettled([
     // Spotify lookup (best-effort — rate limited, non-critical, 15s max)
     !track.spotify_url
       ? withTimeout(spotifyLookup(track.artist, track.title).then(async (spot) => {
@@ -355,7 +428,32 @@ export async function enrichTrack(track: any): Promise<boolean> {
           log("fail", `YouTube error for ${label}: ${err instanceof Error ? err.message : err}`);
         })
       : Promise.resolve(),
+    // MusicBrainz lookup (fallback metadata — 5s timeout, 1req/s rate limited)
+    !track.metadata?.musicbrainz_id
+      ? withTimeout(musicbrainzLookup(track.artist, track.title), 5_000, `mb:${label}`).then((mb) => {
+          mbResult = mb;
+        }).catch((err) => {
+          log("fail", `MusicBrainz error for ${label}: ${err instanceof Error ? err.message : err}`);
+        })
+      : Promise.resolve(),
   ]);
+
+  // Merge MusicBrainz data into metadata
+  if (mbResult) {
+    const mb = mbResult as MusicBrainzResult;
+    const existingMeta = (updates.metadata || track.metadata || {}) as Record<string, unknown>;
+    updates.metadata = {
+      ...existingMeta,
+      musicbrainz_id: mb.musicbrainz_id,
+      ...(mb.album ? { mb_album: mb.album } : {}),
+      ...(mb.release_date ? { mb_release_date: mb.release_date } : {}),
+      ...(mb.genres?.length ? { mb_genres: mb.genres } : {}),
+      ...(mb.isrc ? { isrc: mb.isrc } : {}),
+      // Use MB genres as fallback when Spotify has none
+      ...(!existingMeta.genres && mb.genres?.length ? { genres: mb.genres } : {}),
+    };
+    log("ok", `MusicBrainz: found ${mb.musicbrainz_id} for ${label}`);
+  }
 
   // Artwork fallback: use NTS episode artwork
   if (!track.cover_art_url && !updates.cover_art_url && track.episode_id) {
@@ -468,7 +566,9 @@ export type EngineEventType =
   | "watcher_connected"
   | "watcher_disconnected"
   | "watcher_reconnect"
-  | "radar_curator_run";
+  | "radar_curator_run"
+  | "download_drain_started"
+  | "download_drain_completed";
 
 export async function logEngineEvent(
   eventType: EngineEventType,
