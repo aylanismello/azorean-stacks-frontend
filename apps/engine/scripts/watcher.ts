@@ -186,13 +186,13 @@ async function processSeed(seedId: string) {
         }
       } else {
         const artworkUrl = await source.getArtwork(episodeUrl);
-        const { data: newEp, error: epErr } = await db.from("episodes").insert({
+        const { data: newEp, error: epErr } = await db.from("episodes").upsert({
           url: episodeUrl,
           title: ep.title || null,
           source: source.name,
           aired_date: ep.date || null,
           artwork_url: artworkUrl,
-        }).select("id").single();
+        }, { onConflict: "url" }).select("id").single();
 
         if (!newEp) {
           log("fail", `Episode insert failed: ${context} — ${epErr?.message}`);
@@ -873,13 +873,13 @@ async function processPrioritySeed(seedId: string) {
   // Create episode if it doesn't exist
   if (!episodeId) {
     const artworkUrl = await sourceObj.getArtwork(best.url);
-    const { data: newEp, error: epErr } = await db.from("episodes").insert({
+    const { data: newEp, error: epErr } = await db.from("episodes").upsert({
       url: best.url,
       title: best.title || null,
       source: best.sourceName,
       aired_date: best.date || null,
       artwork_url: artworkUrl,
-    }).select("id").single();
+    }, { onConflict: "url" }).select("id").single();
 
     if (!newEp) {
       await updatePipelineStatus(
