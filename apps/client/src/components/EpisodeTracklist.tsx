@@ -16,6 +16,7 @@ interface TrackListItem {
   storage_path: string | null;
   is_seed?: boolean;
   is_re_seed?: boolean;
+  is_artist_seed?: boolean;
   super_liked?: boolean;
   // Ranked queue scoring metadata
   _match_type?: "full" | "artist" | "unknown";
@@ -215,6 +216,8 @@ export function EpisodeTracklist(props: TracklistProps) {
                   {/* Seed/Re-seed emoji OR status dot */}
                   {t.is_seed ? (
                     <span className="flex-shrink-0 text-[10px] leading-none" title="Seed track">🌱</span>
+                  ) : t.is_artist_seed ? (
+                    <span className="flex-shrink-0 text-[10px] leading-none" title="Artist match">🌿</span>
                   ) : t.is_re_seed ? (
                     <span className="flex-shrink-0 text-[10px] leading-none" title="Re-seeded">🌱<span className="text-[8px]">++</span></span>
                   ) : t.super_liked ? (
@@ -257,9 +260,11 @@ export function EpisodeTracklist(props: TracklistProps) {
                         ? "text-accent font-medium"
                         : t.is_seed || t.is_re_seed
                           ? "text-green-400/90 font-medium"
-                          : t.super_liked
-                            ? "text-amber-300/90 font-medium"
-                            : statusText(t.status)
+                          : t.is_artist_seed
+                            ? "text-teal-400/80 font-medium"
+                            : t.super_liked
+                              ? "text-amber-300/90 font-medium"
+                              : statusText(t.status)
                     }`}>
                       {t.title}
                     </p>
