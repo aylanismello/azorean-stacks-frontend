@@ -57,9 +57,9 @@ export async function PATCH(
     return NextResponse.json({ ...data, super_liked: true });
   }
 
-  if (!status || !["approved", "rejected", "pending", "skipped"].includes(status)) {
+  if (!status || !["approved", "rejected", "pending", "skipped", "listened"].includes(status)) {
     return NextResponse.json(
-      { error: "Invalid status. Must be: approved, rejected, pending, skipped" },
+      { error: "Invalid status. Must be: approved, rejected, pending, skipped, listened" },
       { status: 400 }
     );
   }
@@ -76,6 +76,37 @@ export async function PATCH(
     }
   );
   const { data: { user } } = await authClient.auth.getUser();
+
+  // 'listened' is a soft-skip: only update user_tracks, not the global tracks table.
+  // Guard: only set 'listened' if no explicit vote has been made yet (status must be 'pending').
+  if (status === "listened") {
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const { data: existing } = await supabase
+      .from("user_tracks")
+      .select("status")
+      .eq("user_id", user.id)
+      .eq("track_id", params.id)
+      .maybeSingle();
+
+    if (!existing || existing.status === "pending") {
+      await supabase
+        .from("user_tracks")
+        .upsert(
+          { user_id: user.id, track_id: params.id, status: "listened" },
+          { onConflict: "user_id,track_id" }
+        );
+    }
+
+    const { data: track, error: trackErr } = await supabase
+      .from("tracks")
+      .select("*")
+      .eq("id", params.id)
+      .single();
+    if (trackErr) return NextResponse.json({ error: trackErr.message }, { status: 500 });
+    return NextResponse.json(track);
+  }
 
   const updates: Record<string, unknown> = { status };
 

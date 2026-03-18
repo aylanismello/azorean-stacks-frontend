@@ -20,9 +20,9 @@ export function getServiceClient(): UntypedClient {
   }
   _serviceClient = createClient(supabaseUrl, serviceRoleKey, {
     global: {
-      fetch: (url, options = {}) => {
+      fetch: ((url: Parameters<typeof fetch>[0], options: Parameters<typeof fetch>[1] = {}) => {
         return fetch(url, { ...options, cache: "no-store" as RequestCache });
-      },
+      }) as typeof fetch,
     },
   });
   return _serviceClient;

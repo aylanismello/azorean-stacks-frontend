@@ -135,13 +135,23 @@ export async function GET(
   const episodeIds = Array.from(episodeMatchTypes.keys());
 
   // 3. Fetch all pending tracks from those episodes
-  const { data: pendingTracks } = await db
+  const { data: rawPendingTracks } = await db
     .from("tracks")
     .select(
       "id, artist, title, source, status, episode_id, cover_art_url, spotify_url, youtube_url, storage_path, preview_url, metadata, created_at, seed_track_id, taste_score, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url)"
     )
     .in("episode_id", episodeIds)
     .eq("status", "pending");
+
+  // Filter out tracks the user has already listened to (heard past 80% without voting)
+  const { data: listenedRows } = await db
+    .from("user_tracks")
+    .select("track_id")
+    .eq("user_id", user.id)
+    .eq("status", "listened");
+
+  const listenedTrackIds = new Set((listenedRows || []).map((r: any) => r.track_id));
+  const pendingTracks = (rawPendingTracks || []).filter((t: any) => !listenedTrackIds.has(t.id));
 
   if (!pendingTracks?.length) {
     return NextResponse.json({
