@@ -157,6 +157,17 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     listenedFiredRef.current = false;
   }, [currentTrack?.id]);
 
+  // Auto-skip tracks with no playable source — fire trackEnded so the page
+  // auto-advances to the next track in the queue.
+  useEffect(() => {
+    if (!noSource || !currentTrack) return;
+    // Small delay so the UI can briefly show "No audio source" before advancing
+    const timer = setTimeout(() => {
+      setTrackEndedCount((c) => c + 1);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [noSource, currentTrack]);
+
   // Auto-mark as 'listened' when user reaches 80% of a track without taking action.
   // Fire-and-forget — backend guards against overwriting explicit votes.
   useEffect(() => {

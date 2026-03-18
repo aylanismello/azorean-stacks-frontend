@@ -20,6 +20,7 @@ interface TrackListItem {
   is_re_seed?: boolean;
   is_artist_seed?: boolean;
   super_liked?: boolean;
+  vote_status?: "approved" | "rejected" | "skipped" | "listened" | "pending" | null;
   // Ranked queue scoring metadata
   _match_type?: "full" | "artist" | "unknown";
   _ranked_score?: number;
@@ -36,6 +37,7 @@ interface EpisodeTracklistProps extends BaseTracklistProps {
   episodeId: string;
   episodeTitle?: string | null;
   refreshKey?: number;
+  seedId?: string | null;
   directTracks?: never;
 }
 
@@ -69,6 +71,7 @@ export function EpisodeTracklist(props: TracklistProps) {
   const episodeId = isDirectMode ? undefined : (props as EpisodeTracklistProps).episodeId;
   const episodeTitle = isDirectMode ? undefined : (props as EpisodeTracklistProps).episodeTitle;
   const refreshKey = isDirectMode ? 0 : ((props as EpisodeTracklistProps).refreshKey || 0);
+  const seedId = isDirectMode ? undefined : (props as EpisodeTracklistProps).seedId;
 
   const [fetchedTracks, setFetchedTracks] = useState<TrackListItem[]>([]);
   const [loading, setLoading] = useState(!isDirectMode);
@@ -97,7 +100,8 @@ export function EpisodeTracklist(props: TracklistProps) {
 
     let mounted = true;
 
-    fetch(`/api/episodes/${episodeId}/tracks?_t=${Date.now()}`)
+    const seedParam = seedId ? `&seed_id=${seedId}` : "";
+    fetch(`/api/episodes/${episodeId}/tracks?_t=${Date.now()}${seedParam}`)
       .then((r) => {
         if (!r.ok) throw new Error(`Failed to load tracks (${r.status})`);
         return r.json();
@@ -209,9 +213,9 @@ export function EpisodeTracklist(props: TracklistProps) {
   };
 
   // Download-based header stats
-  const ready = tracks.filter((t) => !!t.storage_path).length;
-  const enrichedCount = tracks.filter((t) => !t.storage_path && !!(t.spotify_url || t.youtube_url)).length;
-  const failed = tracks.filter((t) => !!t.dl_failed_at).length;
+  const downloaded = tracks.filter((t) => !!t.storage_path).length;
+  const enrichedCount = tracks.filter((t) => !t.storage_path && !t.dl_failed_at && !!(t.spotify_url || t.youtube_url)).length;
+  const failed = tracks.filter((t) => !!t.dl_failed_at && !t.storage_path).length;
   const dlPending = tracks.filter((t) => !t.storage_path && !t.spotify_url && !t.youtube_url && !t.dl_failed_at).length;
 
   const displayTitle = listTitle || episodeTitle || "Tracklist";
@@ -228,7 +232,7 @@ export function EpisodeTracklist(props: TracklistProps) {
             {!loading && (
               <div className="flex items-center gap-3 mt-1 text-[10px] font-mono text-muted">
                 <span>{tracks.length} tracks</span>
-                {ready > 0 && <span className="text-green-400/70">{ready} ready</span>}
+                {downloaded > 0 && <span className="text-green-400/70">{downloaded} downloaded</span>}
                 {enrichedCount > 0 && <span className="text-amber-400/70">{enrichedCount} enriched</span>}
                 {failed > 0 && <span className="text-red-400/70">{failed} failed</span>}
                 {dlPending > 0 && <span className="text-foreground/40">{dlPending} pending</span>}
@@ -268,16 +272,19 @@ export function EpisodeTracklist(props: TracklistProps) {
                   key={t.id}
                   ref={isPlaying ? playingRef : undefined}
                   onClick={() => {
+                    if (t.is_seed) return; // Seed tracks are non-interactive (reference track)
                     onTrackSelect?.(t.id);
                     handlePlay(t);
                   }}
                   disabled={false}
                   className={`w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2.5 transition-colors group border ${
-                    isPlaying
-                      ? "bg-accent/10 border-accent/20"
-                      : t.storage_path
-                        ? "hover:bg-surface-2 border-surface-3/60"
-                        : "hover:bg-surface-2/50 border-transparent"
+                    t.is_seed
+                      ? "bg-green-500/5 border-green-500/15 cursor-default"
+                      : isPlaying
+                        ? "bg-accent/10 border-accent/20"
+                        : t.storage_path
+                          ? "hover:bg-surface-2 border-surface-3/60"
+                          : "hover:bg-surface-2/50 border-transparent"
                   }`}
                 >
                   {/* Cover art thumbnail — 36x36 */}
@@ -314,38 +321,65 @@ export function EpisodeTracklist(props: TracklistProps) {
                   {/* Track info */}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1 mb-0.5">
-                      {t.is_seed ? (
-                        <span className="text-[9px] leading-none flex-shrink-0" title="Seed track">🌱</span>
+                      {(t.is_seed || t.is_artist_seed) ? (
+                        <span className="text-[9px] leading-none flex-shrink-0" title="Seed">🌱</span>
                       ) : t.is_re_seed ? (
-                        <span className="text-[9px] leading-none flex-shrink-0" title="Re-seeded">🌱<span className="text-[7px]">++</span></span>
-                      ) : t.is_artist_seed ? (
-                        <span className="text-[9px] leading-none flex-shrink-0" title="Artist match">🌿</span>
+                        <span className="text-[9px] leading-none flex-shrink-0" title="Re-seed">🌿</span>
                       ) : t.super_liked ? (
                         <span className="text-[9px] leading-none text-amber-400 flex-shrink-0" title="Super liked">⭐</span>
                       ) : null}
                       <p className={`text-xs truncate ${
-                        !t.storage_path
-                          ? "line-through text-foreground/30"
-                          : isPlaying
-                            ? "text-accent font-medium"
-                            : t.is_seed || t.is_re_seed
-                              ? "text-green-400/90 font-medium"
-                              : t.is_artist_seed
-                                ? "text-teal-400/80 font-medium"
-                                : t.super_liked
-                                  ? "text-amber-300/90 font-medium"
-                                  : "text-foreground/85"
+                        isPlaying
+                          ? "text-accent font-medium"
+                          : t.vote_status === "rejected"
+                            ? "line-through text-red-400/40"
+                            : t.vote_status === "skipped"
+                              ? "text-amber-400/40"
+                              : t.vote_status === "listened"
+                                ? "text-foreground/40"
+                                : !t.storage_path
+                                  ? "line-through text-foreground/30"
+                                  : (t.is_seed || t.is_artist_seed)
+                                    ? "text-green-400/90 font-medium"
+                                    : t.is_re_seed
+                                      ? "text-emerald-400/80 font-medium"
+                                      : t.super_liked
+                                        ? "text-amber-300/90 font-medium"
+                                        : t.vote_status === "approved"
+                                          ? "text-green-400/80"
+                                          : "text-foreground/85"
                       }`}>
                         {t.title}
                       </p>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <p className={`text-[10px] truncate ${!t.storage_path ? "line-through text-muted/30" : "text-muted"}`}>{t.artist}</p>
+                      <p className={`text-[10px] truncate ${
+                        t.vote_status === "rejected" ? "line-through text-muted/30"
+                          : !t.storage_path ? "line-through text-muted/30"
+                          : "text-muted"
+                      }`}>{t.artist}</p>
                       {t._match_type === "full" && t.storage_path && (
                         <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-green-400/70" title="Exact seed match" />
                       )}
                     </div>
                   </div>
+
+                  {/* Vote status indicator */}
+                  {t.vote_status && t.vote_status !== "pending" && (
+                    <span className="flex-shrink-0 text-[9px] leading-none" title={t.vote_status}>
+                      {t.super_liked ? (
+                        <span className="text-amber-400">&#11088;</span>
+                      ) : t.vote_status === "approved" ? (
+                        <span className="text-green-400">&#9989;</span>
+                      ) : t.vote_status === "rejected" ? (
+                        <span className="text-red-400/70">&#10060;</span>
+                      ) : t.vote_status === "skipped" ? (
+                        <span className="text-amber-400/60">&#9193;</span>
+                      ) : t.vote_status === "listened" ? (
+                        <span className="text-foreground/30">&#128066;</span>
+                      ) : null}
+                    </span>
+                  )}
 
                   {/* Right: download status dot */}
                   <span className="flex-shrink-0">
@@ -379,6 +413,7 @@ export function TracklistSheet({
   listTitle,
   directTracks,
   refreshKey,
+  seedId,
   open,
   onClose,
   onTrackSelect,
@@ -388,6 +423,7 @@ export function TracklistSheet({
   listTitle?: string | null;
   directTracks?: TrackListItem[];
   refreshKey?: number;
+  seedId?: string | null;
   open: boolean;
   onClose: () => void;
   onTrackSelect?: (trackId: string) => void;
@@ -416,6 +452,7 @@ export function TracklistSheet({
             episodeTitle={episodeTitle}
             listTitle={listTitle}
             refreshKey={refreshKey}
+            seedId={seedId}
             onClose={onClose}
             onTrackSelect={onTrackSelect}
             variant="sheet"
