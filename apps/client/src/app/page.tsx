@@ -724,11 +724,12 @@ function StackPageContent() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (tracklistOpen) {
+        if (contextOpen) {
+          setContextOpen(false);
+        } else if (tracklistOpen) {
           setTracklistOpen(false);
-        } else {
-          handleGoToStacks();
         }
+        // Do nothing if no modal is open — never navigate away on Escape
         return;
       }
       if (!currentTrack) return;
@@ -748,7 +749,7 @@ function StackPageContent() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tracks, tracklistOpen, globalPlayer]);
+  }, [tracks, tracklistOpen, contextOpen, globalPlayer]);
 
   // ── Advancing to next episode ──
   if (advancingEpisode) {
@@ -963,7 +964,7 @@ function StackPageContent() {
         <span>← / j skip</span>
         <span>→ / k keep</span>
         <span>space play/pause</span>
-        <span>esc stacks</span>
+        <span>esc close</span>
       </div>
 
       {/* Track context modal */}
@@ -1042,10 +1043,10 @@ function TrackContextModal({
           </button>
         </div>
 
-        {/* Source */}
+        {/* Source episode */}
         {(track.source || track.source_context) && (
           <div>
-            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Source</p>
+            <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Source Episode</p>
             {track.source_url ? (
               <a
                 href={track.source_url}
