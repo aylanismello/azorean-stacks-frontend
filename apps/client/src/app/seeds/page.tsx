@@ -732,7 +732,7 @@ function SeedEpisodeRow({ episode: ep, seedId, seedArtist, seedTitle, allSeeds, 
     if (tracks.length > 0) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/episodes/${ep.id}/tracks`);
+      const res = await fetch(`/api/episodes/${ep.id}/tracks?seed_id=${seedId}`);
       if (res.ok) setTracks(await res.json());
     } finally {
       setLoading(false);
@@ -1000,7 +1000,7 @@ function SeedTrackRow({
         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(local.status)}`} />
       )}
       <span className={`flex-1 min-w-0 truncate ${statusColor(local.status)}`}>
-        {local.artist} — {local.title}{isReseedTrack ? " 🌱++" : ""}
+        {local.artist} — {local.title}{isReseedTrack ? " 🌱" : ""}
       </span>
       <div className="flex gap-1.5 flex-shrink-0 items-center">
         {/* Spotify icon */}

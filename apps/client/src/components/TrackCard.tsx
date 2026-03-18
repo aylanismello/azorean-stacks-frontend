@@ -583,8 +583,8 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
           </div>
         )}
         {track.is_re_seed && !track.is_seed && (
-          <div className="absolute top-3 left-3 z-20 text-base leading-none" title="Re-seeded track">
-            🌱<span className="text-xs">++</span>
+          <div className="absolute top-3 left-3 z-20 text-base leading-none" title="Re-seed match">
+            🌱
           </div>
         )}
 

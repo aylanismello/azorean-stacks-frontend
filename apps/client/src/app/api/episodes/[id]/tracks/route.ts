@@ -27,11 +27,21 @@ export async function GET(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  // Optional seed_id scoping — when viewing from a specific seed context,
+  // only mark tracks relative to that seed (not all seeds linked to this episode)
+  const contextSeedId = req.nextUrl.searchParams.get("seed_id");
+
   // Look up which seeds are connected to this episode
-  const { data: episodeSeedRows } = await db
+  let episodeSeedQuery = db
     .from("episode_seeds")
     .select("seed_id, match_type, seeds(id, artist, title, source, track_id)")
     .eq("episode_id", params.id);
+
+  if (contextSeedId) {
+    episodeSeedQuery = episodeSeedQuery.eq("seed_id", contextSeedId);
+  }
+
+  const { data: episodeSeedRows } = await episodeSeedQuery;
 
   // Build sets for seed matching: prefer direct track_id, fall back to artist::title
   const seedTrackIds = new Set<string>();
@@ -45,7 +55,10 @@ export async function GET(
     const isArtistMatch = row.match_type === "artist" || row.match_type === "artist_match";
     if (isArtistMatch) {
       if (seed?.artist) {
-        seedArtists.add(seed.artist.toLowerCase().trim());
+        // Split comma-separated seed artists so each individual name matches
+        for (const a of seed.artist.split(/,\s*/)) {
+          seedArtists.add(a.toLowerCase().trim());
+        }
       }
     } else {
       if (seed?.track_id) {
@@ -68,8 +81,9 @@ export async function GET(
 
   const trackIds = data.map((t: any) => t.id);
 
-  // Get super_liked status from user_tracks (try to get authed user)
+  // Get super_liked + vote status from user_tracks (try to get authed user)
   const superLikedIds = new Set<string>();
+  const voteStatusMap = new Map<string, string>();
   try {
     const authClient = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -85,12 +99,12 @@ export async function GET(
     if (user && trackIds.length > 0) {
       const { data: utRows } = await db
         .from("user_tracks")
-        .select("track_id")
+        .select("track_id, super_liked, status")
         .eq("user_id", user.id)
-        .eq("super_liked", true)
         .in("track_id", trackIds);
       for (const ut of (utRows || []) as any[]) {
-        superLikedIds.add(ut.track_id);
+        if (ut.super_liked) superLikedIds.add(ut.track_id);
+        if (ut.status) voteStatusMap.set(ut.track_id, ut.status);
       }
     }
   } catch {}
@@ -104,8 +118,11 @@ export async function GET(
     const trackKey = `${track.artist.toLowerCase().trim()}::${track.title.toLowerCase().trim()}`;
     (track as any).is_seed = seedTrackIds.has(track.id) || seedPairs.has(trackKey);
     (track as any).is_re_seed = reSeedTrackIds.has(track.id) || reSeedPairs.has(trackKey);
-    (track as any).is_artist_seed = !(track as any).is_seed && seedArtists.has(track.artist.toLowerCase().trim());
+    // Multi-artist matching: split comma-separated artists and check each individually
+    const trackArtists = track.artist.split(/,\s*/).map((a: string) => a.toLowerCase().trim());
+    (track as any).is_artist_seed = !(track as any).is_seed && trackArtists.some((a: string) => seedArtists.has(a));
     (track as any).super_liked = superLikedIds.has(track.id);
+    (track as any).vote_status = voteStatusMap.get(track.id) || null;
 
     if (track.storage_path) {
       signPromises.push(
