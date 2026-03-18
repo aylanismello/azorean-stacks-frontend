@@ -26,9 +26,9 @@ const STATUS_FILE = `${process.env.HOME}/.openclaw/data/azorean-engine-status.js
 // ─── CONCURRENCY LIMITS ─────────────────────────────────────
 // Tuned for M4 Mac Mini — all bottlenecks are network I/O
 const CONCURRENCY = {
-  enrich: 8,          // Spotify + YouTube lookups per batch
-  download: 3,        // yt-dlp audio downloads per batch
-  repair: 5,          // Background track repair tasks
+  enrich: 25,         // Spotify + YouTube lookups per batch
+  download: 8,        // yt-dlp audio downloads per batch
+  repair: 20,         // Background track repair tasks
   superLike: 2,       // Simultaneous super-like downloads
   ntsMaxEpisodes: 10, // Max episodes to check per source per seed
 } as const;
@@ -1313,7 +1313,7 @@ function startWatcher() {
               .eq("status", "pending")
               .or("spotify_url.is.null,and(youtube_url.is.null,storage_path.is.null)")
               .order("created_at", { ascending: true })
-              .limit(30);
+              .limit(100);
             if (error) {
               log("fail", `[Drain] Pending track scan failed: ${error.message}`);
               return;
