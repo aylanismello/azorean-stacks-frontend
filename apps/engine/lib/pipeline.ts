@@ -465,6 +465,14 @@ export async function enrichTrack(track: any): Promise<boolean> {
     }
   }
 
+  // Track enrichment sources — which services provided metadata
+  const sources: string[] = [];
+  if (spotFound) sources.push("spotify");
+  if (ytFound) sources.push("youtube");
+  if (mbResult) sources.push("musicbrainz");
+  const existingMeta = (updates.metadata || track.metadata || {}) as Record<string, unknown>;
+  updates.metadata = { ...existingMeta, enrichment_sources: sources, enriched_at: new Date().toISOString() };
+
   const { error } = await db.from("tracks").update(updates).eq("id", track.id);
   if (error) {
     log("fail", `DB update failed for ${label}: ${error.message}`);
@@ -473,7 +481,8 @@ export async function enrichTrack(track: any): Promise<boolean> {
 
   const sp = spotFound ? "spotify" : "no-spotify";
   const yt = ytFound ? "youtube" : "no-youtube";
-  log(spotFound || ytFound ? "ok" : "skip", `${label} [${sp}, ${yt}] (${elapsed(t0)})`);
+  const mb = mbResult ? "musicbrainz" : "no-mb";
+  log(spotFound || ytFound ? "ok" : "skip", `${label} [${sp}, ${yt}, ${mb}] (${elapsed(t0)})`);
   return true;
 }
 
