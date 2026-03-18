@@ -30,7 +30,7 @@ const durationMinutes = values.duration ? parseInt(String(values.duration), 10) 
 const deadline = durationMinutes ? Date.now() + durationMinutes * 60_000 : null;
 
 const db = getSupabase();
-const ENRICH_CONCURRENCY = 5;
+const ENRICH_CONCURRENCY = 25;
 const ENRICH_MAX_RETRIES = 3;
 const YT_DLP_BIN =
   process.env.YT_DLP_BIN ||
@@ -958,7 +958,7 @@ async function runEnrich(): Promise<number> {
     const { data: tracks } = await db.from("tracks").select("*")
       .eq("status", "pending")
       .or("spotify_url.is.null,and(youtube_url.is.null,storage_path.is.null)")
-      .order("created_at").limit(30);
+      .order("created_at").limit(100);
     if (!tracks?.length) break;
 
     // Filter out tracks that have exceeded max retries
