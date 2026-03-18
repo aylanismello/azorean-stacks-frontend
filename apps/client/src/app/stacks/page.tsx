@@ -13,6 +13,7 @@ interface StackSeed {
   total_approved: number;
   total_rejected: number;
   total: number;
+  total_playable: number;
   cover_art_url: string | null;
   has_exact_match: boolean;
 }
@@ -260,11 +261,16 @@ function StackTile({
         </p>
         {/* Stats overlay */}
         {seed.total > 0 && (
-          <p className="text-[9px] text-white/40 font-mono mt-1">
-            {seed.total_approved > 0 && `${Math.round((seed.total_approved / seed.total) * 100)}% liked`}
-            {seed.total_approved > 0 && seed.total_pending > 0 && " · "}
-            {seed.total_pending > 0 && `${seed.total_pending} pending`}
-          </p>
+          <>
+            <p className="text-[9px] text-white/40 font-mono mt-1">
+              {seed.total_approved > 0 && `${Math.round((seed.total_approved / seed.total) * 100)}% liked`}
+              {seed.total_approved > 0 && seed.total_pending > 0 && " · "}
+              {seed.total_pending > 0 && `${seed.total_pending} pending`}
+            </p>
+            <p className="text-[9px] text-green-400/60 font-mono">
+              {seed.total_playable}/{seed.total} playable ({Math.round((seed.total_playable / seed.total) * 100)}%)
+            </p>
+          </>
         )}
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-[9px] text-white/30 font-mono">

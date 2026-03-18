@@ -100,7 +100,7 @@ export async function GET(req: NextRequest) {
 
     let query = supabase
       .from("tracks")
-      .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url), seeds!track_id(id)", { count: "exact" })
+      .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url, url), seeds!track_id(id)", { count: "exact" })
       .in("id", trackIdsForEpisode);
 
     if (search) {
@@ -167,7 +167,7 @@ export async function GET(req: NextRequest) {
     const paged = superLikedIds.slice(offset, offset + limit);
     const { data, error } = await supabase
       .from("tracks")
-      .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url), seeds!track_id(id)")
+      .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url, url), seeds!track_id(id)")
       .in("id", paged);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -194,7 +194,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from("tracks")
-    .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url), seeds!track_id(id)", { count: "exact" });
+    .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url, url), seeds!track_id(id)", { count: "exact" });
 
   query = query.eq("status", status);
 

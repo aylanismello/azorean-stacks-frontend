@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   // 1. Get seeds for the authenticated user (including legacy null-user seeds)
   const { data: seeds, error: seedErr } = await supabase
     .from("seeds")
-    .select("id, artist, title, active, cover_art_url")
+    .select("id, artist, title, active, cover_art_url, created_at")
     .or(`user_id.eq.${user.id},user_id.is.null`)
     .order("created_at", { ascending: false });
 
@@ -85,12 +85,13 @@ export async function GET(req: NextRequest) {
   // 3. Get per-episode track stats in one query
   const { data: tracks } = await supabase
     .from("tracks")
-    .select("episode_id, status, cover_art_url, artist, title, source_url, source_context")
+    .select("episode_id, status, cover_art_url, artist, title, source_url, source_context, storage_path")
     .in("episode_id", Array.from(allEpisodeIds));
 
   // Aggregate stats per episode
   const episodeStats: Record<string, {
     pending: number; approved: number; rejected: number; total: number;
+    playable: number;
     cover_art_url: string | null;
     sample_tracks: { artist: string; title: string }[];
   }> = {};
@@ -100,11 +101,12 @@ export async function GET(req: NextRequest) {
     if (!epId) continue;
 
     if (!episodeStats[epId]) {
-      episodeStats[epId] = { pending: 0, approved: 0, rejected: 0, total: 0, cover_art_url: null, sample_tracks: [] };
+      episodeStats[epId] = { pending: 0, approved: 0, rejected: 0, total: 0, playable: 0, cover_art_url: null, sample_tracks: [] };
     }
 
     const s = episodeStats[epId];
     s.total++;
+    if (t.storage_path) s.playable++;
     if (t.status === "pending") s.pending++;
     else if (t.status === "approved") s.approved++;
     else if (t.status === "rejected") s.rejected++;
@@ -142,7 +144,7 @@ export async function GET(req: NextRequest) {
     const eps = (episodesBySeed[seed.id] || [])
       .filter((ep) => !ep.skipped)
       .map((ep) => {
-        const stats = episodeStats[ep.id] || { pending: 0, approved: 0, rejected: 0, total: 0, cover_art_url: null, sample_tracks: [] };
+        const stats = episodeStats[ep.id] || { pending: 0, approved: 0, rejected: 0, total: 0, playable: 0, cover_art_url: null, sample_tracks: [] };
         // For artist-only matches, show which tracks by that artist are in this episode
         const matched_tracks = ep.match_type !== "full"
           ? (artistTracksByEpisode[`${ep.id}::${seedArtistLower}`] || [])
@@ -155,6 +157,7 @@ export async function GET(req: NextRequest) {
     const totalApproved = eps.reduce((s, e) => s + e.approved, 0);
     const totalRejected = eps.reduce((s, e) => s + e.rejected, 0);
     const total = eps.reduce((s, e) => s + e.total, 0);
+    const totalPlayable = eps.reduce((s, e) => s + e.playable, 0);
     globalPending += totalPending;
 
     // Use the seed's own cover art (from Spotify lookup of the seed song itself)
@@ -174,12 +177,13 @@ export async function GET(req: NextRequest) {
       total_approved: totalApproved,
       total_rejected: totalRejected,
       total,
+      total_playable: totalPlayable,
       cover_art_url,
       has_exact_match,
     };
   })
-    .filter((s) => s.episodes.length > 0) // Only seeds with episodes
-    .sort((a, b) => b.total_pending - a.total_pending); // Most pending first
+    .filter((s) => s.episodes.length > 0); // Only seeds with episodes
+    // Seeds are already sorted by created_at desc from the DB query (newest first)
 
   return NextResponse.json({ stacks, total_pending: globalPending });
 }

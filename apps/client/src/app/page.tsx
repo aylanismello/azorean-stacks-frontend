@@ -663,21 +663,14 @@ function StackPageContent() {
     lastEndedCount.current = globalPlayer.trackEndedCount;
 
     if (hasEpisodeTracks) {
-      // Episode mode: advance to next pending track
-      const hasPending = tracks.some((t) => t.status === "pending" && t.id !== globalPlayer.currentTrack?.id);
-      if (!hasPending) {
-        // No more pending — advance to next episode
-        advanceToNextEpisode();
-        return;
-      }
+      // Episode mode: advance to next track by position that has audio — never go backwards
       setEpisodePos((prev) => {
         for (let i = prev + 1; i < tracks.length; i++) {
-          if (tracks[i].status === "pending") return i;
+          const t = tracks[i];
+          if (t.audio_url || t.preview_url || t.storage_path || t.spotify_url) return i;
         }
-        // Wrap around
-        for (let i = 0; i < prev; i++) {
-          if (tracks[i].status === "pending") return i;
-        }
+        // No playable tracks ahead — advance to next episode
+        advanceToNextEpisode();
         return prev;
       });
       return;
@@ -1078,21 +1071,26 @@ function TrackContextModal({
         </div>
 
         {/* Source episode */}
-        {(track.source || track.source_context) && (
+        {(track.source || track.source_context || track.episode) && (
           <div>
             <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Source Episode</p>
-            {track.source_url ? (
-              <a
-                href={track.source_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-accent hover:text-accent-bright underline underline-offset-2 decoration-accent/30"
-              >
-                {track.source_context || track.source}
-              </a>
-            ) : (
-              <p className="text-sm text-foreground/80">{track.source_context || track.source}</p>
-            )}
+            {(() => {
+              const linkUrl = track.source_url || track.episode?.url || null;
+              const label = track.source_context || track.episode?.title || track.source;
+              if (linkUrl) {
+                return (
+                  <a
+                    href={linkUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-accent hover:text-accent-bright underline underline-offset-2 decoration-accent/30"
+                  >
+                    {label}
+                  </a>
+                );
+              }
+              return <p className="text-sm text-foreground/80">{label}</p>;
+            })()}
           </div>
         )}
 

@@ -670,6 +670,20 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
   // This is triggered from the page level via the preloadTrack function
   // (the provider doesn't know about the queue, so the page calls preloadTrack)
 
+  // Global spacebar → play/pause (works on every page, not just the stack page)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== " ") return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
+      if (!currentTrackRef.current) return;
+      e.preventDefault();
+      togglePlayPause();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [togglePlayPause]);
+
   return (
     <GlobalPlayerContext.Provider
       value={{
