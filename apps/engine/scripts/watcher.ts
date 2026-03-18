@@ -1385,7 +1385,26 @@ function startWatcher() {
               return;
             }
             const toQueue = (pending || []).filter((t: any) => !trackQueue.includes(t.id));
-            if (toQueue.length === 0) return;
+            if (toQueue.length === 0) {
+              // Check for tracks stuck without any match — mark as skipped
+              // These are tracks where enrichment already ran (spotify_url is empty string = tried, found nothing)
+              // AND youtube_url is still null (YouTube also found nothing)
+              const { data: unfindable } = await db.from("tracks")
+                .select("id")
+                .eq("status", "pending")
+                .is("youtube_url", null)
+                .eq("spotify_url", "")  // empty string = enrichment ran, found nothing
+                .limit(100);
+              if (unfindable?.length) {
+                const ids = unfindable.map((t: any) => t.id);
+                await db.from("tracks").update({
+                  status: "skipped",
+                  metadata: { skip_reason: "no_youtube_or_spotify_match" },
+                }).in("id", ids);
+                log("info", `[Drain] Marked ${ids.length} unfindable tracks as skipped`);
+              }
+              return;
+            }
             for (const t of toQueue) enqueueTrack(t.id);
             log("info", `[Drain] Queued ${toQueue.length} pending tracks for enrichment`);
             processRepairQueue();
@@ -1412,7 +1431,26 @@ function startWatcher() {
                   log("fail", `[DL Drain] Query failed: ${error.message}`);
                   return;
                 }
-                if (!downloadable?.length) return;
+                if (!downloadable?.length) {
+                  // Mark tracks with 3+ failed attempts as 'failed' so they stop being re-queued
+                  const { data: gaveUp } = await db.from("tracks")
+                    .select("id")
+                    .not("youtube_url", "is", null)
+                    .neq("youtube_url", "")
+                    .is("storage_path", null)
+                    .eq("status", "pending")
+                    .gte("dl_attempts", 3)
+                    .limit(100);
+                  if (gaveUp?.length) {
+                    const ids = gaveUp.map((t: any) => t.id);
+                    await db.from("tracks").update({
+                      status: "failed",
+                      metadata: { fail_reason: "download_failed_3_attempts" },
+                    }).in("id", ids);
+                    log("info", `[DL Drain] Marked ${ids.length} tracks as failed (3+ download attempts)`);
+                  }
+                  return;
+                }
                 log("info", `[DL Drain] Found ${downloadable.length} tracks to download`);
                 await logEngineEvent("download_drain_started", "started", {
                   message: `Downloading ${downloadable.length} tracks`,

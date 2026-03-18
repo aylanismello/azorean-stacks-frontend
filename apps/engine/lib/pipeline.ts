@@ -232,44 +232,65 @@ export async function spotifyLookup(artist: string, title: string) {
 export interface YouTubeResult {
   url: string;
   thumbnail: string | null;
+  source: "youtube" | "soundcloud";
+}
+
+async function ytDlpSearch(
+  searchPrefix: string,
+  searchQuery: string,
+  timeoutLabel: string,
+): Promise<{ chosen: any } | null> {
+  const proc = Bun.spawn(
+    [YT_DLP_BIN, "--dump-json", "--no-download", "--flat-playlist", "--no-warnings",
+     `${searchPrefix}:${searchQuery}`],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  const [stdout, _stderr, exitCode] = await Promise.all([
+    withTimeout(new Response(proc.stdout).text(), 30_000, timeoutLabel),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (exitCode !== 0 || !stdout.trim()) return null;
+  const results = stdout.trim().split("\n").map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  const filtered = results.filter((r: any) => {
+    const dur = r.duration || 0;
+    const t = (r.title || "").toLowerCase();
+    if (dur > 0 && (dur < 60 || dur > 900)) return false;
+    if (t.includes("live at") || t.includes("live from")) return false;
+    return true;
+  });
+  const chosen = filtered[0] || results[0];
+  if (!chosen?.webpage_url) return null;
+  return { chosen };
+}
+
+function extractThumbnail(chosen: any): string | null {
+  if (chosen.thumbnails?.length) {
+    return chosen.thumbnails[chosen.thumbnails.length - 1]?.url || null;
+  }
+  return chosen.thumbnail || null;
 }
 
 export async function youtubeLookup(artist: string, title: string): Promise<YouTubeResult | null> {
   try {
     const { primaryArtist, cleanTitle } = normalizeForSearch(artist, title);
     const searchQuery = `${primaryArtist} ${cleanTitle}`;
-    const proc = Bun.spawn(
-      [YT_DLP_BIN, "--dump-json", "--no-download", "--flat-playlist", "--no-warnings",
-       `ytsearch3:${searchQuery}`],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const [stdout, stderr, exitCode] = await Promise.all([
-      withTimeout(new Response(proc.stdout).text(), 30_000, "yt-search"),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    if (exitCode !== 0) {
-      log("fail", `yt-dlp exit ${exitCode} for "${searchQuery}"`);
-      return null;
+
+    // Try YouTube first
+    const ytResult = await ytDlpSearch("ytsearch3", searchQuery, "yt-search");
+    if (ytResult) {
+      return { url: ytResult.chosen.webpage_url, thumbnail: extractThumbnail(ytResult.chosen), source: "youtube" };
     }
-    if (!stdout.trim()) return null;
-    const results = stdout.trim().split("\n").map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-    const filtered = results.filter((r: any) => {
-      const dur = r.duration || 0;
-      const t = (r.title || "").toLowerCase();
-      if (dur > 0 && (dur < 60 || dur > 900)) return false;
-      if (t.includes("live at") || t.includes("live from")) return false;
-      return true;
-    });
-    const chosen = filtered[0] || results[0];
-    if (!chosen?.webpage_url) return null;
-    let thumbnail: string | null = null;
-    if (chosen.thumbnails?.length) {
-      thumbnail = chosen.thumbnails[chosen.thumbnails.length - 1]?.url || null;
-    } else if (chosen.thumbnail) {
-      thumbnail = chosen.thumbnail;
+    log("skip", `YouTube: no results for "${searchQuery}" — trying SoundCloud`);
+
+    // Fallback: try SoundCloud
+    const scResult = await ytDlpSearch("scsearch3", searchQuery, "sc-search");
+    if (scResult) {
+      log("ok", `SoundCloud: found match for "${searchQuery}"`);
+      return { url: scResult.chosen.webpage_url, thumbnail: extractThumbnail(scResult.chosen), source: "soundcloud" };
     }
-    return { url: chosen.webpage_url, thumbnail };
+
+    return null;
   } catch (err) {
     log("fail", `YouTube lookup error: ${err instanceof Error ? err.message : err}`);
     return null;
@@ -386,6 +407,7 @@ export async function enrichTrack(track: any): Promise<boolean> {
   const updates: Record<string, unknown> = {};
   let spotFound = !!track.spotify_url;
   let ytFound = !!track.youtube_url;
+  let ytSource: "youtube" | "soundcloud" = "youtube";
 
   // Run Spotify, YouTube, and MusicBrainz lookups in PARALLEL
   // Spotify has a 15s timeout, MusicBrainz 5s — neither blocks YouTube
@@ -423,6 +445,7 @@ export async function enrichTrack(track: any): Promise<boolean> {
           if (yt) {
             updates.youtube_url = yt.url;
             ytFound = true;
+            ytSource = yt.source;
           }
         }).catch((err) => {
           log("fail", `YouTube error for ${label}: ${err instanceof Error ? err.message : err}`);
@@ -468,7 +491,7 @@ export async function enrichTrack(track: any): Promise<boolean> {
   // Track enrichment sources — which services provided metadata
   const sources: string[] = [];
   if (spotFound) sources.push("spotify");
-  if (ytFound) sources.push("youtube");
+  if (ytFound) sources.push(ytSource);
   if (mbResult) sources.push("musicbrainz");
   const existingMeta = (updates.metadata || track.metadata || {}) as Record<string, unknown>;
   updates.metadata = { ...existingMeta, enrichment_sources: sources, enriched_at: new Date().toISOString() };
@@ -508,7 +531,10 @@ export async function downloadTrack(track: any): Promise<boolean> {
 
   const dlProc = Bun.spawn(
     [YT_DLP_BIN, "-x", "--audio-format", "mp3", "--audio-quality", "0",
-     "--no-playlist", "--no-warnings", "-o", outPath, track.youtube_url],
+     "--no-playlist", "--no-warnings",
+     "--retries", "3", "--fragment-retries", "3",
+     "--socket-timeout", "30", "--extractor-retries", "3",
+     "-o", outPath, track.youtube_url],
     { stdout: "ignore", stderr: "ignore" },
   );
 
