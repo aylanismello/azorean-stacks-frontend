@@ -1415,7 +1415,11 @@ function startWatcher() {
           let downloadDrainRunning = false;
           setTimeout(() => {
             setInterval(async () => {
-              if (shuttingDown || downloadDrainRunning) return;
+              if (shuttingDown) return;
+              if (downloadDrainRunning) {
+                log("info", "[DL Drain] Previous batch still running — skipping");
+                return;
+              }
               downloadDrainRunning = true;
               try {
                 const { data: downloadable, error } = await db.from("tracks")
@@ -1426,7 +1430,7 @@ function startWatcher() {
                   .eq("status", "pending")
                   .lt("dl_attempts", 3)
                   .order("created_at", { ascending: true })
-                  .limit(100);
+                  .limit(20);
                 if (error) {
                   log("fail", `[DL Drain] Query failed: ${error.message}`);
                   return;
@@ -1489,8 +1493,8 @@ function startWatcher() {
               } finally {
                 downloadDrainRunning = false;
               }
-            }, 30_000); // Every 30s — downloads should be nearly continuous
-          }, 10_000); // Start quickly after watcher connects
+            }, 15_000); // Every 15s — small fast batches
+          }, 5_000); // Start 5s after watcher connects
 
           // Every 10 min: warn + resubscribe if no Realtime events received
           setInterval(() => {
