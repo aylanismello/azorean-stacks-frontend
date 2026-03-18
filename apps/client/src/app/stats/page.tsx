@@ -417,7 +417,7 @@ export default function StatsPage() {
                     {ev.status}
                   </span>
                   <span className="text-xs text-foreground/70 truncate flex-1">
-                    {ev.type.replace(/_/g, " ")}
+                    {(ev.event_type || ev.type || "").replace(/_/g, " ")}
                     {ev.metadata?.message ? ` — ${ev.metadata.message}` : ""}
                   </span>
                   <span className="text-[10px] text-muted font-mono shrink-0">
