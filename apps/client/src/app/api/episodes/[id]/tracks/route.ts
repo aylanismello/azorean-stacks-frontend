@@ -38,21 +38,30 @@ export async function GET(
   const reSeedTrackIds = new Set<string>();
   const seedPairs = new Set<string>();
   const reSeedPairs = new Set<string>();
+  const seedArtists = new Set<string>();
   for (const row of (episodeSeedRows || []) as any[]) {
     const seed = Array.isArray(row.seeds) ? row.seeds[0] : row.seeds;
     const isReSeed = row.match_type === "re_seed" || row.match_type === "re-seed";
-    if (seed?.track_id) {
-      if (isReSeed) {
-        reSeedTrackIds.add(seed.track_id);
-      } else {
-        seedTrackIds.add(seed.track_id);
+    const isArtistMatch = row.match_type === "artist" || row.match_type === "artist_match";
+    if (isArtistMatch) {
+      if (seed?.artist) {
+        seedArtists.add(seed.artist.toLowerCase().trim());
       }
-    } else if (seed?.artist && seed?.title) {
-      const key = `${seed.artist.toLowerCase().trim()}::${seed.title.toLowerCase().trim()}`;
-      if (isReSeed) {
-        reSeedPairs.add(key);
-      } else {
-        seedPairs.add(key);
+    } else {
+      if (seed?.track_id) {
+        if (isReSeed) {
+          reSeedTrackIds.add(seed.track_id);
+        } else {
+          seedTrackIds.add(seed.track_id);
+        }
+      }
+      if (seed?.artist && seed?.title) {
+        const key = `${seed.artist.toLowerCase().trim()}::${seed.title.toLowerCase().trim()}`;
+        if (isReSeed) {
+          reSeedPairs.add(key);
+        } else {
+          seedPairs.add(key);
+        }
       }
     }
   }
@@ -95,6 +104,7 @@ export async function GET(
     const trackKey = `${track.artist.toLowerCase().trim()}::${track.title.toLowerCase().trim()}`;
     (track as any).is_seed = seedTrackIds.has(track.id) || seedPairs.has(trackKey);
     (track as any).is_re_seed = reSeedTrackIds.has(track.id) || reSeedPairs.has(trackKey);
+    (track as any).is_artist_seed = !(track as any).is_seed && seedArtists.has(track.artist.toLowerCase().trim());
     (track as any).super_liked = superLikedIds.has(track.id);
 
     if (track.storage_path) {

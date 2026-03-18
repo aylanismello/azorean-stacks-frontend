@@ -80,6 +80,10 @@ export interface EpisodeTrack {
   audio_url?: string | null;
   dl_attempts: number;
   dl_failed_at: string | null;
+  is_seed?: boolean;
+  is_re_seed?: boolean;
+  is_artist_seed?: boolean;
+  super_liked?: boolean;
 }
 
 // =============================================================================
