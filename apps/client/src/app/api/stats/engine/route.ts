@@ -7,55 +7,113 @@ export async function GET() {
   try {
     const db = getServiceClient();
 
-    // Track pipeline breakdown — need counts from tracks table
-    // We fetch counts via RPC-style raw queries using supabase filters
+    // ── Pipeline breakdown ──────────────────────────────────────────────
 
     // Total tracks
     const { count: total } = await db
       .from("tracks")
       .select("id", { count: "exact", head: true });
 
-    // Failed: status = 'failed' OR spotify_url = '' (union via .or)
-    const { count: failedUnion } = await db
-      .from("tracks")
-      .select("id", { count: "exact", head: true })
-      .or("status.eq.failed,spotify_url.eq.");
-
-    // Downloaded: storage_path IS NOT NULL
+    // Downloaded: has storage_path
     const { count: downloaded } = await db
       .from("tracks")
       .select("id", { count: "exact", head: true })
       .not("storage_path", "is", null);
 
-    // Enriched (not downloaded): (spotify_url IS NOT NULL OR youtube_url IS NOT NULL) AND storage_path IS NULL AND status = 'pending'
-    // Use .or for spotify_url/youtube_url, then filter out downloaded + failed
-    const { count: enriched } = await db
-      .from("tracks")
-      .select("id", { count: "exact", head: true })
-      .or("spotify_url.not.is.null,youtube_url.not.is.null")
-      .is("storage_path", null)
-      .eq("status", "pending")
-      .neq("spotify_url", "");
-
-    // Pending (not enriched): status = 'pending' AND spotify_url IS NULL AND youtube_url IS NULL
-    const { count: pending } = await db
+    // Pending enrichment: status='pending', no spotify_url AND no youtube_url
+    const { count: pendingEnrichment } = await db
       .from("tracks")
       .select("id", { count: "exact", head: true })
       .eq("status", "pending")
       .is("spotify_url", null)
       .is("youtube_url", null);
 
+    // Pending download: has youtube_url, no storage_path, status='pending', dl_attempts < 3
+    const { count: pendingDownload } = await db
+      .from("tracks")
+      .select("id", { count: "exact", head: true })
+      .not("youtube_url", "is", null)
+      .is("storage_path", null)
+      .eq("status", "pending")
+      .lt("dl_attempts", 3);
+
+    // Skipped (unfindable): status='skipped'
+    const { count: skippedUnfindable } = await db
+      .from("tracks")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "skipped");
+
+    // Failed download: has youtube_url, dl_attempts >= 3, no storage_path
+    const { count: failedDownload } = await db
+      .from("tracks")
+      .select("id", { count: "exact", head: true })
+      .not("youtube_url", "is", null)
+      .gte("dl_attempts", 3)
+      .is("storage_path", null);
+
+    // Failed enrichment: status='failed' OR (spotify_url='' AND youtube_url is null)
+    const { count: failedEnrichment } = await db
+      .from("tracks")
+      .select("id", { count: "exact", head: true })
+      .or("status.eq.failed,and(spotify_url.eq.,youtube_url.is.null)");
+
     const totalCount = total ?? 0;
     const downloadedCount = downloaded ?? 0;
-    const enrichedCount = enriched ?? 0;
-    const pendingCount = pending ?? 0;
-    const failedCount = failedUnion ?? 0;
+    const pendingEnrichmentCount = pendingEnrichment ?? 0;
+    const pendingDownloadCount = pendingDownload ?? 0;
+    const skippedCount = skippedUnfindable ?? 0;
+    const failedDownloadCount = failedDownload ?? 0;
+    const failedEnrichmentCount = failedEnrichment ?? 0;
 
     const pct = (n: number) =>
       totalCount > 0 ? Math.round((n / totalCount) * 1000) / 10 : 0;
 
-    // Watcher: last watcher_connected OR watcher_reconnect event — ONLINE if within last 10 min
-    // watcher_reconnect is emitted after reconnects and replaces watcher_connected in that scenario
+    // ── Enrichment sources ──────────────────────────────────────────────
+
+    // Spotify only: has spotify_url (non-empty), no youtube_url
+    const { count: spotifyOnly } = await db
+      .from("tracks")
+      .select("id", { count: "exact", head: true })
+      .not("spotify_url", "is", null)
+      .neq("spotify_url", "")
+      .is("youtube_url", null);
+
+    // YouTube only: has youtube_url, no spotify_url (or empty)
+    const { count: youtubeOnly } = await db
+      .from("tracks")
+      .select("id", { count: "exact", head: true })
+      .not("youtube_url", "is", null)
+      .or("spotify_url.is.null,spotify_url.eq.");
+
+    // SoundCloud: metadata->>'audio_source' = 'soundcloud'
+    const { count: soundcloud } = await db
+      .from("tracks")
+      .select("id", { count: "exact", head: true })
+      .eq("metadata->>audio_source", "soundcloud");
+
+    // MusicBrainz: metadata->>'musicbrainz_id' is not null
+    const { count: musicbrainz } = await db
+      .from("tracks")
+      .select("id", { count: "exact", head: true })
+      .not("metadata->>musicbrainz_id", "is", null);
+
+    // Both Spotify + YouTube
+    const { count: bothSpotifyYoutube } = await db
+      .from("tracks")
+      .select("id", { count: "exact", head: true })
+      .not("spotify_url", "is", null)
+      .neq("spotify_url", "")
+      .not("youtube_url", "is", null);
+
+    // No match: no spotify and no youtube
+    const { count: noMatch } = await db
+      .from("tracks")
+      .select("id", { count: "exact", head: true })
+      .or("spotify_url.is.null,spotify_url.eq.")
+      .is("youtube_url", null);
+
+    // ── Watcher status ──────────────────────────────────────────────────
+
     const { data: watcherEvents } = await db
       .from("engine_events")
       .select("created_at, event_type")
@@ -69,7 +127,8 @@ export async function GET() {
       connectedAt != null &&
       Date.now() - new Date(connectedAt).getTime() < 30 * 60 * 1000;
 
-    // Last discover run
+    // ── Last discover run ───────────────────────────────────────────────
+
     const { data: discoverRuns } = await db
       .from("discovery_runs")
       .select("completed_at, started_at, tracks_found, tracks_added")
@@ -78,7 +137,8 @@ export async function GET() {
 
     const lastDiscover = discoverRuns?.[0] ?? null;
 
-    // Last download run: look for download_completed or super_like_completed engine events
+    // ── Last download event ─────────────────────────────────────────────
+
     const { data: downloadEvents } = await db
       .from("engine_events")
       .select("created_at, metadata")
@@ -88,7 +148,8 @@ export async function GET() {
 
     const lastDownloadEvent = downloadEvents?.[0] ?? null;
 
-    // Enrichment + download rates (based on last 10 minutes of engine_events)
+    // ── Throughput rates (last 10 min) ──────────────────────────────────
+
     const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
     const { count: enrichEventsCount } = await db
@@ -107,25 +168,38 @@ export async function GET() {
     const downloadRate = Math.round(((downloadEventsCount ?? 0) / 10) * 10) / 10;
 
     const etaEnrichment = enrichRate > 0
-      ? Math.round(pendingCount / enrichRate)
+      ? Math.round(pendingEnrichmentCount / enrichRate)
       : null;
 
-    // "enriched but not downloaded" count is what download drain will process
     const etaDownload = downloadRate > 0
-      ? Math.round(enrichedCount / downloadRate)
+      ? Math.round(pendingDownloadCount / downloadRate)
       : null;
 
     return NextResponse.json({
-      tracks: {
+      pipeline: {
         total: totalCount,
-        pending: pendingCount,
-        enriched: enrichedCount,
+        pending_enrichment: pendingEnrichmentCount,
+        pending_download: pendingDownloadCount,
         downloaded: downloadedCount,
-        failed: failedCount,
-        pending_pct: pct(pendingCount),
-        enriched_pct: pct(enrichedCount),
-        downloaded_pct: pct(downloadedCount),
-        failed_pct: pct(failedCount),
+        skipped_unfindable: skippedCount,
+        failed_download: failedDownloadCount,
+        failed_enrichment: failedEnrichmentCount,
+        percentages: {
+          pending_enrichment: pct(pendingEnrichmentCount),
+          pending_download: pct(pendingDownloadCount),
+          downloaded: pct(downloadedCount),
+          skipped_unfindable: pct(skippedCount),
+          failed_download: pct(failedDownloadCount),
+          failed_enrichment: pct(failedEnrichmentCount),
+        },
+      },
+      enrichment_sources: {
+        spotify_only: spotifyOnly ?? 0,
+        youtube_only: youtubeOnly ?? 0,
+        soundcloud: soundcloud ?? 0,
+        musicbrainz: musicbrainz ?? 0,
+        both_spotify_youtube: bothSpotifyYoutube ?? 0,
+        no_match: noMatch ?? 0,
       },
       watcher: {
         online,

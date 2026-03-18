@@ -253,56 +253,141 @@ export default function StatsPage() {
             <div className="bg-surface-1 rounded-xl p-4">
               <p className="text-xs text-muted mb-1">Enrichment Rate</p>
               <p className="text-2xl font-semibold font-mono text-accent">
-                {engine.tracks.total > 0
-                  ? `${Math.round(((engine.tracks.enriched + engine.tracks.downloaded) / engine.tracks.total) * 100)}%`
+                {engine.pipeline.total > 0
+                  ? `${Math.round(((engine.pipeline.total - engine.pipeline.pending_enrichment - engine.pipeline.failed_enrichment) / engine.pipeline.total) * 100)}%`
                   : "—"}
               </p>
             </div>
             <div className="bg-surface-1 rounded-xl p-4">
               <p className="text-xs text-muted mb-1">Download Rate</p>
               <p className="text-2xl font-semibold font-mono text-accent">
-                {engine.tracks.total > 0
-                  ? `${Math.round((engine.tracks.downloaded / engine.tracks.total) * 100)}%`
+                {engine.pipeline.total > 0
+                  ? `${Math.round((engine.pipeline.downloaded / engine.pipeline.total) * 100)}%`
                   : "—"}
               </p>
             </div>
           </div>
 
-          {/* Track pipeline breakdown */}
+          {/* Stacked pipeline progress bar */}
           <div className="bg-surface-1 rounded-xl p-4 mb-4">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs text-muted uppercase tracking-wider">
                 Track Pipeline
               </p>
               <p className="text-xs text-muted font-mono">
-                {engine.tracks.total.toLocaleString()} total
+                {engine.pipeline.total.toLocaleString()} total
               </p>
             </div>
+
+            {/* Stacked bar */}
+            <div className="h-3 bg-surface-2 rounded-full overflow-hidden flex mb-4">
+              {engine.pipeline.percentages.downloaded > 0 && (
+                <div
+                  className="bg-green-400 h-full"
+                  style={{ width: `${engine.pipeline.percentages.downloaded}%` }}
+                  title={`Downloaded: ${engine.pipeline.downloaded.toLocaleString()}`}
+                />
+              )}
+              {engine.pipeline.percentages.pending_download > 0 && (
+                <div
+                  className="bg-blue-400 h-full"
+                  style={{ width: `${engine.pipeline.percentages.pending_download}%` }}
+                  title={`Pending download: ${engine.pipeline.pending_download.toLocaleString()}`}
+                />
+              )}
+              {engine.pipeline.percentages.pending_enrichment > 0 && (
+                <div
+                  className="bg-amber-400 h-full"
+                  style={{ width: `${engine.pipeline.percentages.pending_enrichment}%` }}
+                  title={`Pending enrichment: ${engine.pipeline.pending_enrichment.toLocaleString()}`}
+                />
+              )}
+              {engine.pipeline.percentages.skipped_unfindable > 0 && (
+                <div
+                  className="bg-gray-500 h-full"
+                  style={{ width: `${engine.pipeline.percentages.skipped_unfindable}%` }}
+                  title={`Skipped (unfindable): ${engine.pipeline.skipped_unfindable.toLocaleString()}`}
+                />
+              )}
+              {engine.pipeline.percentages.failed_download > 0 && (
+                <div
+                  className="bg-red-400 h-full"
+                  style={{ width: `${engine.pipeline.percentages.failed_download}%` }}
+                  title={`Failed downloads: ${engine.pipeline.failed_download.toLocaleString()}`}
+                />
+              )}
+              {engine.pipeline.percentages.failed_enrichment > 0 && (
+                <div
+                  className="bg-red-600 h-full"
+                  style={{ width: `${engine.pipeline.percentages.failed_enrichment}%` }}
+                  title={`No online match: ${engine.pipeline.failed_enrichment.toLocaleString()}`}
+                />
+              )}
+            </div>
+
+            {/* Legend */}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 mb-4">
+              <LegendDot color="bg-green-400" label="Downloaded" />
+              <LegendDot color="bg-blue-400" label="Pending DL" />
+              <LegendDot color="bg-amber-400" label="Pending Enrichment" />
+              <LegendDot color="bg-gray-500" label="Skipped" />
+              <LegendDot color="bg-red-400" label="Failed DL" />
+              <LegendDot color="bg-red-600" label="No Match" />
+            </div>
+
+            {/* Detailed rows */}
             <div className="space-y-3">
               <PipelineBar
                 label="Downloaded"
-                count={engine.tracks.downloaded}
-                pct={engine.tracks.downloaded_pct}
+                count={engine.pipeline.downloaded}
+                pct={engine.pipeline.percentages.downloaded}
                 color="bg-green-400"
               />
               <PipelineBar
-                label="Enriched"
-                count={engine.tracks.enriched}
-                pct={engine.tracks.enriched_pct}
-                color="bg-accent"
+                label="Pending download"
+                count={engine.pipeline.pending_download}
+                pct={engine.pipeline.percentages.pending_download}
+                color="bg-blue-400"
               />
               <PipelineBar
-                label="Pending"
-                count={engine.tracks.pending}
-                pct={engine.tracks.pending_pct}
-                color="bg-surface-3"
+                label="Pending enrichment"
+                count={engine.pipeline.pending_enrichment}
+                pct={engine.pipeline.percentages.pending_enrichment}
+                color="bg-amber-400"
               />
               <PipelineBar
-                label="Failed"
-                count={engine.tracks.failed}
-                pct={engine.tracks.failed_pct}
-                color="bg-red-400/60"
+                label="Skipped (unfindable)"
+                count={engine.pipeline.skipped_unfindable}
+                pct={engine.pipeline.percentages.skipped_unfindable}
+                color="bg-gray-500"
               />
+              <PipelineBar
+                label="Failed downloads (3 attempts)"
+                count={engine.pipeline.failed_download}
+                pct={engine.pipeline.percentages.failed_download}
+                color="bg-red-400"
+              />
+              <PipelineBar
+                label="No online match"
+                count={engine.pipeline.failed_enrichment}
+                pct={engine.pipeline.percentages.failed_enrichment}
+                color="bg-red-600"
+              />
+            </div>
+          </div>
+
+          {/* Enrichment sources */}
+          <div className="bg-surface-1 rounded-xl p-4 mb-4">
+            <p className="text-xs text-muted uppercase tracking-wider mb-3">
+              Enrichment Sources
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <SourcePill label="Spotify only" count={engine.enrichment_sources.spotify_only} color="bg-green-500/20 text-green-400" />
+              <SourcePill label="YouTube only" count={engine.enrichment_sources.youtube_only} color="bg-red-500/20 text-red-400" />
+              <SourcePill label="Both Spotify+YT" count={engine.enrichment_sources.both_spotify_youtube} color="bg-purple-500/20 text-purple-400" />
+              <SourcePill label="SoundCloud" count={engine.enrichment_sources.soundcloud} color="bg-orange-500/20 text-orange-400" />
+              <SourcePill label="MusicBrainz" count={engine.enrichment_sources.musicbrainz} color="bg-blue-500/20 text-blue-400" />
+              <SourcePill label="No match" count={engine.enrichment_sources.no_match} color="bg-surface-3 text-muted" />
             </div>
           </div>
 
@@ -577,5 +662,23 @@ function PipelineBar({
         />
       </div>
     </div>
+  );
+}
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className={`w-2 h-2 rounded-full ${color}`} />
+      <span className="text-[10px] text-muted">{label}</span>
+    </span>
+  );
+}
+
+function SourcePill({ label, count, color }: { label: string; count: number; color: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono ${color}`}>
+      {label}
+      <span className="font-semibold">{count.toLocaleString()}</span>
+    </span>
   );
 }

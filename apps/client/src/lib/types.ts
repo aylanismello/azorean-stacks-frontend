@@ -198,16 +198,30 @@ export interface Stats {
 }
 
 export interface EngineStats {
-  tracks: {
+  pipeline: {
     total: number;
-    pending: number;
-    enriched: number;
+    pending_enrichment: number;
+    pending_download: number;
     downloaded: number;
-    failed: number;
-    pending_pct: number;
-    enriched_pct: number;
-    downloaded_pct: number;
-    failed_pct: number;
+    skipped_unfindable: number;
+    failed_download: number;
+    failed_enrichment: number;
+    percentages: {
+      pending_enrichment: number;
+      pending_download: number;
+      downloaded: number;
+      skipped_unfindable: number;
+      failed_download: number;
+      failed_enrichment: number;
+    };
+  };
+  enrichment_sources: {
+    spotify_only: number;
+    youtube_only: number;
+    soundcloud: number;
+    musicbrainz: number;
+    both_spotify_youtube: number;
+    no_match: number;
   };
   watcher: {
     online: boolean;
