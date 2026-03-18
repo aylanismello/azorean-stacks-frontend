@@ -669,7 +669,8 @@ async function spotifySearch(query: string, token: string, artist: string, title
       log("fail", `Spotify rate-limited 3 times — giving up for "${query}"`);
       return [];
     }
-    const waitSec = parseInt(res.headers.get("Retry-After") || "5", 10);
+    const rawWait = parseInt(res.headers.get("Retry-After") || "5", 10);
+    const waitSec = Math.min(rawWait, 5);
     log("wait", `Spotify rate-limited — waiting ${waitSec}s (${artist} – ${title}, retry ${retries + 1}/3)`);
     await sleep(waitSec * 1000);
     return spotifySearch(query, token, artist, title, retries + 1);
@@ -858,7 +859,8 @@ async function spotifyArtistGenres(artistIds: string[], retries = 0): Promise<st
         log("fail", "Spotify artist genres rate-limited 3 times — giving up");
         return [];
       }
-      const waitSec = parseInt(res.headers.get("Retry-After") || "5", 10);
+      const rawWait = parseInt(res.headers.get("Retry-After") || "5", 10);
+      const waitSec = Math.min(rawWait, 5);
       log("wait", `Spotify artist rate-limited — waiting ${waitSec}s (retry ${retries + 1}/3)`);
       await sleep(waitSec * 1000);
       return spotifyArtistGenres(artistIds, retries + 1);

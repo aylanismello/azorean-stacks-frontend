@@ -85,7 +85,7 @@ export async function GET(req: NextRequest) {
   // 3. Get per-episode track stats in one query
   const { data: tracks } = await supabase
     .from("tracks")
-    .select("episode_id, status, cover_art_url, artist, title")
+    .select("episode_id, status, cover_art_url, artist, title, source_url, source_context")
     .in("episode_id", Array.from(allEpisodeIds));
 
   // Aggregate stats per episode
