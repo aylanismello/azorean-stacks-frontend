@@ -33,6 +33,9 @@ const CONCURRENCY = {
   ntsMaxEpisodes: 10, // Max episodes to check per source per seed
 } as const;
 
+const PRIORITY_DOWNLOAD_CONCURRENCY = 15; // Max concurrent downloads for priority pipeline
+const PRIORITY_ENRICH_CONCURRENCY = 40;   // Max concurrent enrichments for priority pipeline
+
 const GARBAGE_TITLES = new Set(["unknown track", "untitled", "id", "?", "unknown", ""]);
 
 // ─── STATUS TRACKING ────────────────────────────────────────
@@ -740,6 +743,7 @@ async function updatePipelineStatus(
 }
 
 async function processPrioritySeed(seedId: string) {
+  const startTime = Date.now();
   const { data: seed, error: seedErr } = await db.from("seeds").select("*").eq("id", seedId).single();
   if (seedErr || !seed) {
     log("fail", `Priority: could not read seed ${seedId}`);
@@ -940,12 +944,24 @@ async function processPrioritySeed(seedId: string) {
       tracksToProcess.push(inserted);
     }
   } else {
-    // Episode already existed — fetch its unenriched tracks
-    const { data: existingTracks } = await db.from("tracks")
+    // Episode already existed — fetch pending (un-enriched) tracks AND enriched-but-not-downloaded tracks
+    const { data: pendingTracks } = await db.from("tracks")
       .select("*")
       .eq("episode_id", episodeId)
       .eq("status", "pending");
-    tracksToProcess = existingTracks || [];
+    const { data: needsDownload } = await db.from("tracks")
+      .select("*")
+      .eq("episode_id", episodeId)
+      .not("youtube_url", "is", null)
+      .is("storage_path", null);
+    const allTracks = [...(pendingTracks || []), ...(needsDownload || [])];
+    // Deduplicate by id
+    const seen = new Set<string>();
+    tracksToProcess = allTracks.filter((t) => {
+      if (seen.has(t.id)) return false;
+      seen.add(t.id);
+      return true;
+    });
   }
 
   if (tracksToProcess.length === 0) {
@@ -965,25 +981,25 @@ async function processPrioritySeed(seedId: string) {
   );
 
   let enriched = 0;
-  for (let i = 0; i < tracksToProcess.length; i += CONCURRENCY.enrich) {
-    const batch = tracksToProcess.slice(i, i + CONCURRENCY.enrich);
+  for (let i = 0; i < tracksToProcess.length; i += PRIORITY_ENRICH_CONCURRENCY) {
+    const batch = tracksToProcess.slice(i, i + PRIORITY_ENRICH_CONCURRENCY);
     const results = await Promise.allSettled(batch.map(enrichTrack));
     for (const r of results) {
       if (r.status === "fulfilled" && r.value) enriched++;
     }
-    await updatePipelineStatus(seedId, { progress: `${Math.min(i + CONCURRENCY.enrich, tracksToProcess.length)}/${tracksToProcess.length}` });
+    await updatePipelineStatus(seedId, { progress: `${Math.min(i + PRIORITY_ENRICH_CONCURRENCY, tracksToProcess.length)}/${tracksToProcess.length}` });
   }
 
   await updatePipelineStatus(seedId, {}, `enriched ${enriched}/${tracksToProcess.length} tracks`);
 
-  // Phase 3: Download first 5 tracks with YouTube URLs
+  // Phase 3: Download ALL tracks with YouTube URLs (no limit)
   const { data: downloadable } = await db.from("tracks")
     .select("*")
     .in("id", tracksToProcess.map((t) => t.id))
     .not("youtube_url", "is", null)
-    .is("storage_path", null)
-    .limit(5);
+    .is("storage_path", null);
 
+  let downloaded = 0;
   if (downloadable && downloadable.length > 0) {
     await updatePipelineStatus(
       seedId,
@@ -991,28 +1007,47 @@ async function processPrioritySeed(seedId: string) {
       `downloading ${downloadable.length} tracks`,
     );
 
-    let downloaded = 0;
-    for (let i = 0; i < downloadable.length; i += CONCURRENCY.download) {
-      const batch = downloadable.slice(i, i + CONCURRENCY.download);
+    for (let i = 0; i < downloadable.length; i += PRIORITY_DOWNLOAD_CONCURRENCY) {
+      const batch = downloadable.slice(i, i + PRIORITY_DOWNLOAD_CONCURRENCY);
       const results = await Promise.allSettled(batch.map(async (track) => {
         const ok = await downloadTrack(track);
         log(ok ? "ok" : "fail", `Priority DL: ${track.artist} – ${track.title}`);
         return ok;
       }));
       downloaded += results.filter((r) => r.status === "fulfilled" && r.value).length;
-      await updatePipelineStatus(seedId, { progress: `${Math.min(i + CONCURRENCY.download, downloadable.length)}/${downloadable.length}` });
+      await updatePipelineStatus(seedId, { progress: `${Math.min(i + PRIORITY_DOWNLOAD_CONCURRENCY, downloadable.length)}/${downloadable.length}` });
     }
 
     await updatePipelineStatus(seedId, {}, `downloaded ${downloaded}/${downloadable.length} tracks`);
   }
 
+  // Phase 4: Cleanup — mark dangling pending tracks (no spotify_url AND no youtube_url) as skipped
+  const trackIds = tracksToProcess.map((t) => t.id);
+  if (trackIds.length > 0) {
+    const { data: dangling } = await db.from("tracks")
+      .select("id")
+      .in("id", trackIds)
+      .eq("status", "pending")
+      .is("spotify_url", null)
+      .is("youtube_url", null);
+
+    if (dangling && dangling.length > 0) {
+      await db.from("tracks")
+        .update({ status: "skipped", metadata: { skip_reason: "no_spotify_or_youtube_match" } })
+        .in("id", dangling.map((t) => t.id));
+      await updatePipelineStatus(seedId, {}, `skipped ${dangling.length} tracks with no match`);
+      log("info", `Priority: skipped ${dangling.length} dangling tracks for ${seedLabel}`);
+    }
+  }
+
+  const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
   await updatePipelineStatus(
     seedId,
     { state: "done", completed_at: new Date().toISOString() },
-    "pipeline complete",
+    `pipeline complete — ${tracksToProcess.length} tracks processed, ${enriched} enriched, ${downloaded} downloaded in ${elapsedSec}s`,
   );
 
-  log("ok", `Priority pipeline done for ${seedLabel}`);
+  log("ok", `Priority pipeline done for ${seedLabel} — ${tracksToProcess.length} tracks, ${enriched} enriched, ${downloaded} downloaded in ${elapsedSec}s`);
 }
 
 async function processPriorityQueue() {
