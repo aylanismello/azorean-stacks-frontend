@@ -1,15 +1,18 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Stats, PipelineStats } from "@/lib/types";
+import { Stats, PipelineStats, EngineStats } from "@/lib/types";
 
 export default function StatsPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [pipeline, setPipeline] = useState<PipelineStats | null>(null);
+  const [engine, setEngine] = useState<EngineStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [secondsAgo, setSecondsAgo] = useState(0);
 
-  useEffect(() => {
+  const fetchAll = () =>
     Promise.all([
       fetch("/api/stats").then((res) => {
         if (!res.ok) throw new Error(`Failed to load stats (${res.status})`);
@@ -19,17 +22,40 @@ export default function StatsPage() {
         if (!res.ok) throw new Error(`Failed to load pipeline stats (${res.status})`);
         return res.json();
       }),
+      fetch("/api/stats/engine").then((res) => {
+        if (!res.ok) throw new Error(`Failed to load engine stats (${res.status})`);
+        return res.json();
+      }),
     ])
-      .then(([statsData, pipelineData]) => {
+      .then(([statsData, pipelineData, engineData]) => {
         setStats(statsData);
         setPipeline(pipelineData);
+        setEngine(engineData);
+        setLastUpdated(new Date());
+        setSecondsAgo(0);
         setError(null);
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : "Failed to load stats");
-      })
-      .finally(() => setLoading(false));
+      });
+
+  useEffect(() => {
+    fetchAll().finally(() => setLoading(false));
+
+    const refreshInterval = setInterval(fetchAll, 30_000);
+    return () => clearInterval(refreshInterval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Tick "last updated X seconds ago"
+  useEffect(() => {
+    const tick = setInterval(() => {
+      if (lastUpdated) {
+        setSecondsAgo(Math.floor((Date.now() - lastUpdated.getTime()) / 1000));
+      }
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [lastUpdated]);
 
   if (loading) {
     return (
@@ -78,9 +104,21 @@ export default function StatsPage() {
       minute: "2-digit",
     });
 
+  const formatSecondsAgo = (s: number) => {
+    if (s < 60) return `${s}s ago`;
+    return `${Math.floor(s / 60)}m ago`;
+  };
+
   return (
     <div className="px-4 md:px-6 pt-4 md:pt-8 max-w-3xl mx-auto">
-      <h1 className="text-xl font-semibold mb-6">Taste Dashboard</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-xl font-semibold">Taste Dashboard</h1>
+        {lastUpdated && (
+          <span className="text-[11px] text-muted/60 font-mono">
+            updated {formatSecondsAgo(secondsAgo)}
+          </span>
+        )}
+      </div>
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-10">
@@ -92,6 +130,122 @@ export default function StatsPage() {
           value={`${Math.round(stats.approval_rate * 100)}%`}
         />
       </div>
+
+      {/* Engine Status */}
+      {engine && (
+        <div className="mb-10">
+          <h2 className="text-sm font-medium text-muted mb-4 uppercase tracking-wider">
+            Engine Status
+          </h2>
+
+          {/* Watcher + rates */}
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="bg-surface-1 rounded-xl p-4">
+              <p className="text-xs text-muted mb-1">Watcher</p>
+              <p
+                className={`text-sm font-semibold ${
+                  engine.watcher.online ? "text-green-400" : "text-red-400"
+                }`}
+              >
+                {engine.watcher.online ? "ONLINE" : "OFFLINE"}
+              </p>
+              {engine.watcher.connected_at && (
+                <p className="text-[10px] text-muted mt-1 font-mono">
+                  since {formatDate(engine.watcher.connected_at)}
+                </p>
+              )}
+            </div>
+            <div className="bg-surface-1 rounded-xl p-4">
+              <p className="text-xs text-muted mb-1">Enrichment Rate</p>
+              <p className="text-2xl font-semibold font-mono text-accent">
+                {engine.tracks.total > 0
+                  ? `${Math.round(((engine.tracks.enriched + engine.tracks.downloaded) / engine.tracks.total) * 100)}%`
+                  : "—"}
+              </p>
+            </div>
+            <div className="bg-surface-1 rounded-xl p-4">
+              <p className="text-xs text-muted mb-1">Download Rate</p>
+              <p className="text-2xl font-semibold font-mono text-accent">
+                {engine.tracks.total > 0
+                  ? `${Math.round((engine.tracks.downloaded / engine.tracks.total) * 100)}%`
+                  : "—"}
+              </p>
+            </div>
+          </div>
+
+          {/* Track pipeline breakdown */}
+          <div className="bg-surface-1 rounded-xl p-4 mb-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-muted uppercase tracking-wider">
+                Track Pipeline
+              </p>
+              <p className="text-xs text-muted font-mono">
+                {engine.tracks.total.toLocaleString()} total
+              </p>
+            </div>
+            <div className="space-y-3">
+              <PipelineBar
+                label="Downloaded"
+                count={engine.tracks.downloaded}
+                pct={engine.tracks.downloaded_pct}
+                color="bg-green-400"
+              />
+              <PipelineBar
+                label="Enriched"
+                count={engine.tracks.enriched}
+                pct={engine.tracks.enriched_pct}
+                color="bg-accent"
+              />
+              <PipelineBar
+                label="Pending"
+                count={engine.tracks.pending}
+                pct={engine.tracks.pending_pct}
+                color="bg-surface-3"
+              />
+              <PipelineBar
+                label="Failed"
+                count={engine.tracks.failed}
+                pct={engine.tracks.failed_pct}
+                color="bg-red-400/60"
+              />
+            </div>
+          </div>
+
+          {/* Last runs */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-surface-1 rounded-xl p-4">
+              <p className="text-xs text-muted mb-1">Last Discover Run</p>
+              {engine.last_discover ? (
+                <>
+                  <p className="text-xs font-mono text-foreground/70">
+                    {formatDate(engine.last_discover.at)}
+                  </p>
+                  <p className="text-[11px] text-muted mt-1">
+                    {engine.last_discover.tracks_found} tracks found
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-muted/50">No runs yet</p>
+              )}
+            </div>
+            <div className="bg-surface-1 rounded-xl p-4">
+              <p className="text-xs text-muted mb-1">Last Download Run</p>
+              {engine.last_download ? (
+                <>
+                  <p className="text-xs font-mono text-foreground/70">
+                    {formatDate(engine.last_download.at)}
+                  </p>
+                  <p className="text-[11px] text-muted mt-1">
+                    {String(engine.last_download.tracks_downloaded)} downloaded
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-muted/50">No downloads yet</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid md:grid-cols-2 gap-8">
         {/* Top Artists */}
@@ -298,6 +452,35 @@ function StatCard({
       >
         {value}
       </p>
+    </div>
+  );
+}
+
+function PipelineBar({
+  label,
+  count,
+  pct,
+  color,
+}: {
+  label: string;
+  count: number;
+  pct: number;
+  color: string;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs text-foreground/70">{label}</span>
+        <span className="text-xs text-muted font-mono">
+          {count.toLocaleString()} <span className="text-muted/60">({pct}%)</span>
+        </span>
+      </div>
+      <div className="h-1.5 bg-surface-2 rounded-full overflow-hidden">
+        <div
+          className={`h-full ${color} rounded-full transition-all`}
+          style={{ width: `${Math.min(pct, 100)}%` }}
+        />
+      </div>
     </div>
   );
 }

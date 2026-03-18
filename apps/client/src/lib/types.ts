@@ -197,6 +197,32 @@ export interface Stats {
   recent_runs: DiscoveryRun[];
 }
 
+export interface EngineStats {
+  tracks: {
+    total: number;
+    pending: number;
+    enriched: number;
+    downloaded: number;
+    failed: number;
+    pending_pct: number;
+    enriched_pct: number;
+    downloaded_pct: number;
+    failed_pct: number;
+  };
+  watcher: {
+    online: boolean;
+    connected_at: string | null;
+  };
+  last_discover: {
+    at: string;
+    tracks_found: number;
+  } | null;
+  last_download: {
+    at: string;
+    tracks_downloaded: number;
+  } | null;
+}
+
 export interface PipelineEngineEvent {
   type: string;
   status: string;
