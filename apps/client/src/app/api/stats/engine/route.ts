@@ -64,8 +64,8 @@ export async function GET() {
     // watcher_reconnect is emitted after reconnects and replaces watcher_connected in that scenario
     const { data: watcherEvents } = await db
       .from("engine_events")
-      .select("created_at, type")
-      .in("type", ["watcher_connected", "watcher_reconnect"])
+      .select("created_at, event_type")
+      .in("event_type", ["watcher_connected", "watcher_reconnect"])
       .order("created_at", { ascending: false })
       .limit(1);
 
@@ -73,7 +73,7 @@ export async function GET() {
     const connectedAt = lastWatcherEvent?.created_at ?? null;
     const online =
       connectedAt != null &&
-      Date.now() - new Date(connectedAt).getTime() < 10 * 60 * 1000;
+      Date.now() - new Date(connectedAt).getTime() < 30 * 60 * 1000;
 
     // Last discover run
     const { data: discoverRuns } = await db
@@ -88,7 +88,7 @@ export async function GET() {
     const { data: downloadEvents } = await db
       .from("engine_events")
       .select("created_at, metadata")
-      .in("type", ["download_completed", "super_like_completed", "batch_download_completed"])
+      .in("event_type", ["download_completed", "super_like_completed", "batch_download_completed"])
       .order("created_at", { ascending: false })
       .limit(1);
 
@@ -109,7 +109,7 @@ export async function GET() {
       watcher: {
         online,
         connected_at: connectedAt,
-        event_type: lastWatcherEvent?.type ?? null,
+        event_type: lastWatcherEvent?.event_type ?? null,
       },
       last_discover: lastDiscover
         ? {
