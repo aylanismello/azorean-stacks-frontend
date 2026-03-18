@@ -417,10 +417,12 @@ async function enqueueBacklogSeeds() {
 }
 
 async function enqueueBacklogTracks() {
+  const MAX_DL_ATTEMPTS = 3;
   const { data: tracks, error } = await db.from("tracks")
-    .select("id, status, spotify_url, youtube_url, storage_path, created_at")
+    .select("id, status, spotify_url, youtube_url, storage_path, created_at, dl_attempts")
     .in("status", ["pending", "approved"])
     .is("storage_path", null)
+    .lt("dl_attempts", MAX_DL_ATTEMPTS)
     .order("created_at", { ascending: true })
     .limit(500);
 
@@ -429,8 +431,11 @@ async function enqueueBacklogTracks() {
     return;
   }
 
+  // Only enrich tracks that truly need it:
+  // - spotify_url is null (not empty string — empty string = already tried, found nothing)
+  // - OR no youtube_url and no storage_path
   const incomplete = (tracks || []).filter((track) =>
-    !track.youtube_url || (track.status === "pending" && !track.spotify_url)
+    !track.youtube_url || (track.status === "pending" && track.spotify_url === null)
   );
 
   if (incomplete.length === 0) {
@@ -531,13 +536,18 @@ async function processTrack(trackId: string, prefetched?: any) {
   }
 
   const label = `${track.artist} – ${track.title}`;
+  const MAX_DL_ATTEMPTS = 3;
+  // Only consider Spotify missing if it's truly null (not empty string — empty string means
+  // enrichment already ran and found nothing, so don't re-enrich repeatedly).
+  const spotifyMissing = track.spotify_url === null || track.spotify_url === undefined;
   const shouldEnrich =
     track.status === "pending" &&
-    (!track.spotify_url || (!track.youtube_url && !track.storage_path));
+    (spotifyMissing || (!track.youtube_url && !track.storage_path));
   const canDownload =
     ["pending", "approved"].includes(track.status) &&
     !!track.youtube_url &&
-    !track.storage_path;
+    !track.storage_path &&
+    (track.dl_attempts || 0) < MAX_DL_ATTEMPTS;
 
   if (!shouldEnrich && !canDownload) {
     return;
@@ -567,7 +577,8 @@ async function processTrack(trackId: string, prefetched?: any) {
   if (
     ["pending", "approved"].includes(refreshed.status) &&
     refreshed.youtube_url &&
-    !refreshed.storage_path
+    !refreshed.storage_path &&
+    (refreshed.dl_attempts || 0) < MAX_DL_ATTEMPTS
   ) {
     const ok = await downloadTrack(refreshed);
     log(ok ? "ok" : "fail", `Repair DL: ${label}`);
@@ -877,8 +888,18 @@ async function processPrioritySeed(seedId: string) {
     episodeId = newEp.id;
   }
 
+  // Determine match type: full if seed track appears in the tracklist, artist if only artist matches
+  let priorityMatchType: "full" | "artist" | "unknown" = "unknown";
+  if (best.rawTracklist.length > 0) {
+    const hasFullMatch = best.rawTracklist.some((t) => isSameTrack(t, { artist: seed.artist, title: seed.title }));
+    const hasArtistMatch = !hasFullMatch && best.rawTracklist.some(
+      (t) => t.artist.toLowerCase().trim() === seed.artist.toLowerCase().trim()
+    );
+    priorityMatchType = hasFullMatch ? "full" : hasArtistMatch ? "artist" : "unknown";
+  }
+
   await db.from("episode_seeds").upsert(
-    { episode_id: episodeId, seed_id: seedId },
+    { episode_id: episodeId, seed_id: seedId, match_type: priorityMatchType },
     { onConflict: "episode_id,seed_id" },
   );
 
@@ -1048,7 +1069,8 @@ async function processPriorityQueue() {
 }
 
 async function resetStalePipelineStatuses() {
-  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  // Use 30 minutes — priority pipeline can take 10-20+ min for large episode sets
+  const fiveMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   try {
     const { data: stale } = await db.from("seeds")
       .select("id, pipeline_status")
@@ -1308,10 +1330,15 @@ function startWatcher() {
           setInterval(async () => {
             if (shuttingDown) return;
             if (trackQueue.length > 0) return;
+            // Only queue tracks that truly need enrichment:
+            // - spotify_url IS NULL (not empty string — empty string means we already tried and found nothing)
+            // - OR no youtube_url AND no storage_path (need YouTube lookup still)
+            // Also exclude tracks with too many failed download attempts (dl_attempts >= 3)
             const { data: pending, error } = await db.from("tracks")
-              .select("id")
+              .select("id, dl_attempts")
               .eq("status", "pending")
               .or("spotify_url.is.null,and(youtube_url.is.null,storage_path.is.null)")
+              .lt("dl_attempts", 3)
               .order("created_at", { ascending: true })
               .limit(100);
             if (error) {
