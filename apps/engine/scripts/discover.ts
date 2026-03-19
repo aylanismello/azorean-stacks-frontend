@@ -520,16 +520,26 @@ async function runDiscover(): Promise<number> {
     log("info", `Garbage filter: removed ${preFilterCount - filtered.length} tracks`);
   }
 
+  // Propagate seed genres to co-occurrence tracks so genre filters work before enrichment
+  let seedGenres: string[] | undefined;
+  if (seed.track_id) {
+    const { data: seedTrack } = await db.from("tracks").select("metadata").eq("id", seed.track_id).maybeSingle();
+    const genres = (seedTrack?.metadata as any)?.genres;
+    if (Array.isArray(genres) && genres.length > 0) seedGenres = genres;
+  }
+
   // Insert tracks and link to episodes with position
   let added = 0;
   for (const c of filtered) {
+    const trackMeta: Record<string, unknown> = { co_occurrence: c.co_occurrence, seed_artist: seed.artist, seed_title: seed.title };
+    if (seedGenres) trackMeta.seed_genres = seedGenres;
     const { data: inserted, error } = await db.from("tracks").insert({
       artist: c.artist,
       title: c.title,
       source: c.source,
       source_url: c.source_url,
       source_context: c.source_context,
-      metadata: { co_occurrence: c.co_occurrence, seed_artist: seed.artist, seed_title: seed.title },
+      metadata: trackMeta,
       status: "pending",
       episode_id: c.episode_id,
       seed_track_id: seed.track_id || null,
