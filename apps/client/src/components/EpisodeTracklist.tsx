@@ -389,7 +389,7 @@ export function EpisodeTracklist(props: TracklistProps) {
                   onClick={() => setShowUnplayable((prev) => !prev)}
                   className="w-full text-center py-2 mt-2 text-[10px] font-mono text-muted/60 hover:text-muted transition-colors"
                 >
-                  {showUnplayable ? "Hide unplayable" : `Show ${unplayableTracks.length} unplayable tracks`}
+                  {showUnplayable ? "Hide unenriched" : `Show ${unplayableTracks.length} unenriched tracks`}
                 </button>
                 {showUnplayable && unplayableTracks.map((t) => (
                   <div
