@@ -53,6 +53,11 @@ function StackPageContent() {
   const router = useRouter();
   const globalPlayer = useGlobalPlayer();
   const { connected: spotifyConnected } = useSpotify();
+  // Mobile: account for top bar (3.5rem) + bottom tab bar + player (~4.5rem)
+  // Desktop: override with md: classes that account for sidebar nav + player
+  const mobileHeightClass = globalPlayer.currentTrack
+    ? "h-[calc(100dvh-8rem-env(safe-area-inset-bottom,0px))]"
+    : "h-[calc(100dvh-7rem-env(safe-area-inset-bottom,0px))]";
   const desktopPlayerFrameClass = globalPlayer.currentTrack
     ? "md:h-[calc(100dvh-148px)] md:pb-6"
     : "md:h-[calc(100dvh-100px)] md:pb-4";
@@ -935,7 +940,7 @@ function StackPageContent() {
 
   // ── Main stack view ──
   return (
-    <div className={`px-4 pt-2 pb-0 h-[calc(100dvh-3.5rem-env(safe-area-inset-bottom,0px))] flex flex-col overflow-hidden ${desktopPlayerFrameClass}`}>
+    <div className={`px-4 pt-2 pb-0 ${mobileHeightClass} flex flex-col overflow-hidden ${desktopPlayerFrameClass}`}>
       {/* Top bar — stack identity always visible */}
       <div className="relative flex items-center justify-between mb-3 md:mb-2 md:max-w-6xl md:mx-auto md:w-full md:flex-shrink-0 min-h-[40px]">
         {/* Left: back to stacks */}
