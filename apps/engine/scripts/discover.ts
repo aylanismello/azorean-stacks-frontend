@@ -10,6 +10,9 @@
  *
  * Usage: bun run discover [--skip-discover] [--limit 50] [--duration 60]
  */
+import { initSentry, Sentry } from "../lib/sentry";
+initSentry();
+
 import { parseArgs } from "util";
 import { getSupabase } from "../lib/supabase";
 import { SOURCES } from "../lib/sources/index";
@@ -1120,6 +1123,9 @@ async function main() {
 }
 
 main().catch((err) => {
+  Sentry.captureException(err, {
+    tags: { component: "discover" },
+  });
   console.error("\n  !! Pipeline crashed !!");
   console.error(`  ${err instanceof Error ? err.stack || err.message : err}`);
   process.exit(1);
