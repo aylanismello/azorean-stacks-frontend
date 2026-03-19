@@ -120,11 +120,28 @@ function StackPageContent() {
   // This is true both for URL-driven episodes AND derived episodes in all-pending
   const [hasEpisodeTracks, setHasEpisodeTracks] = useState(!!episodeId);
 
-  // The track currently shown on the card
+  // Helper: check if a track has playable audio
+  const isTrackPlayable = (t: Track) => !!(t.audio_url || t.preview_url || t.storage_path || t.spotify_url);
+
+  // The track currently shown on the card — never land on an unplayable track
   const safeEpisodePos = Math.min(episodePos, Math.max(tracks.length - 1, 0));
-  const currentTrack = hasEpisodeTracks
-    ? tracks[safeEpisodePos] ?? null
-    : tracks[0] ?? null;
+  const currentTrack = (() => {
+    if (hasEpisodeTracks) {
+      const t = tracks[safeEpisodePos];
+      if (t && isTrackPlayable(t)) return t;
+      // Find next playable track from current position
+      for (let i = safeEpisodePos + 1; i < tracks.length; i++) {
+        if (isTrackPlayable(tracks[i])) return tracks[i];
+      }
+      // Wrap around
+      for (let i = 0; i < safeEpisodePos; i++) {
+        if (isTrackPlayable(tracks[i])) return tracks[i];
+      }
+      return null; // All unplayable
+    }
+    // Taste/ranked mode: first playable track
+    return tracks.find(isTrackPlayable) ?? null;
+  })();
 
   const lastEpisodeIdRef = useRef<string | null>(episodeId);
 
@@ -239,10 +256,10 @@ function StackPageContent() {
       setError(null);
       setAdvancingEpisode(false);
 
-      // In episode mode, start at the first pending track
+      // In episode mode, start at the first playable pending track
       if (episodeId && newTracks.length > 0) {
-        const firstPending = newTracks.findIndex((t) => t.status === "pending");
-        setEpisodePos(firstPending >= 0 ? firstPending : 0);
+        const firstPlayablePending = newTracks.findIndex((t) => t.status === "pending" && isTrackPlayable(t));
+        setEpisodePos(firstPlayablePending >= 0 ? firstPlayablePending : 0);
         setHasEpisodeTracks(true);
       }
     } catch (err) {
@@ -447,24 +464,24 @@ function StackPageContent() {
       if (!advance) return;
 
       if (hasEpisodeTracks) {
-        // Episode mode: check if any pending tracks remain (excluding the one we just voted on)
-        const remainingPending = tracks.filter((t) => t.id !== id && t.status === "pending");
+        // Episode mode: check if any playable pending tracks remain (excluding the one we just voted on)
+        const remainingPending = tracks.filter((t) => t.id !== id && t.status === "pending" && isTrackPlayable(t));
         if (remainingPending.length === 0) {
           // All tracks voted — advance to next episode
           advanceToNextEpisode();
           return;
         }
-        // Advance to next pending track — compute position and play directly
+        // Advance to next pending + playable track — compute position and play directly
         // so global player + card update atomically (no 1-render desync).
         const curPos = episodePosRef.current;
         let nextPos = -1;
         for (let i = curPos + 1; i < tracks.length; i++) {
-          if (tracks[i].id !== id && tracks[i].status === "pending") { nextPos = i; break; }
+          if (tracks[i].id !== id && tracks[i].status === "pending" && isTrackPlayable(tracks[i])) { nextPos = i; break; }
         }
         if (nextPos < 0) {
-          // Wrap around — find first pending before current
+          // Wrap around — find first pending + playable before current
           for (let i = 0; i < curPos; i++) {
-            if (tracks[i].id !== id && tracks[i].status === "pending") { nextPos = i; break; }
+            if (tracks[i].id !== id && tracks[i].status === "pending" && isTrackPlayable(tracks[i])) { nextPos = i; break; }
           }
         }
         if (nextPos >= 0) {
@@ -577,8 +594,8 @@ function StackPageContent() {
         setTracks(data.tracks);
         setTotal(data.total || 0);
         setHasEpisodeTracks(true);
-        const firstPending = data.tracks.findIndex((t: Track) => t.status === "pending");
-        setEpisodePos(firstPending >= 0 ? firstPending : 0);
+        const firstPlayable = data.tracks.findIndex((t: Track) => t.status === "pending" && isTrackPlayable(t));
+        setEpisodePos(firstPlayable >= 0 ? firstPlayable : 0);
       });
   }, [currentEpisodeId, episodeId, isTasteMode]);
 
@@ -861,10 +878,28 @@ function StackPageContent() {
   }
 
   // ── Empty ──
+  // Check if we have tracks but none are playable
+  const hasTracksButNonePlayable = tracks.length > 0 && !currentTrack;
+
   if (!currentTrack) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[80vh] px-6 text-center">
-        {episodeId ? (
+        {hasTracksButNonePlayable ? (
+          <>
+            <h2 className="text-xl font-medium text-foreground/80 mb-2">
+              No playable tracks yet — processing
+            </h2>
+            <p className="text-sm text-muted max-w-xs">
+              {tracks.length} track{tracks.length !== 1 ? "s" : ""} found but audio is still being processed. Check back soon.
+            </p>
+            <button
+              onClick={fetchTracks}
+              className="mt-6 px-5 py-2 text-sm bg-surface-2 hover:bg-surface-3 rounded-lg text-muted hover:text-foreground transition-colors"
+            >
+              Refresh
+            </button>
+          </>
+        ) : episodeId ? (
           <>
             <h2 className="text-xl font-medium text-foreground/80 mb-2">All done!</h2>
             <p className="text-sm text-muted max-w-xs">

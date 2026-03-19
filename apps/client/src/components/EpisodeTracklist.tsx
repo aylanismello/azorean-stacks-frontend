@@ -76,6 +76,7 @@ export function EpisodeTracklist(props: TracklistProps) {
   const [fetchedTracks, setFetchedTracks] = useState<TrackListItem[]>([]);
   const [loading, setLoading] = useState(!isDirectMode);
   const [error, setError] = useState<string | null>(null);
+  const [showUnplayable, setShowUnplayable] = useState(false);
   const globalPlayer = useGlobalPlayer();
   const playingRef = useRef<HTMLButtonElement>(null);
   const prevEpisodeIdRef = useRef(episodeId);
@@ -157,7 +158,11 @@ export function EpisodeTracklist(props: TracklistProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodeId, refreshKey, isDirectMode]);
 
-  const tracks = isDirectMode ? (props as DirectTracklistProps).directTracks : fetchedTracks;
+  const allTracks = isDirectMode ? (props as DirectTracklistProps).directTracks : fetchedTracks;
+  const isPlayable = (t: TrackListItem) => !!(t.storage_path || t.audio_url || t.preview_url || t.spotify_url);
+  const playableTracks = allTracks.filter(isPlayable);
+  const unplayableTracks = allTracks.filter((t) => !isPlayable(t));
+  const tracks = playableTracks;
 
   // Auto-scroll to playing track when tracklist loads or track changes
   useEffect(() => {
@@ -203,8 +208,8 @@ export function EpisodeTracklist(props: TracklistProps) {
     return null;
   };
 
-  // Header stats — just playable count
-  const playable = tracks.filter((t) => !!(t.storage_path || t.audio_url || t.preview_url || t.spotify_url)).length;
+  // Header stats
+  const playable = playableTracks.length;
 
   const displayTitle = listTitle || episodeTitle || "Tracklist";
 
@@ -219,7 +224,7 @@ export function EpisodeTracklist(props: TracklistProps) {
             </h3>
             {!loading && (
               <div className="flex items-center gap-3 mt-1 text-[10px] font-mono text-muted">
-                <span>{tracks.length} tracks</span>
+                <span>{allTracks.length} tracks</span>
                 {playable > 0 && <span className="text-green-400/70">{playable} playable</span>}
               </div>
             )}
@@ -245,19 +250,20 @@ export function EpisodeTracklist(props: TracklistProps) {
           </div>
         ) : error ? (
           <p className="text-center text-red-400/70 text-xs py-8">{error}</p>
-        ) : tracks.length === 0 ? (
+        ) : tracks.length === 0 && unplayableTracks.length === 0 ? (
           <p className="text-center text-muted text-xs py-8">No tracks</p>
+        ) : tracks.length === 0 && unplayableTracks.length > 0 ? (
+          <p className="text-center text-muted text-xs py-8">No playable tracks yet — processing</p>
         ) : (
           <div className="space-y-0.5">
             {tracks.map((t) => {
               const isPlaying = globalPlayer.currentTrack?.id === t.id;
-              const hasAudio = !!(t.audio_url || t.preview_url || t.spotify_url);
               return (
                 <button
                   key={t.id}
                   ref={isPlaying ? playingRef : undefined}
                   onClick={() => {
-                    if (t.is_seed) return; // Seed tracks are non-interactive (reference track)
+                    if (t.is_seed) return;
                     onTrackSelect?.(t.id);
                     handlePlay(t);
                   }}
@@ -273,7 +279,7 @@ export function EpisodeTracklist(props: TracklistProps) {
                   }`}
                 >
                   {/* Cover art thumbnail — 36x36 */}
-                  <span className={`relative w-9 h-9 flex-shrink-0 rounded-md overflow-hidden ${!t.storage_path ? "opacity-30" : ""}`}>
+                  <span className="relative w-9 h-9 flex-shrink-0 rounded-md overflow-hidden">
                     {isPlaying && (globalPlayer.currentTrack?.coverArtUrl || t.cover_art_url) ? (
                       <>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -322,26 +328,22 @@ export function EpisodeTracklist(props: TracklistProps) {
                               ? "text-amber-400/40"
                               : t.vote_status === "listened"
                                 ? "text-foreground/40"
-                                : !t.storage_path
-                                  ? "line-through text-foreground/30"
-                                  : (t.is_seed || t.is_artist_seed)
-                                    ? "text-green-400/90 font-medium"
-                                    : t.is_re_seed
-                                      ? "text-emerald-400/80 font-medium"
-                                      : t.super_liked
-                                        ? "text-amber-300/90 font-medium"
-                                        : t.vote_status === "approved"
-                                          ? "text-green-400/80"
-                                          : "text-foreground/85"
+                                : (t.is_seed || t.is_artist_seed)
+                                  ? "text-green-400/90 font-medium"
+                                  : t.is_re_seed
+                                    ? "text-emerald-400/80 font-medium"
+                                    : t.super_liked
+                                      ? "text-amber-300/90 font-medium"
+                                      : t.vote_status === "approved"
+                                        ? "text-green-400/80"
+                                        : "text-foreground/85"
                       }`}>
                         {t.title}
                       </p>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <p className={`text-[10px] truncate ${
-                        t.vote_status === "rejected" ? "line-through text-muted/30"
-                          : !t.storage_path ? "line-through text-muted/30"
-                          : "text-muted"
+                        t.vote_status === "rejected" ? "line-through text-muted/30" : "text-muted"
                       }`}>{t.artist}</p>
                       {t._match_type === "full" && t.storage_path && (
                         <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-green-400/70" title="Exact seed match" />
@@ -379,6 +381,42 @@ export function EpisodeTracklist(props: TracklistProps) {
                 </button>
               );
             })}
+
+            {/* Unplayable tracks toggle */}
+            {unplayableTracks.length > 0 && (
+              <>
+                <button
+                  onClick={() => setShowUnplayable((prev) => !prev)}
+                  className="w-full text-center py-2 mt-2 text-[10px] font-mono text-muted/60 hover:text-muted transition-colors"
+                >
+                  {showUnplayable ? "Hide unplayable" : `Show ${unplayableTracks.length} unplayable tracks`}
+                </button>
+                {showUnplayable && unplayableTracks.map((t) => (
+                  <div
+                    key={t.id}
+                    className="w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2.5 border border-transparent opacity-40 cursor-default"
+                  >
+                    <span className="relative w-9 h-9 flex-shrink-0 rounded-md overflow-hidden opacity-30">
+                      {t.cover_art_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={t.cover_art_url} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="w-full h-full flex items-center justify-center bg-gradient-to-br from-surface-3 to-surface-4">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-foreground/30">
+                            <path d="M9 18V5l12-2v13" />
+                            <circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                          </svg>
+                        </span>
+                      )}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs truncate line-through text-foreground/30">{t.title}</p>
+                      <p className="text-[10px] truncate line-through text-muted/30">{t.artist}</p>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         )}
       </div>
