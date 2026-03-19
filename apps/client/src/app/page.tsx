@@ -126,7 +126,7 @@ function StackPageContent() {
   const [hasEpisodeTracks, setHasEpisodeTracks] = useState(!!episodeId);
 
   // Helper: check if a track has playable audio
-  const isTrackPlayable = (t: Track) => !!(t.audio_url || t.preview_url || t.storage_path || t.spotify_url);
+  const isTrackPlayable = (t: Track) => !!(t.audio_url || t.storage_path);
 
   // The track currently shown on the card — never land on an unplayable track
   const safeEpisodePos = Math.min(episodePos, Math.max(tracks.length - 1, 0));

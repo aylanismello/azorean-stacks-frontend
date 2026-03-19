@@ -142,7 +142,7 @@ export async function GET(
     )
     .in("episode_id", episodeIds)
     .eq("status", "pending")
-    .or("storage_path.not.is.null,spotify_url.neq.,preview_url.not.is.null");
+    .not("storage_path", "is", null);
 
   // Filter out tracks the user has already listened to (heard past 80% without voting)
   const { data: listenedRows } = await db
