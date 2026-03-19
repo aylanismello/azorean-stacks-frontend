@@ -506,14 +506,15 @@ function StackPageContent() {
         if (isTasteMode) {
           const votedTrack = tracks.find((t) => t.id === id);
           if (votedTrack) {
+            const meta = votedTrack.metadata || {};
             if (status === "rejected") {
               const epId = votedTrack.episode_id;
-              const seedArtist = votedTrack.metadata["seed_artist"] as string | undefined;
+              const seedArtist = meta["seed_artist"] as string | undefined;
               if (epId) rejectionCounts.current.set(epId, (rejectionCounts.current.get(epId) ?? 0) + 1);
               if (seedArtist) seedRejections.current.set(seedArtist, (seedRejections.current.get(seedArtist) ?? 0) + 1);
             } else if (status === "approved") {
-              const genres = (votedTrack.metadata["genres"] as string[]) || [];
-              const seedArtist = (votedTrack.metadata["seed_artist"] as string) || null;
+              const genres = (meta["genres"] as string[]) || [];
+              const seedArtist = (meta["seed_artist"] as string) || null;
               recentApprovals.current = [{ genres, seedArtist }, ...recentApprovals.current].slice(0, 5);
             }
           }
@@ -625,12 +626,28 @@ function StackPageContent() {
   // Sidebar/tracklist click → jump to that track via global player (single source of truth)
   const handleTrackSelect = useCallback((trackId: string) => {
     userHasInteracted.current = true;
-    // Find the track's index in the queue and jump to it
+    // Find the track in the active queue first
     const idx = tracks.findIndex((t) => t.id === trackId);
     if (idx >= 0) {
       globalPlayer.playFromQueue(idx);
+      return;
     }
-  }, [tracks, globalPlayer]);
+    // Track was voted on and removed from active queue — find it in session history
+    const sessionTrack = sessionTracks.find((t) => t.id === trackId);
+    if (sessionTrack) {
+      // Temporarily add it back to the queue so we can play it
+      const playerTrack = {
+        id: sessionTrack.id,
+        artist: sessionTrack.artist,
+        title: sessionTrack.title,
+        coverArtUrl: sessionTrack.cover_art_url || null,
+        spotifyUrl: sessionTrack.spotify_url || null,
+        audioUrl: sessionTrack.audio_url || sessionTrack.preview_url || null,
+        youtubeUrl: sessionTrack.youtube_url || null,
+      };
+      globalPlayer.play(playerTrack, window.location.pathname + window.location.search);
+    }
+  }, [tracks, sessionTracks, globalPlayer]);
 
   const handleSkipEpisode = async () => {
     userHasInteracted.current = true;
