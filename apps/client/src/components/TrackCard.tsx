@@ -81,27 +81,19 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   const spotify = useSpotify();
 
   // Restore vote state from track data on mount (returning to a previously-voted track)
+  // Restore vote state — runs on mount AND when track object changes
+  const trackVoteStatus = (track as any).vote_status as string | undefined;
+  const trackSuperLiked = (track as any).super_liked as boolean | undefined;
+  const trackSeedId = (track as any).seed_id as string | undefined;
   useEffect(() => {
-    const vs = (track as any).vote_status || track.status;
-    // Reset all vote states first (mutual exclusivity)
-    setKept(false);
-    setSuperLiked(false);
-    setRejected(false);
-    setSkippedVote(false);
-    setBadSource(false);
-    // Set active state based on vote_status
-    if (vs === "approved") {
-      setKept(true);
-      if ((track as any).super_liked) setSuperLiked(true);
-    } else if (vs === "rejected") {
-      setRejected(true);
-    } else if (vs === "skipped") {
-      setSkippedVote(true);
-    } else if (vs === "bad_source") {
-      setBadSource(true);
-    }
-    if ((track as any).seed_id || (track as any).is_seeded) setSeeded(true);
-  }, [track.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    const vs = trackVoteStatus || track.status;
+    setKept(vs === "approved");
+    setSuperLiked(vs === "approved" && !!trackSuperLiked);
+    setRejected(vs === "rejected");
+    setSkippedVote(vs === "skipped");
+    setBadSource(vs === "bad_source");
+    if (trackSeedId || (track as any).is_seeded) setSeeded(true);
+  }, [track.id, track.status, trackVoteStatus, trackSuperLiked, trackSeedId]);
 
   const handleCopy = useCallback(async () => {
     await navigator.clipboard.writeText(`${track.artist} - ${track.title}`);
