@@ -21,7 +21,7 @@ export interface Track {
   episode: { id: string; title: string | null; source: string; aired_date: string | null; artwork_url: string | null; url?: string | null } | null;
   metadata: Record<string, unknown>;
   /** @deprecated Use UserTrack.status instead for multi-user */
-  status: "pending" | "approved" | "rejected" | "skipped";
+  status: "pending" | "approved" | "rejected" | "skipped" | "bad_source";
   created_at: string;
   /** @deprecated Use UserTrack.voted_at instead */
   voted_at: string | null;
@@ -102,7 +102,7 @@ export interface UserTrack {
   id: string;
   user_id: string;
   track_id: string;
-  status: "pending" | "approved" | "rejected" | "skipped" | "listened";
+  status: "pending" | "approved" | "rejected" | "skipped" | "listened" | "bad_source";
   rating: number | null;
   notes: string | null;
   voted_at: string | null;

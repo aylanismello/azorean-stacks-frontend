@@ -9,7 +9,7 @@ import { useSpotify } from "./SpotifyProvider";
 
 interface TrackCardProps {
   track: Track;
-  onVote: (id: string, status: "approved" | "rejected" | "skipped", advance?: boolean) => Promise<void>;
+  onVote: (id: string, status: "approved" | "rejected" | "skipped" | "bad_source", advance?: boolean) => Promise<void>;
   onSuperLike?: (id: string) => Promise<void>;
   onSkipEpisode?: () => void;
   skippingEpisode?: boolean;
@@ -50,15 +50,35 @@ function sourceLabel(source: string): string {
   return labels[source] || source;
 }
 
+/** Derive short label for the original download source — where the audio file was fetched from */
+function audioSourceLabel(track: Track): string {
+  if (track.youtube_url) return "YT";
+  if ((track as any).soundcloud_url) return "SC";
+  if (track.spotify_url && track.preview_url) return "SP";
+  if (track.preview_url) return "Preview";
+  if (track.storage_path) return "DL";
+  return "Audio";
+}
+
+/** Infer enrichment source pills when metadata.enrichment_sources is missing */
+function inferEnrichmentSources(track: Track): string[] {
+  const sources: string[] = [];
+  if (track.spotify_url) sources.push("spotify");
+  if (track.youtube_url) sources.push("youtube");
+  return sources;
+}
+
 export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingEpisode, onShowContext, seedContext }: TrackCardProps) {
+  // Initialize vote button states from existing track data so they persist across navigation
+  const existingVoteStatus = track.user_track?.status ?? track.status;
   const [exiting, setExiting] = useState<"left" | "right" | null>(null);
   const [voting, setVoting] = useState(false);
   const votingRef = useRef(false);
-  const [kept, setKept] = useState(false);
-  const [superLiked, setSuperLiked] = useState(false);
+  const [kept, setKept] = useState(!!track.super_liked || existingVoteStatus === "approved");
+  const [superLiked, setSuperLiked] = useState(!!track.super_liked);
   const [superLiking, setSuperLiking] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [seeded, setSeeded] = useState(false);
+  const [seeded, setSeeded] = useState(!!track.seed_id);
   const [seeding, setSeeding] = useState(false);
   const [swipeX, setSwipeX] = useState(0);
   const touchRef = useRef<{ startX: number; startY: number; swiping: boolean } | null>(null);
@@ -128,7 +148,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   }, [track.id, onSuperLike, superLiking, reportEngagement]);
 
   const handleVote = useCallback(
-    async (status: "approved" | "rejected" | "skipped", advance: boolean = true) => {
+    async (status: "approved" | "rejected" | "skipped" | "bad_source", advance: boolean = true) => {
       if (votingRef.current) return;
       if (!advance) {
         if (superLiked) return; // already super-liked, don't double-approve
@@ -361,6 +381,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
     </span>
   );
 
+  const audioLabel = audioSourceLabel(track);
   const playingIndicator = isCurrentTrack && !globalPlayer.noSource && (
     globalPlayer.canSwitchSource ? (
       // Switchable tabs when both sources available
@@ -374,7 +395,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
           }`}
         >
           {globalPlayer.source === "audio" && eqBars}
-          Audio
+          {audioLabel}
         </button>
         <button
           onClick={() => globalPlayer.switchSource("spotify")}
@@ -395,7 +416,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
           {eqBars}
         </span>
         <span className={globalPlayer.source === "spotify" ? "text-[#1DB954]" : "text-accent"}>
-          {globalPlayer.source === "spotify" ? "Spotify" : "Audio"}
+          {globalPlayer.source === "spotify" ? "Spotify" : audioLabel}
         </span>
       </div>
     )
@@ -479,6 +500,16 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
         </svg>
+      </button>
+
+      {/* Bad source — wrong audio / can't judge */}
+      <button
+        onClick={() => handleVote("bad_source", true)}
+        disabled={voting}
+        className="flex items-center justify-center w-9 h-9 rounded-full bg-surface-2 md:bg-black/40 md:backdrop-blur-md border border-orange-400/30 text-orange-400/70 hover:bg-orange-950/50 hover:border-orange-400/60 hover:text-orange-400 transition-all active:scale-90 disabled:opacity-50"
+        title="Bad source — wrong audio"
+      >
+        <span className="text-sm">⚠️</span>
       </button>
 
       {/* Skip (neutral) */}
@@ -732,7 +763,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
                 {track.taste_score > 0 ? "+" : ""}{track.taste_score.toFixed(2)}
               </span>
             )}
-            {Array.isArray(meta.enrichment_sources) && (meta.enrichment_sources as string[]).map((src: string) => {
+            {(Array.isArray(meta.enrichment_sources) ? (meta.enrichment_sources as string[]) : inferEnrichmentSources(track)).map((src: string) => {
               const labels: Record<string, string> = { spotify: "SP", youtube: "YT", soundcloud: "SC", musicbrainz: "MB" };
               const colors: Record<string, string> = {
                 spotify: "text-[#1DB954]", youtube: "text-red-400", soundcloud: "text-orange-400", musicbrainz: "text-purple-400",
@@ -759,7 +790,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
                   }`}
                 >
                   {globalPlayer.source === "audio" && eqBars}
-                  Audio
+                  {audioLabel}
                 </button>
                 <button
                   onClick={() => globalPlayer.switchSource("spotify")}
@@ -779,7 +810,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
                   {eqBars}
                 </span>
                 <span className={globalPlayer.source === "spotify" ? "text-[#1DB954]" : "text-white/60"}>
-                  {globalPlayer.source === "spotify" ? "Spotify" : "Audio"}
+                  {globalPlayer.source === "spotify" ? "Spotify" : audioLabel}
                 </span>
               </div>
             ) : null}
@@ -1011,8 +1042,11 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
             </span>
           )}
           {/* Enrichment source pills */}
-          {Array.isArray(meta.enrichment_sources) && (meta.enrichment_sources as string[]).length > 0 && (
-            (meta.enrichment_sources as string[]).map((src: string) => {
+          {(() => {
+            const enrichSrcs = Array.isArray(meta.enrichment_sources) && (meta.enrichment_sources as string[]).length > 0
+              ? (meta.enrichment_sources as string[])
+              : inferEnrichmentSources(track);
+            return enrichSrcs.map((src: string) => {
               const labels: Record<string, string> = { spotify: "SP", youtube: "YT", soundcloud: "SC", musicbrainz: "MB" };
               const colors: Record<string, string> = {
                 spotify: "bg-[#1DB954]/15 text-[#1DB954]",
@@ -1029,8 +1063,8 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
                   {labels[src] || src.toUpperCase().slice(0, 2)}
                 </span>
               );
-            })
-          )}
+            });
+          })()}
           {meta.genre && (
             <span className="px-2.5 py-1 bg-surface-2 rounded-lg text-xs text-muted">
               {meta.genre}

@@ -441,7 +441,7 @@ function StackPageContent() {
     }
   };
 
-  const handleVote = async (id: string, status: "approved" | "rejected" | "skipped", advance: boolean = true) => {
+  const handleVote = async (id: string, status: "approved" | "rejected" | "skipped" | "bad_source", advance: boolean = true) => {
     userHasInteracted.current = true;
     try {
       const res = await fetch(`/api/tracks/${id}`, {
@@ -457,11 +457,12 @@ function StackPageContent() {
       }
 
       // Update the track's status locally so the UI reflects the vote
+      // Clear super_liked when changing vote (e.g. super-like → rejected)
       setTracks((prev) =>
-        prev.map((t) => t.id === id ? { ...t, status, voted_at: new Date().toISOString() } : t)
+        prev.map((t) => t.id === id ? { ...t, status, super_liked: false, voted_at: new Date().toISOString() } : t)
       );
       setSessionTracks((prev) =>
-        prev.map((t) => t.id === id ? { ...t, status, voted_at: new Date().toISOString() } : t)
+        prev.map((t) => t.id === id ? { ...t, status, super_liked: false, voted_at: new Date().toISOString() } : t)
       );
 
       setVoteCount((c) => c + 1);
