@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
   // Aggregate stats per episode
   const episodeStats: Record<string, {
     pending: number; approved: number; rejected: number; total: number;
-    playable: number;
+    playable: number; processing: number; unavailable: number;
     cover_art_url: string | null;
     sample_tracks: { artist: string; title: string }[];
   }> = {};
@@ -101,7 +101,7 @@ export async function GET(req: NextRequest) {
     if (!epId) continue;
 
     if (!episodeStats[epId]) {
-      episodeStats[epId] = { pending: 0, approved: 0, rejected: 0, total: 0, playable: 0, cover_art_url: null, sample_tracks: [] };
+      episodeStats[epId] = { pending: 0, approved: 0, rejected: 0, total: 0, playable: 0, processing: 0, unavailable: 0, cover_art_url: null, sample_tracks: [] };
     }
 
     const s = episodeStats[epId];
@@ -110,6 +110,14 @@ export async function GET(req: NextRequest) {
     if (t.status === "pending") s.pending++;
     else if (t.status === "approved") s.approved++;
     else if (t.status === "rejected") s.rejected++;
+
+    // Processing: pending enrichment or download (no storage_path yet, not terminal)
+    if (t.status === "pending" && !t.storage_path) s.processing++;
+    // Unavailable: skipped, failed, or dead-end (no online source found)
+    if (t.status === "skipped" || t.status === "failed" ||
+        (t.status !== "pending" && t.status !== "approved" && t.status !== "rejected" && !t.storage_path)) {
+      s.unavailable++;
+    }
 
     if (!s.cover_art_url && t.cover_art_url) s.cover_art_url = t.cover_art_url;
     if (s.sample_tracks.length < 3 && t.status === "pending") {
@@ -144,7 +152,7 @@ export async function GET(req: NextRequest) {
     const eps = (episodesBySeed[seed.id] || [])
       .filter((ep) => !ep.skipped)
       .map((ep) => {
-        const stats = episodeStats[ep.id] || { pending: 0, approved: 0, rejected: 0, total: 0, playable: 0, cover_art_url: null, sample_tracks: [] };
+        const stats = episodeStats[ep.id] || { pending: 0, approved: 0, rejected: 0, total: 0, playable: 0, processing: 0, unavailable: 0, cover_art_url: null, sample_tracks: [] };
         // For artist-only matches, show which tracks by that artist are in this episode
         const matched_tracks = ep.match_type !== "full"
           ? (artistTracksByEpisode[`${ep.id}::${seedArtistLower}`] || [])
@@ -158,6 +166,8 @@ export async function GET(req: NextRequest) {
     const totalRejected = eps.reduce((s, e) => s + e.rejected, 0);
     const total = eps.reduce((s, e) => s + e.total, 0);
     const totalPlayable = eps.reduce((s, e) => s + e.playable, 0);
+    const totalProcessing = eps.reduce((s, e) => s + e.processing, 0);
+    const totalUnavailable = eps.reduce((s, e) => s + e.unavailable, 0);
     globalPending += totalPending;
 
     // Use the seed's own cover art (from Spotify lookup of the seed song itself)
@@ -178,6 +188,8 @@ export async function GET(req: NextRequest) {
       total_rejected: totalRejected,
       total,
       total_playable: totalPlayable,
+      total_processing: totalProcessing,
+      total_unavailable: totalUnavailable,
       cover_art_url,
       has_exact_match,
     };

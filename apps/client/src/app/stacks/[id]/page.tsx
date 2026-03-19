@@ -13,6 +13,9 @@ interface StackEpisode {
   approved: number;
   rejected: number;
   total: number;
+  playable: number;
+  processing: number;
+  unavailable: number;
   cover_art_url: string | null;
   matched_tracks: { artist: string; title: string }[];
 }
@@ -27,6 +30,9 @@ interface StackSeed {
   total_approved: number;
   total_rejected: number;
   total: number;
+  total_playable: number;
+  total_processing: number;
+  total_unavailable: number;
   cover_art_url: string | null;
 }
 
@@ -196,13 +202,11 @@ export default function StackDetailPage() {
           </h1>
           <p className="text-sm text-white/50 truncate">{decodeEntities(seed.title)}</p>
           <div className="flex items-center gap-3 mt-1 text-xs font-mono text-muted">
-            <span>{seed.episodes.length} episode{seed.episodes.length !== 1 ? "s" : ""}</span>
-            {seed.total_pending > 0 && (
-              <span className="text-white/50">{seed.total_pending} pending</span>
-            )}
-            {seed.total_approved > 0 && (
-              <span className="text-green-400/60">{seed.total_approved} kept</span>
-            )}
+            <span>{seed.episodes.length} ep{seed.episodes.length !== 1 ? "s" : ""}</span>
+            <span>{seed.total} tracks</span>
+            {seed.total_playable > 0 && <span className="text-green-400/70">{seed.total_playable} 🔊</span>}
+            {seed.total_processing > 0 && <span className="text-yellow-400/60">{seed.total_processing} ⏳</span>}
+            {seed.total_unavailable > 0 && <span className="text-white/30">{seed.total_unavailable} ✗</span>}
           </div>
         </div>
       </div>
@@ -286,15 +290,10 @@ function EpisodeRow({
           </span>
         )}
         <div className="flex items-center gap-1.5 flex-shrink-0 text-[9px] font-mono">
-          {episode.approved > 0 && (
-            <span className="text-green-400/70">{episode.approved} kept</span>
-          )}
-          {episode.rejected > 0 && (
-            <span className="text-red-400/40">{episode.rejected} skip</span>
-          )}
-          {episode.pending > 0 && (
-            <span className="text-white/40">{episode.pending} pending</span>
-          )}
+          <span className="text-white/40">{episode.total} tracks</span>
+          {episode.playable > 0 && <span className="text-green-400/70">{episode.playable} 🔊</span>}
+          {episode.processing > 0 && <span className="text-yellow-400/60">{episode.processing} ⏳</span>}
+          {episode.unavailable > 0 && <span className="text-white/25">{episode.unavailable} ✗</span>}
         </div>
       </div>
 
