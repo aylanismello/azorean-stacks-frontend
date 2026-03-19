@@ -108,7 +108,9 @@ export async function PATCH(
     return NextResponse.json(track);
   }
 
-  const updates: Record<string, unknown> = { status };
+  // bad_source is user-only — don't write to the global tracks table
+  const isUserOnly = status === "bad_source" || status === "listened";
+  const updates: Record<string, unknown> = isUserOnly ? {} : { status };
 
   if (status === "approved" || status === "rejected" || status === "skipped" || status === "bad_source") {
     updates.voted_at = new Date().toISOString();
@@ -140,15 +142,23 @@ export async function PATCH(
     }
   }
 
-  const { data, error } = await supabase
-    .from("tracks")
-    .update(updates)
-    .eq("id", params.id)
-    .select()
-    .single();
+  let data: any = null;
+  if (!isUserOnly && Object.keys(updates).length > 0) {
+    const { data: d, error } = await supabase
+      .from("tracks")
+      .update(updates)
+      .eq("id", params.id)
+      .select()
+      .single();
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    data = d;
+  } else {
+    // For user-only statuses, just fetch the track
+    const { data: d } = await supabase.from("tracks").select().eq("id", params.id).single();
+    data = d;
   }
 
   // Record vote in user_tracks for all voted statuses (enables weight tuning + engagement analytics)
