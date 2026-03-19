@@ -20,7 +20,7 @@ interface TrackListItem {
   is_re_seed?: boolean;
   is_artist_seed?: boolean;
   super_liked?: boolean;
-  vote_status?: "approved" | "rejected" | "skipped" | "listened" | "pending" | null;
+  vote_status?: "approved" | "rejected" | "skipped" | "listened" | "pending" | "bad_source" | null;
   // Ranked queue scoring metadata
   _match_type?: "full" | "artist" | "unknown";
   _ranked_score?: number;
@@ -198,6 +198,7 @@ export function EpisodeTracklist(props: TracklistProps) {
     if (s === "rejected") return "text-foreground/30 line-through";
     if (s === "skipped") return "text-foreground/40";
     if (s === "listened") return "text-foreground/40";
+    if (s === "bad_source") return "text-orange-400/40 line-through";
     return "text-foreground/60";
   };
 
@@ -212,6 +213,8 @@ export function EpisodeTracklist(props: TracklistProps) {
       return <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="Skipped" />;
     if (t.vote_status === "listened")
       return <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" title="Listened" />;
+    if (t.vote_status === "bad_source")
+      return <span className="w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0" title="Bad source" />;
     return null;
   };
 
@@ -376,6 +379,8 @@ export function EpisodeTracklist(props: TracklistProps) {
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-amber-400/40">
                           <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
                         </svg>
+                      ) : t.vote_status === "bad_source" ? (
+                        <span className="text-[10px] text-orange-400/60">⚠️</span>
                       ) : null}
                     </span>
                   )}
