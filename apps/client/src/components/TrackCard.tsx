@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Track } from "@/lib/types";
 import { openYouTube } from "@/lib/youtube";
 import { openSpotify } from "@/lib/spotify-link";
@@ -9,7 +9,7 @@ import { useSpotify } from "./SpotifyProvider";
 
 interface TrackCardProps {
   track: Track;
-  onVote: (id: string, status: "approved" | "rejected" | "skipped", advance?: boolean) => Promise<void>;
+  onVote: (id: string, status: "approved" | "rejected" | "skipped" | "bad_source", advance?: boolean) => Promise<void>;
   onSuperLike?: (id: string) => Promise<void>;
   onSkipEpisode?: () => void;
   skippingEpisode?: boolean;
@@ -50,6 +50,18 @@ function sourceLabel(source: string): string {
   return labels[source] || source;
 }
 
+function audioSourceLabel(meta: Record<string, any>, track: { youtube_url: string | null; preview_url: string | null; audio_url?: string | null; storage_path: string | null }): string {
+  const dlSource = (meta.audio_source as string) || "";
+  const labels: Record<string, string> = { youtube: "YT", soundcloud: "SC", spotify: "SP" };
+  if (labels[dlSource]) return labels[dlSource];
+  if (dlSource) return dlSource.toUpperCase().slice(0, 2);
+  // Infer from track data
+  if (track.youtube_url && track.storage_path) return "YT";
+  if (track.preview_url && !track.storage_path) return "Preview";
+  if (track.storage_path) return "DL";
+  return "Audio";
+}
+
 export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingEpisode, onShowContext, seedContext }: TrackCardProps) {
   const [exiting, setExiting] = useState<"left" | "right" | null>(null);
   const [voting, setVoting] = useState(false);
@@ -64,6 +76,13 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   const touchRef = useRef<{ startX: number; startY: number; swiping: boolean } | null>(null);
   const globalPlayer = useGlobalPlayer();
   const spotify = useSpotify();
+
+  // Restore vote state from track data on mount (returning to a previously-voted track)
+  useEffect(() => {
+    if (track.status === "approved" || track.user_track?.status === "approved") setKept(true);
+    if (track.super_liked) setSuperLiked(true);
+    if (track.seed_id) setSeeded(true);
+  }, [track.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCopy = useCallback(async () => {
     await navigator.clipboard.writeText(`${track.artist} - ${track.title}`);
@@ -128,7 +147,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   }, [track.id, onSuperLike, superLiking, reportEngagement]);
 
   const handleVote = useCallback(
-    async (status: "approved" | "rejected" | "skipped", advance: boolean = true) => {
+    async (status: "approved" | "rejected" | "skipped" | "bad_source", advance: boolean = true) => {
       if (votingRef.current) return;
       if (!advance) {
         if (superLiked) return; // already super-liked, don't double-approve
@@ -140,7 +159,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
       reportEngagement();
       votingRef.current = true;
       setVoting(true);
-      setExiting(status === "approved" ? "right" : status === "skipped" ? "right" : "left");
+      setExiting(status === "approved" ? "right" : status === "skipped" ? "right" : "left"); // rejected + bad_source exit left
       await new Promise((r) => setTimeout(r, 250));
       await onVote(track.id, status, true);
     },
@@ -395,7 +414,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
           {eqBars}
         </span>
         <span className={globalPlayer.source === "spotify" ? "text-[#1DB954]" : "text-accent"}>
-          {globalPlayer.source === "spotify" ? "Spotify" : "Audio"}
+          {globalPlayer.source === "spotify" ? "Spotify" : audioSourceLabel(meta, track)}
         </span>
       </div>
     )
@@ -479,6 +498,16 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
         </svg>
+      </button>
+
+      {/* Bad source (⚠️) */}
+      <button
+        onClick={() => handleVote("bad_source", true)}
+        disabled={voting}
+        className="flex items-center justify-center w-10 h-10 md:w-11 md:h-11 rounded-full bg-surface-2 md:bg-black/40 md:backdrop-blur-md border-2 border-orange-400/30 text-orange-400/80 hover:bg-orange-950/50 hover:border-orange-400/60 hover:text-orange-400 transition-all active:scale-90 disabled:opacity-50"
+        title="Bad source — wrong track or bad audio"
+      >
+        <span className="text-sm">⚠️</span>
       </button>
 
       {/* Skip (neutral) */}
@@ -732,7 +761,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
                 {track.taste_score > 0 ? "+" : ""}{track.taste_score.toFixed(2)}
               </span>
             )}
-            {Array.isArray(meta.enrichment_sources) && (meta.enrichment_sources as string[])
+            {Array.isArray(meta.enrichment_sources) && Array.from(new Set(meta.enrichment_sources as string[]))
               .filter((src: string) => {
                 // Hide enrichment pills that match the download source
                 const dlSource = (meta.audio_source as string) || (track.youtube_url ? "youtube" : null);
@@ -785,7 +814,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
                   {eqBars}
                 </span>
                 <span className={globalPlayer.source === "spotify" ? "text-[#1DB954]" : "text-white/60"}>
-                  {globalPlayer.source === "spotify" ? "Spotify" : "Audio"}
+                  {globalPlayer.source === "spotify" ? "Spotify" : audioSourceLabel(meta, track)}
                 </span>
               </div>
             ) : null}
@@ -836,6 +865,16 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
               </svg>
+            </button>
+
+            {/* Bad source (⚠️) */}
+            <button
+              onClick={() => handleVote("bad_source", true)}
+              disabled={voting}
+              className="flex items-center justify-center w-9 h-9 rounded-full bg-black/40 backdrop-blur-md border-2 border-orange-400/40 text-orange-400/90 active:scale-90 transition-all disabled:opacity-50"
+              title="Bad source — wrong track or bad audio"
+            >
+              <span className="text-xs">⚠️</span>
             </button>
 
             {/* Skip (neutral — yellow) */}
@@ -1018,7 +1057,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
           )}
           {/* Enrichment source pills — hide if same as download source */}
           {Array.isArray(meta.enrichment_sources) && (meta.enrichment_sources as string[]).length > 0 && (
-            (meta.enrichment_sources as string[])
+            Array.from(new Set(meta.enrichment_sources as string[]))
               .filter((src: string) => {
                 const dlSource = (meta.audio_source as string) || (track.youtube_url ? "youtube" : null);
                 return src !== dlSource;
