@@ -294,14 +294,22 @@ export async function GET(req: NextRequest) {
 
   await Promise.all(signPromises);
 
+  // Filter out non-playable tracks from pending results (no audio source at all)
+  const filtered = isPending
+    ? tracks.filter((t: any) => !!(t.storage_path || t.audio_url || t.spotify_url || t.preview_url))
+    : tracks;
+
   // Apply diversification in taste mode then trim to requested limit
   const finalTracks = orderBy === "taste_score"
-    ? diversifyTracks(tracks).slice(0, limit)
-    : tracks;
+    ? diversifyTracks(filtered).slice(0, limit)
+    : filtered;
 
   await attachMatchTypes(finalTracks);
 
-  return NextResponse.json({ tracks: finalTracks, total: count });
+  // For pending, return playable count (not the raw DB count which includes non-playable)
+  const finalTotal = isPending ? filtered.length : count;
+
+  return NextResponse.json({ tracks: finalTracks, total: finalTotal });
 }
 
 // POST /api/tracks — agent pushes new discoveries (service role)

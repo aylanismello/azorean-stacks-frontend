@@ -416,9 +416,12 @@ export async function GET(
 
   scored.sort((a: any, b: any) => b._ranked_score - a._ranked_score);
 
+  // 11b. Filter out non-playable tracks (no audio source at all)
+  const playable = scored.filter((t: any) => !!(t.storage_path || t.spotify_url || t.preview_url));
+
   // 12. Generate signed audio URLs in parallel
   const signPromises: Promise<void>[] = [];
-  for (const t of scored) {
+  for (const t of playable) {
     if (t.storage_path) {
       signPromises.push(
         db.storage
@@ -433,8 +436,8 @@ export async function GET(
   await Promise.all(signPromises);
 
   return NextResponse.json({
-    tracks: scored,
-    total: scored.length,
+    tracks: playable,
+    total: playable.length,
     seed: { id: seed.id, artist: seed.artist, title: seed.title },
     weights_used: weights,
     using_default_weights: !latestWeights,

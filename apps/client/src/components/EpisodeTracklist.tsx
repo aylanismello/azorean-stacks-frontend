@@ -76,6 +76,7 @@ export function EpisodeTracklist(props: TracklistProps) {
   const [fetchedTracks, setFetchedTracks] = useState<TrackListItem[]>([]);
   const [loading, setLoading] = useState(!isDirectMode);
   const [error, setError] = useState<string | null>(null);
+  const [showUnenriched, setShowUnenriched] = useState(false);
   const globalPlayer = useGlobalPlayer();
   const playingRef = useRef<HTMLButtonElement>(null);
   const prevEpisodeIdRef = useRef(episodeId);
@@ -157,7 +158,12 @@ export function EpisodeTracklist(props: TracklistProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodeId, refreshKey, isDirectMode]);
 
-  const tracks = isDirectMode ? (props as DirectTracklistProps).directTracks : fetchedTracks;
+  const allTracks = isDirectMode ? (props as DirectTracklistProps).directTracks : fetchedTracks;
+
+  // Split into playable and unenriched (no audio source)
+  const isPlayable = (t: TrackListItem) => !!(t.storage_path || t.audio_url || t.preview_url || t.spotify_url);
+  const tracks = allTracks.filter(isPlayable);
+  const unenrichedTracks = allTracks.filter((t) => !isPlayable(t));
 
   // Auto-scroll to playing track when tracklist loads or track changes
   useEffect(() => {
@@ -203,8 +209,8 @@ export function EpisodeTracklist(props: TracklistProps) {
     return null;
   };
 
-  // Header stats — just playable count
-  const playable = tracks.filter((t) => !!(t.storage_path || t.audio_url || t.preview_url || t.spotify_url)).length;
+  // Header stats
+  const playable = tracks.length;
 
   const displayTitle = listTitle || episodeTitle || "Tracklist";
 
@@ -251,13 +257,12 @@ export function EpisodeTracklist(props: TracklistProps) {
           <div className="space-y-0.5">
             {tracks.map((t) => {
               const isPlaying = globalPlayer.currentTrack?.id === t.id;
-              const hasAudio = !!(t.audio_url || t.preview_url || t.spotify_url);
               return (
                 <button
                   key={t.id}
                   ref={isPlaying ? playingRef : undefined}
                   onClick={() => {
-                    if (t.is_seed) return; // Seed tracks are non-interactive (reference track)
+                    if (t.is_seed) return;
                     onTrackSelect?.(t.id);
                     handlePlay(t);
                   }}
@@ -379,6 +384,42 @@ export function EpisodeTracklist(props: TracklistProps) {
                 </button>
               );
             })}
+
+            {/* Unenriched tracks toggle */}
+            {unenrichedTracks.length > 0 && (
+              <>
+                <button
+                  onClick={() => setShowUnenriched((prev) => !prev)}
+                  className="w-full text-center py-2 mt-2 text-[10px] font-mono text-muted/60 hover:text-muted transition-colors"
+                >
+                  {showUnenriched ? "Hide" : "Show"} {unenrichedTracks.length} unenriched track{unenrichedTracks.length !== 1 ? "s" : ""}
+                </button>
+                {showUnenriched && unenrichedTracks.map((t) => (
+                  <div
+                    key={t.id}
+                    className="w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2.5 opacity-40 border border-transparent"
+                  >
+                    <span className="w-9 h-9 flex-shrink-0 rounded-md overflow-hidden opacity-30">
+                      {t.cover_art_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={t.cover_art_url} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="w-full h-full flex items-center justify-center bg-gradient-to-br from-surface-3 to-surface-4">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-foreground/30">
+                            <path d="M9 18V5l12-2v13" />
+                            <circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                          </svg>
+                        </span>
+                      )}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs truncate line-through text-foreground/30">{t.title}</p>
+                      <p className="text-[10px] truncate line-through text-muted/30">{t.artist}</p>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         )}
       </div>

@@ -30,7 +30,7 @@ const durationMinutes = values.duration ? parseInt(String(values.duration), 10) 
 const deadline = durationMinutes ? Date.now() + durationMinutes * 60_000 : null;
 
 const db = getSupabase();
-const ENRICH_CONCURRENCY = 25;
+const ENRICH_CONCURRENCY = 3;
 const ENRICH_MAX_RETRIES = 3;
 const YT_DLP_BIN =
   process.env.YT_DLP_BIN ||
@@ -471,7 +471,7 @@ async function runDiscover(): Promise<number> {
   }
 
   // Batch dedup: fetch existing tracks matching any candidate artist (case-insensitive)
-  const candidateArtists = [...new Set(uniqueCandidates.map(c => c.artist.toLowerCase().trim()))];
+  const candidateArtists = Array.from(new Set(uniqueCandidates.map(c => c.artist.toLowerCase().trim())));
   const existingTrackKeys = new Set<string>();
 
   // Query in batches of 50 artists to stay under query limits
@@ -629,6 +629,26 @@ const SPOTIFY_API = "https://api.spotify.com/v1";
 let cachedToken: string | null = null;
 let tokenExpiry = 0;
 
+// Global Spotify rate limiter — max 10 requests per second
+const SPOTIFY_MAX_RPS = 10;
+const spotifyRequestTimestamps: number[] = [];
+
+async function withSpotifyRateLimit<T>(fn: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  while (spotifyRequestTimestamps.length > 0 && spotifyRequestTimestamps[0] < now - 1000) {
+    spotifyRequestTimestamps.shift();
+  }
+  if (spotifyRequestTimestamps.length >= SPOTIFY_MAX_RPS) {
+    const waitUntil = spotifyRequestTimestamps[0] + 1000;
+    const delay = waitUntil - now;
+    if (delay > 0) await sleep(delay);
+  }
+  // Random stagger (100-500ms)
+  await sleep(100 + Math.random() * 400);
+  spotifyRequestTimestamps.push(Date.now());
+  return fn();
+}
+
 async function getSpotifyToken(): Promise<string> {
   if (cachedToken && Date.now() < tokenExpiry - 60_000) return cachedToken;
   log("info", "Refreshing Spotify token");
@@ -661,16 +681,20 @@ type SpotifyTrackItem = {
 
 async function spotifySearch(query: string, token: string, artist: string, title: string, retries = 0): Promise<SpotifyTrackItem[]> {
   const q = encodeURIComponent(query);
-  const res = await fetch(`${SPOTIFY_API}/search?q=${q}&type=track&limit=5`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await withSpotifyRateLimit(() =>
+    fetch(`${SPOTIFY_API}/search?q=${q}&type=track&limit=5`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+  );
   if (res.status === 429) {
     if (retries >= 3) {
       log("fail", `Spotify rate-limited 3 times — giving up for "${query}"`);
       return [];
     }
-    const rawWait = parseInt(res.headers.get("Retry-After") || "5", 10);
-    const waitSec = Math.min(rawWait, 5);
+    // Exponential backoff: 5s, 15s, 45s — but respect Retry-After if larger
+    const backoffSec = 5 * Math.pow(3, retries);
+    const retryAfter = parseInt(res.headers.get("Retry-After") || "0", 10);
+    const waitSec = Math.max(backoffSec, retryAfter);
     log("wait", `Spotify rate-limited — waiting ${waitSec}s (${artist} – ${title}, retry ${retries + 1}/3)`);
     await sleep(waitSec * 1000);
     return spotifySearch(query, token, artist, title, retries + 1);
@@ -849,18 +873,20 @@ async function spotifyArtistGenres(artistIds: string[], retries = 0): Promise<st
   if (!artistIds.length) return [];
   try {
     const token = await getSpotifyToken();
-    // Spotify /v1/artists accepts up to 50 IDs
     const ids = artistIds.slice(0, 50).join(",");
-    const res = await fetch(`${SPOTIFY_API}/artists?ids=${ids}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await withSpotifyRateLimit(() =>
+      fetch(`${SPOTIFY_API}/artists?ids=${ids}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    );
     if (res.status === 429) {
       if (retries >= 3) {
         log("fail", "Spotify artist genres rate-limited 3 times — giving up");
         return [];
       }
-      const rawWait = parseInt(res.headers.get("Retry-After") || "5", 10);
-      const waitSec = Math.min(rawWait, 5);
+      const backoffSec = 5 * Math.pow(3, retries);
+      const retryAfter = parseInt(res.headers.get("Retry-After") || "0", 10);
+      const waitSec = Math.max(backoffSec, retryAfter);
       log("wait", `Spotify artist rate-limited — waiting ${waitSec}s (retry ${retries + 1}/3)`);
       await sleep(waitSec * 1000);
       return spotifyArtistGenres(artistIds, retries + 1);
