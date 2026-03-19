@@ -227,6 +227,11 @@ export async function GET(req: NextRequest) {
 
   query = query.eq("status", status);
 
+  // Only return playable tracks for pending queries (has storage_path, spotify_url, or preview_url)
+  if (isPending) {
+    query = query.or("storage_path.not.is.null,spotify_url.neq.,preview_url.not.is.null");
+  }
+
   // taste_score: highest first; created_at for pending: oldest first; voted_at: newest first
   const ascending = orderBy === "taste_score" ? false : isPending;
   // In taste mode fetch double the limit so diversification has enough material to work with
