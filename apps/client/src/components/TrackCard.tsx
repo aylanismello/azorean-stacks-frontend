@@ -50,9 +50,10 @@ function sourceLabel(source: string): string {
   return labels[source] || source;
 }
 
-/** Derive short label for the audio playback source based on track URLs */
+/** Derive short label for the download source — where the audio was fetched from */
 function audioSourceLabel(track: Track): string {
-  if (track.storage_path) return "Local";
+  if (track.storage_path && track.youtube_url) return "YT";
+  if (track.storage_path) return "DL";
   if (track.youtube_url) return "YT";
   if (track.preview_url) return "Preview";
   return "Audio";
