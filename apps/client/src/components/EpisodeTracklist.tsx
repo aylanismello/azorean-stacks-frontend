@@ -267,8 +267,14 @@ export function EpisodeTracklist(props: TracklistProps) {
                   ref={isPlaying ? playingRef : undefined}
                   onClick={() => {
                     if (t.is_seed) return;
-                    onTrackSelect?.(t.id);
-                    handlePlay(t);
+                    // Let the parent handle playback via globalPlayer.playFromQueue
+                    // to maintain single source of truth. Fall back to direct play
+                    // only if no onTrackSelect handler is provided.
+                    if (onTrackSelect) {
+                      onTrackSelect(t.id);
+                    } else {
+                      handlePlay(t);
+                    }
                   }}
                   disabled={false}
                   className={`w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2.5 transition-colors group border ${
