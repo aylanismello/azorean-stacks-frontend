@@ -14,6 +14,8 @@ interface StackSeed {
   total_rejected: number;
   total: number;
   total_playable: number;
+  total_processing: number;
+  total_unavailable: number;
   cover_art_url: string | null;
   has_exact_match: boolean;
 }
@@ -233,10 +235,10 @@ function StackTile({
 
       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
 
-      {seed.total_pending > 0 && (
+      {seed.total_playable > 0 && (
         <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm rounded-full px-2 py-0.5 flex items-center gap-1">
-          <span className="text-[10px] font-mono font-semibold text-accent">
-            {seed.total_pending}
+          <span className="text-[10px] font-mono font-semibold text-green-400">
+            {seed.total_playable} 🔊
           </span>
         </div>
       )}
@@ -261,16 +263,11 @@ function StackTile({
         </p>
         {/* Stats overlay */}
         {seed.total > 0 && (
-          <>
-            <p className="text-[9px] text-white/40 font-mono mt-1">
-              {seed.total_approved > 0 && `${Math.round((seed.total_approved / seed.total) * 100)}% liked`}
-              {seed.total_approved > 0 && seed.total_pending > 0 && " · "}
-              {seed.total_pending > 0 && `${seed.total_pending} pending`}
-            </p>
-            <p className="text-[9px] text-green-400/60 font-mono">
-              {seed.total_playable}/{seed.total} playable ({Math.round((seed.total_playable / seed.total) * 100)}%)
-            </p>
-          </>
+          <p className="text-[9px] font-mono mt-1 flex flex-wrap gap-x-1.5">
+            <span className="text-green-400/70">{seed.total_playable} 🔊</span>
+            {seed.total_processing > 0 && <span className="text-yellow-400/60">{seed.total_processing} ⏳</span>}
+            {seed.total_unavailable > 0 && <span className="text-white/25">{seed.total_unavailable} ✗</span>}
+          </p>
         )}
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-[9px] text-white/30 font-mono">
