@@ -77,7 +77,7 @@ export async function GET(req: NextRequest) {
 
   if (allEpisodeIds.size === 0) {
     return NextResponse.json({
-      stacks: (seeds || []).map((s) => ({ ...s, episodes: [], total_pending: 0, total_approved: 0, total_rejected: 0, total: 0 })),
+      stacks: (seeds || []).map((s) => ({ ...s, episodes: [], total_pending: 0, total_approved: 0, total_rejected: 0, total: 0, total_playable: 0, total_processing: 0, total_unavailable: 0 })),
       total_pending: 0,
     });
   }

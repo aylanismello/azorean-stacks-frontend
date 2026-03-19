@@ -560,17 +560,17 @@ function SeedCard({
           {/* Episode count hint */}
           {episodes.length > 0 && (
             <p className="text-[10px] text-muted mt-0.5">
-              {seed.curated_count || 0}/{episodes.length} curated {expanded ? "▾" : "▸"}
+              {episodes.length} ep{episodes.length !== 1 ? "s" : ""} {expanded ? "▾" : "▸"}
             </p>
           )}
         </button>
 
-        {/* Discovery count + no-match warning */}
+        {/* Episode count + no-match warning */}
         <div className="text-right flex-shrink-0">
           <p className="text-sm font-mono text-accent">
-            {totalFound}
+            {episodes.length}
           </p>
-          <p className="text-[10px] text-muted">found</p>
+          <p className="text-[10px] text-muted">eps</p>
           {noMatches && (
             <p className="text-[10px] text-amber-400 mt-0.5" title="Last pipeline run found no matching episodes for this seed">
               no matches
@@ -864,25 +864,12 @@ function SeedEpisodeRow({ episode: ep, seedId, seedArtist, seedTitle, allSeeds, 
               found: {ep.matched_tracks.map((t) => t.title).join(", ")}
             </p>
           )}
-          {/* Enrichment count summary */}
+          {/* Track stats summary */}
           {trackCount > 0 && (
-            <div className="flex items-center gap-1.5 mt-1">
-              <span className="text-[10px] text-muted">
-                {trackCount} track{trackCount !== 1 ? "s" : ""}
-              </span>
-              {enrichedCount === trackCount ? (
-                <span className="text-[10px] text-green-400" title="All tracks have Spotify/YouTube">✓ all enriched</span>
-              ) : enrichedCount > 0 ? (
-                <span className="text-[10px] text-amber-400" title={`${enrichedCount}/${trackCount} tracks have Spotify/YouTube`}>
-                  {enrichedCount}/{trackCount} enriched
-                </span>
-              ) : (
-                <span className="text-[10px] text-muted/50">none enriched</span>
-              )}
-              {downloadedCount > 0 && (
-                <span className="text-[10px] text-blue-400" title={`${downloadedCount}/${trackCount} tracks have local audio`}>
-                  · {downloadedCount} dl
-                </span>
+            <div className="flex items-center gap-1.5 mt-1 text-[10px] font-mono">
+              <span className="text-green-400/70">{downloadedCount}/{trackCount} playable</span>
+              {trackCount - downloadedCount > 0 && (
+                <span className="text-yellow-400/60">{trackCount - downloadedCount} ⏳</span>
               )}
             </div>
           )}

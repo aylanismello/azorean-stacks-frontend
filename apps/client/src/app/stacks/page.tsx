@@ -235,10 +235,10 @@ function StackTile({
 
       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
 
-      {seed.total_playable > 0 && (
+      {seed.total > 0 && (
         <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm rounded-full px-2 py-0.5 flex items-center gap-1">
           <span className="text-[10px] font-mono font-semibold text-green-400">
-            {seed.total_playable} 🔊
+            {seed.total_playable}/{seed.total}
           </span>
         </div>
       )}
@@ -261,18 +261,29 @@ function StackTile({
         <p className="text-[10px] text-white/50 truncate mt-0.5 drop-shadow">
           {decodeEntities(seed.title)}
         </p>
-        {/* Stats overlay */}
-        {seed.total > 0 && (
-          <p className="text-[9px] font-mono mt-1 flex flex-wrap gap-x-1.5">
-            <span className="text-green-400/70">{seed.total_playable} 🔊</span>
-            {seed.total_processing > 0 && <span className="text-yellow-400/60">{seed.total_processing} ⏳</span>}
-            {seed.total_unavailable > 0 && <span className="text-white/25">{seed.total_unavailable} ✗</span>}
-          </p>
-        )}
+        {/* Stats: eps · playable/total · processing · unavailable */}
+        <p className="text-[9px] font-mono mt-1 flex flex-wrap gap-x-1.5 items-center">
+          <span className="text-white/30">{seed.episodes.length} eps</span>
+          {seed.total > 0 && (
+            <>
+              <span className="text-white/20">·</span>
+              <span className="text-green-400/70">{seed.total_playable}/{seed.total} playable</span>
+            </>
+          )}
+          {seed.total_processing > 0 && (
+            <>
+              <span className="text-white/20">·</span>
+              <span className="text-yellow-400/60">{seed.total_processing} ⏳</span>
+            </>
+          )}
+          {seed.total_unavailable > 0 && (
+            <>
+              <span className="text-white/20">·</span>
+              <span className="text-white/25">{seed.total_unavailable} ✗</span>
+            </>
+          )}
+        </p>
         <div className="flex items-center gap-2 mt-0.5">
-          <span className="text-[9px] text-white/30 font-mono">
-            {seed.episodes.length} ep{seed.episodes.length !== 1 ? "s" : ""} · {seed.total} tracks
-          </span>
           <span
             role="button"
             tabIndex={0}

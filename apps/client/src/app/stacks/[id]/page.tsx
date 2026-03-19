@@ -201,12 +201,26 @@ export default function StackDetailPage() {
             {decodeEntities(seed.artist)}
           </h1>
           <p className="text-sm text-white/50 truncate">{decodeEntities(seed.title)}</p>
-          <div className="flex items-center gap-3 mt-1 text-xs font-mono text-muted">
-            <span>{seed.episodes.length} ep{seed.episodes.length !== 1 ? "s" : ""}</span>
-            <span>{seed.total} tracks</span>
-            {seed.total_playable > 0 && <span className="text-green-400/70">{seed.total_playable} 🔊</span>}
-            {seed.total_processing > 0 && <span className="text-yellow-400/60">{seed.total_processing} ⏳</span>}
-            {seed.total_unavailable > 0 && <span className="text-white/30">{seed.total_unavailable} ✗</span>}
+          <div className="flex items-center gap-1.5 mt-1 text-xs font-mono text-muted flex-wrap">
+            <span>{seed.episodes.length} eps</span>
+            {seed.total > 0 && (
+              <>
+                <span className="text-white/20">·</span>
+                <span className="text-green-400/70">{seed.total_playable}/{seed.total} playable</span>
+              </>
+            )}
+            {seed.total_processing > 0 && (
+              <>
+                <span className="text-white/20">·</span>
+                <span className="text-yellow-400/60">{seed.total_processing} ⏳</span>
+              </>
+            )}
+            {seed.total_unavailable > 0 && (
+              <>
+                <span className="text-white/20">·</span>
+                <span className="text-white/30">{seed.total_unavailable} ✗</span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -290,8 +304,7 @@ function EpisodeRow({
           </span>
         )}
         <div className="flex items-center gap-1.5 flex-shrink-0 text-[9px] font-mono">
-          <span className="text-white/40">{episode.total} tracks</span>
-          {episode.playable > 0 && <span className="text-green-400/70">{episode.playable} 🔊</span>}
+          {episode.total > 0 && <span className="text-green-400/70">{episode.playable}/{episode.total} playable</span>}
           {episode.processing > 0 && <span className="text-yellow-400/60">{episode.processing} ⏳</span>}
           {episode.unavailable > 0 && <span className="text-white/25">{episode.unavailable} ✗</span>}
         </div>
