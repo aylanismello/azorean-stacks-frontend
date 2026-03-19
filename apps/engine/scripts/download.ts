@@ -85,7 +85,15 @@ async function downloadOne(track: any): Promise<boolean> {
     { stdout: "ignore", stderr: "ignore" },
   );
 
-  const exitCode = await withTimeout(dlProc.exited, DL_TIMEOUT, `${track.artist} - ${track.title}`);
+  let exitCode: number;
+  try {
+    exitCode = await withTimeout(dlProc.exited, DL_TIMEOUT, `${track.artist} - ${track.title}`);
+  } catch (err) {
+    // Kill the orphaned yt-dlp process on timeout
+    try { dlProc.kill(); } catch {}
+    await markFailed(track);
+    return false;
+  }
   if (exitCode !== 0) {
     await markFailed(track);
     return false;
@@ -133,7 +141,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 
 async function runOnce(): Promise<{ downloaded: number; failed: number; empty: boolean }> {
   let query = db.from("tracks").select("*")
-    .is("storage_path", null).not("youtube_url", "is", null)
+    .is("storage_path", null).not("youtube_url", "is", null).neq("youtube_url", "")
     .in("status", ["pending", "approved"])
     .order("created_at").limit(batchLimit);
 
@@ -145,7 +153,7 @@ async function runOnce(): Promise<{ downloaded: number; failed: number; empty: b
 
   if (!tracks?.length) {
     const { count } = await db.from("tracks").select("id", { count: "exact", head: true })
-      .is("storage_path", null).not("youtube_url", "is", null)
+      .is("storage_path", null).not("youtube_url", "is", null).neq("youtube_url", "")
       .in("status", ["pending", "approved"])
       .gte("dl_attempts", MAX_ATTEMPTS);
 

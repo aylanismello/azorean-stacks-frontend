@@ -408,11 +408,13 @@ async function processLotRadioShow(affinity: CuratorAffinity): Promise<{ episode
 
   // Lot Radio episodes are crawled externally — query DB for episodes matching this show (by title)
   const episodeLimit = affinity.tier === "high" ? 10 : 5;
+  // Use prefix match (%) so "DJ Python w/ Special Guest" matches curator "DJ Python"
+  const escapedSlug = affinity.showSlug.replace(/[%_\\]/g, (c: string) => `\\${c}`);
   const { data: episodes } = await db
     .from("episodes")
     .select("id, url, title, aired_date, artwork_url")
     .eq("source", "lotradio")
-    .ilike("title", affinity.showSlug)
+    .ilike("title", `${escapedSlug}%`)
     .order("aired_date", { ascending: false })
     .limit(episodeLimit);
 
