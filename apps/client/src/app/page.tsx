@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { Track } from "@/lib/types";
 import { TrackCard } from "@/components/TrackCard";
 import { EpisodeTracklist, TracklistSheet } from "@/components/EpisodeTracklist";
-import { useGlobalPlayer } from "@/components/GlobalPlayerProvider";
+import { useGlobalPlayer, PlayerTrack } from "@/components/GlobalPlayerProvider";
 import { useSpotify } from "@/components/SpotifyProvider";
 
 function mergeTrackSession(existing: Track[], incoming: Track[]): Track[] {
@@ -46,6 +46,21 @@ export default function StackPage() {
       <StackPageContent />
     </Suspense>
   );
+}
+
+/** Convert a local Track to a PlayerTrack for the global player queue */
+function toPlayerTrack(track: Track): PlayerTrack {
+  return {
+    id: track.id,
+    artist: track.artist,
+    title: track.title,
+    coverArtUrl: track.cover_art_url || track.episode?.artwork_url || null,
+    spotifyUrl: track.spotify_url,
+    audioUrl: track.audio_url || track.preview_url || null,
+    episodeId: track.episode_id,
+    episodeTitle: track.episode?.title,
+    youtubeUrl: track.youtube_url,
+  };
 }
 
 function StackPageContent() {
@@ -109,15 +124,11 @@ function StackPageContent() {
   // Prevent reconciliation from firing on navigation to a new stack
   const skipReconcileRef = useRef(false);
   const stackIdentityRef = useRef<string>("");
+  // Ref for global player's current track (avoids stale closures in fetchTracks)
+  const playerCurrentTrackRef = useRef(globalPlayer.currentTrack);
+  useEffect(() => { playerCurrentTrackRef.current = globalPlayer.currentTrack; }, [globalPlayer.currentTrack]);
 
-  // Position index into the tracks array (used when we have an episode context)
-  const [episodePos, setEpisodePos] = useState(0);
-  const episodePosRef = useRef(0);
-  // Keep ref in sync — used by auto-advance to avoid stale closures
-  useEffect(() => { episodePosRef.current = episodePos; }, [episodePos]);
   useEffect(() => {
-    setEpisodePos(0);
-    episodePosRef.current = 0;
     setAdvancingEpisode(false);
   }, [episodeId]);
 
@@ -126,27 +137,34 @@ function StackPageContent() {
   const [hasEpisodeTracks, setHasEpisodeTracks] = useState(!!episodeId);
 
   // Helper: check if a track has playable audio
-  const isTrackPlayable = (t: Track) => !!(t.audio_url || t.preview_url || t.storage_path || t.spotify_url);
+  const isTrackPlayable = (t: Track) => !!(t.audio_url || t.storage_path);
 
-  // The track currently shown on the card — never land on an unplayable track
-  const safeEpisodePos = Math.min(episodePos, Math.max(tracks.length - 1, 0));
+  // The track currently shown on the card — derived from global player (single source of truth)
   const currentTrack = (() => {
-    if (hasEpisodeTracks) {
-      const t = tracks[safeEpisodePos];
-      if (t && isTrackPlayable(t)) return t;
-      // Find next playable track from current position
-      for (let i = safeEpisodePos + 1; i < tracks.length; i++) {
-        if (isTrackPlayable(tracks[i])) return tracks[i];
-      }
-      // Wrap around
-      for (let i = 0; i < safeEpisodePos; i++) {
-        if (isTrackPlayable(tracks[i])) return tracks[i];
-      }
-      return null; // All unplayable
+    // If the global player has a track loaded, find it in our local tracks
+    if (globalPlayer.currentTrack) {
+      const found = tracks.find(t => t.id === globalPlayer.currentTrack!.id);
+      if (found) return found;
     }
-    // Taste/ranked mode: first playable track
+    // Fallback for initial load (before player has a track):
+    // show first playable track without playing it
+    if (hasEpisodeTracks) {
+      const idx = Math.min(globalPlayer.currentIndex, Math.max(tracks.length - 1, 0));
+      const t = tracks[idx];
+      if (t && isTrackPlayable(t)) return t;
+      for (let i = idx + 1; i < tracks.length; i++) {
+        if (isTrackPlayable(tracks[i])) return tracks[i];
+      }
+      for (let i = 0; i < idx; i++) {
+        if (isTrackPlayable(tracks[i])) return tracks[i];
+      }
+      return null;
+    }
     return tracks.find(isTrackPlayable) ?? null;
   })();
+
+  // Position of current track in the local tracks array (for display)
+  const currentDisplayIndex = currentTrack ? tracks.findIndex(t => t.id === currentTrack.id) : 0;
 
   const lastEpisodeIdRef = useRef<string | null>(episodeId);
 
@@ -191,29 +209,6 @@ function StackPageContent() {
     return [...front, ...rest];
   }, []);
 
-  // Helper: play a track from the local tracks array via the global player.
-  // Called directly during auto-advance and vote-advance so the bottom bar
-  // updates atomically with the card — no 1-render lag.
-  const playTrackDirectly = useCallback((track: Track) => {
-    const origin = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/";
-    const payload = {
-      id: track.id,
-      artist: track.artist,
-      title: track.title,
-      coverArtUrl: track.cover_art_url || track.episode?.artwork_url || null,
-      spotifyUrl: track.spotify_url,
-      audioUrl: track.audio_url || track.preview_url || null,
-      episodeId: track.episode_id,
-      episodeTitle: track.episode?.title,
-      youtubeUrl: track.youtube_url,
-    };
-    const hasPlayable = !!(track.audio_url || track.preview_url || track.spotify_url);
-    if (hasPlayable) {
-      globalPlayer.play(payload, origin);
-    } else {
-      globalPlayer.loadTrack(payload, origin);
-    }
-  }, [globalPlayer]);
 
   const buildUrl = useCallback((_extra?: string) => {
     // Episode mode: fetch ALL tracks in episode order (not just pending)
@@ -261,11 +256,27 @@ function StackPageContent() {
       setError(null);
       setAdvancingEpisode(false);
 
-      // In episode mode, start at the first playable pending track
+      // Sync queue to global player
+      const playerTracks = newTracks.map(toPlayerTrack);
       if (episodeId && newTracks.length > 0) {
         const firstPlayablePending = newTracks.findIndex((t) => t.status === "pending" && isTrackPlayable(t));
-        setEpisodePos(firstPlayablePending >= 0 ? firstPlayablePending : 0);
+        const startIndex = firstPlayablePending >= 0 ? firstPlayablePending : 0;
         setHasEpisodeTracks(true);
+        globalPlayer.setQueue(playerTracks, startIndex);
+        // Load first track without playing (before user interaction)
+        if (skipReconcileRef.current || !playerCurrentTrackRef.current) {
+          globalPlayer.loadTrack(playerTracks[startIndex]);
+          skipReconcileRef.current = false;
+        }
+      } else if (newTracks.length > 0) {
+        globalPlayer.setQueue(playerTracks, 0);
+        if (skipReconcileRef.current || !playerCurrentTrackRef.current) {
+          const firstPlayable = newTracks.findIndex(isTrackPlayable);
+          if (firstPlayable >= 0) {
+            globalPlayer.loadTrack(playerTracks[firstPlayable]);
+          }
+          skipReconcileRef.current = false;
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load tracks");
@@ -307,10 +318,10 @@ function StackPageContent() {
       if (prev.length === 0) return prev;
 
       if (episodeId || hasEpisodeTracks) {
-        // Episode mode: find the playing track and set episodePos
+        // Episode mode: sync queue index to the playing track's position
         const idx = prev.findIndex((t) => t.id === playerTrack.id);
         if (idx >= 0) {
-          setEpisodePos(idx);
+          globalPlayer.setQueue(prev.map(toPlayerTrack), idx);
         }
         // Don't reorder episode tracks — position is semantic
         return prev;
@@ -441,7 +452,7 @@ function StackPageContent() {
     }
   };
 
-  const handleVote = async (id: string, status: "approved" | "rejected" | "skipped", advance: boolean = true) => {
+  const handleVote = async (id: string, status: "approved" | "rejected" | "skipped" | "bad_source", advance: boolean = true) => {
     userHasInteracted.current = true;
     try {
       const res = await fetch(`/api/tracks/${id}`, {
@@ -457,11 +468,12 @@ function StackPageContent() {
       }
 
       // Update the track's status locally so the UI reflects the vote
+      // Clear super_liked when changing vote (e.g. super-like → rejected)
       setTracks((prev) =>
-        prev.map((t) => t.id === id ? { ...t, status, voted_at: new Date().toISOString() } : t)
+        prev.map((t) => t.id === id ? { ...t, status, super_liked: false, voted_at: new Date().toISOString() } : t)
       );
       setSessionTracks((prev) =>
-        prev.map((t) => t.id === id ? { ...t, status, voted_at: new Date().toISOString() } : t)
+        prev.map((t) => t.id === id ? { ...t, status, super_liked: false, voted_at: new Date().toISOString() } : t)
       );
 
       setVoteCount((c) => c + 1);
@@ -476,9 +488,8 @@ function StackPageContent() {
           advanceToNextEpisode();
           return;
         }
-        // Advance to next pending + playable track — compute position and play directly
-        // so global player + card update atomically (no 1-render desync).
-        const curPos = episodePosRef.current;
+        // Advance to next pending + playable track via global player queue
+        const curPos = globalPlayer.currentIndex;
         let nextPos = -1;
         for (let i = curPos + 1; i < tracks.length; i++) {
           if (tracks[i].id !== id && tracks[i].status === "pending" && isTrackPlayable(tracks[i])) { nextPos = i; break; }
@@ -490,9 +501,7 @@ function StackPageContent() {
           }
         }
         if (nextPos >= 0) {
-          setEpisodePos(nextPos);
-          episodePosRef.current = nextPos;
-          playTrackDirectly(tracks[nextPos]);
+          globalPlayer.playFromQueue(nextPos);
         }
       } else {
         // All-pending mode: update momentum refs then remove voted track + reorder
@@ -519,6 +528,11 @@ function StackPageContent() {
             ordered = reorderByMomentum(ordered);
             ordered = boostByChain(ordered);
           }
+          // Sync queue to provider and play next track
+          globalPlayer.setQueue(ordered.map(toPlayerTrack), 0);
+          if (ordered.length > 0) {
+            globalPlayer.playFromQueue(0);
+          }
           // Ranked mode: full queue is loaded upfront, no refetch needed
           if (!isRankedMode && ordered.length <= 3) {
             const votedId = id;
@@ -539,6 +553,8 @@ function StackPageContent() {
                       combined = reorderByMomentum(combined);
                       combined = boostByChain(combined);
                     }
+                    // Re-sync queue with fresh tracks
+                    globalPlayer.setQueue(combined.map(toPlayerTrack));
                     return combined;
                   });
                   setSessionTracks((curr) => mergeTrackSession(curr, newTracks));
@@ -600,27 +616,23 @@ function StackPageContent() {
         setTotal(data.total || 0);
         setHasEpisodeTracks(true);
         const firstPlayable = data.tracks.findIndex((t: Track) => t.status === "pending" && isTrackPlayable(t));
-        setEpisodePos(firstPlayable >= 0 ? firstPlayable : 0);
+        const startIdx = firstPlayable >= 0 ? firstPlayable : 0;
+        globalPlayer.setQueue(data.tracks.map(toPlayerTrack), startIdx);
+        if (data.tracks[startIdx]) {
+          globalPlayer.loadTrack(toPlayerTrack(data.tracks[startIdx]));
+        }
       });
   }, [currentEpisodeId, episodeId, isTasteMode]);
 
-  // Sidebar/tracklist click → jump card to that track
+  // Sidebar/tracklist click → jump to that track via global player (single source of truth)
   const handleTrackSelect = useCallback((trackId: string) => {
     userHasInteracted.current = true;
-    if (hasEpisodeTracks) {
-      const idx = tracks.findIndex((t) => t.id === trackId);
-      if (idx >= 0) setEpisodePos(idx);
-    } else {
-      setTracks((prev) => {
-        const idx = prev.findIndex((t) => t.id === trackId);
-        if (idx <= 0) return prev;
-        const reordered = [...prev];
-        const [selected] = reordered.splice(idx, 1);
-        reordered.unshift(selected);
-        return reordered;
-      });
+    // Find the track's index in the queue and jump to it
+    const idx = tracks.findIndex((t) => t.id === trackId);
+    if (idx >= 0) {
+      globalPlayer.playFromQueue(idx);
     }
-  }, [hasEpisodeTracks, tracks]);
+  }, [tracks, globalPlayer]);
 
   const handleSkipEpisode = async () => {
     userHasInteracted.current = true;
@@ -645,7 +657,6 @@ function StackPageContent() {
         derivedEpisodeRef.current = { id: null, title: null };
         derivedFetchedRef.current = null;
         setHasEpisodeTracks(false);
-        setEpisodePos(0);
         fetchTracks();
         setSkippingEpisode(false);
       }
@@ -667,51 +678,11 @@ function StackPageContent() {
     }
   }, [fromEpisodes, handleGoToStacks]);
 
-  // Card → Player sync: when the card track changes, play it
-  // Only auto-play after the user has interacted (not on initial page load)
+  // Card → Player sync is no longer needed — the global player is the single
+  // source of truth. All navigation (tracklist clicks, votes, auto-advance)
+  // goes through globalPlayer.playFromQueue() which updates both the player
+  // and the card atomically.
   const currentTrackId = currentTrack?.id ?? null;
-  useEffect(() => {
-    if (!currentTrack) return;
-    if (!userHasInteracted.current) return;
-
-    const playerTrackId = globalPlayer.currentTrack?.id ?? null;
-
-    // Already playing this track
-    if (playerTrackId === currentTrack.id) return;
-
-    const origin = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/";
-
-    // Unplayable tracks should still become the active card/player item and stop the prior song.
-    const hasPlayable = !!(currentTrack.audio_url || currentTrack.preview_url || currentTrack.spotify_url);
-    if (!hasPlayable) {
-      globalPlayer.loadTrack({
-        id: currentTrack.id,
-        artist: currentTrack.artist,
-        title: currentTrack.title,
-        coverArtUrl: currentTrack.cover_art_url || currentTrack.episode?.artwork_url || null,
-        spotifyUrl: currentTrack.spotify_url,
-        audioUrl: currentTrack.audio_url || currentTrack.preview_url || null,
-        episodeId: currentTrack.episode_id,
-        episodeTitle: currentTrack.episode?.title,
-        youtubeUrl: currentTrack.youtube_url,
-      }, origin);
-      return;
-    }
-
-    // Play the card track — set origin to current URL so Playing tab returns here
-    globalPlayer.play({
-      id: currentTrack.id,
-      artist: currentTrack.artist,
-      title: currentTrack.title,
-      coverArtUrl: currentTrack.cover_art_url || currentTrack.episode?.artwork_url || null,
-      spotifyUrl: currentTrack.spotify_url,
-      audioUrl: currentTrack.audio_url || currentTrack.preview_url || null,
-      episodeId: currentTrack.episode_id,
-      episodeTitle: currentTrack.episode?.title,
-      youtubeUrl: currentTrack.youtube_url,
-    }, origin);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTrackId]);
 
   // Auto-advance on song end — move to next track in order
   const lastEndedCount = useRef(globalPlayer.trackEndedCount);
@@ -720,10 +691,8 @@ function StackPageContent() {
     lastEndedCount.current = globalPlayer.trackEndedCount;
 
     if (hasEpisodeTracks) {
-      // Episode mode: advance to next track by position that has audio — never go backwards.
-      // Compute next position from ref (latest value) and play directly so the
-      // global player + card update atomically — no 1-render desync.
-      const curPos = episodePosRef.current;
+      // Episode mode: advance to next playable track via the global player queue.
+      const curPos = globalPlayer.currentIndex;
       let nextPos = -1;
       for (let i = curPos + 1; i < tracks.length; i++) {
         const t = tracks[i];
@@ -733,9 +702,7 @@ function StackPageContent() {
         }
       }
       if (nextPos >= 0) {
-        setEpisodePos(nextPos);
-        episodePosRef.current = nextPos;
-        playTrackDirectly(tracks[nextPos]);
+        globalPlayer.playFromQueue(nextPos);
       } else {
         // No playable tracks ahead — advance to next episode
         advanceToNextEpisode();
@@ -743,13 +710,16 @@ function StackPageContent() {
       return;
     }
 
-    // All-pending mode: drop finished track, refetch if low
+    // All-pending mode: drop finished track, advance via queue
     if (tracks.length < 2) return;
-    const currentId = tracks[0].id;
-    if (globalPlayer.currentTrack?.id !== currentId) return;
+    const currentId = globalPlayer.currentTrack?.id;
+    if (!currentId || currentId !== tracks[0]?.id) return;
     setTracks((prev) => {
       if (prev.length < 2) return prev;
       const remaining = prev.slice(1);
+      // Update the queue with remaining tracks and play the first one
+      globalPlayer.setQueue(remaining.map(toPlayerTrack), 0);
+      globalPlayer.playFromQueue(0);
       // Ranked mode: full queue is loaded upfront, no refetch needed
       if (!isRankedMode && remaining.length <= 3) {
         const existingIds = new Set(remaining.map((t) => t.id));
@@ -769,6 +739,8 @@ function StackPageContent() {
                   combined = reorderByMomentum(combined);
                   combined = boostByChain(combined);
                 }
+                // Re-sync queue with fresh tracks
+                globalPlayer.setQueue(combined.map(toPlayerTrack));
                 return combined;
               });
               setSessionTracks((curr) => mergeTrackSession(curr, newTracks));
@@ -778,7 +750,7 @@ function StackPageContent() {
       }
       return remaining;
     });
-  }, [globalPlayer.trackEndedCount, tracks, globalPlayer.currentTrack?.id, buildUrl, hasEpisodeTracks, isRankedMode, playTrackDirectly, advanceToNextEpisode]);
+  }, [globalPlayer.trackEndedCount, tracks, globalPlayer.currentTrack?.id, globalPlayer.currentIndex, buildUrl, hasEpisodeTracks, isRankedMode, globalPlayer, advanceToNextEpisode]);
 
   // Preload next track's audio when current track reaches 75% completion
   const preloadTriggeredRef = useRef<string | null>(null);
@@ -792,7 +764,7 @@ function StackPageContent() {
     // Find the next track in queue
     let nextTrack: Track | undefined;
     if (hasEpisodeTracks) {
-      for (let i = episodePos + 1; i < tracks.length; i++) {
+      for (let i = globalPlayer.currentIndex + 1; i < tracks.length; i++) {
         if (tracks[i].status === "pending") { nextTrack = tracks[i]; break; }
       }
     } else if (tracks.length > 1) {
@@ -800,19 +772,9 @@ function StackPageContent() {
     }
 
     if (nextTrack && (nextTrack.audio_url || nextTrack.preview_url)) {
-      globalPlayer.preloadTrack({
-        id: nextTrack.id,
-        artist: nextTrack.artist,
-        title: nextTrack.title,
-        coverArtUrl: nextTrack.cover_art_url || nextTrack.episode?.artwork_url || null,
-        spotifyUrl: nextTrack.spotify_url,
-        audioUrl: nextTrack.audio_url || nextTrack.preview_url || null,
-        episodeId: nextTrack.episode_id,
-        episodeTitle: nextTrack.episode?.title,
-        youtubeUrl: nextTrack.youtube_url,
-      });
+      globalPlayer.preloadTrack(toPlayerTrack(nextTrack));
     }
-  }, [globalPlayer.progress, globalPlayer.duration, globalPlayer.currentTrack?.id, tracks, hasEpisodeTracks]);
+  }, [globalPlayer.progress, globalPlayer.duration, globalPlayer.currentTrack?.id, globalPlayer.currentIndex, tracks, hasEpisodeTracks]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1008,7 +970,7 @@ function StackPageContent() {
           </span>
           <span className="text-[10px] font-mono text-muted/60 pointer-events-auto">
             {hasEpisodeTracks
-              ? `${safeEpisodePos + 1} / ${total}`
+              ? `${currentDisplayIndex + 1} / ${total}`
               : isRankedMode
                 ? `ranked queue — ${total} tracks`
                 : `${total} pending`}
@@ -1099,7 +1061,7 @@ function StackPageContent() {
           seedName={seedName}
           seedContext={parsedSeedContext}
           episodeTitle={hasEpisodeTracks ? currentEpisodeTitle : null}
-          episodePos={hasEpisodeTracks ? safeEpisodePos + 1 : null}
+          episodePos={hasEpisodeTracks ? currentDisplayIndex + 1 : null}
           episodeTotal={hasEpisodeTracks ? total : null}
           onClose={() => setContextOpen(false)}
         />

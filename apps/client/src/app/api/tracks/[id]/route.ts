@@ -57,9 +57,9 @@ export async function PATCH(
     return NextResponse.json({ ...data, super_liked: true });
   }
 
-  if (!status || !["approved", "rejected", "pending", "skipped", "listened"].includes(status)) {
+  if (!status || !["approved", "rejected", "pending", "skipped", "listened", "bad_source"].includes(status)) {
     return NextResponse.json(
-      { error: "Invalid status. Must be: approved, rejected, pending, skipped, listened" },
+      { error: "Invalid status. Must be: approved, rejected, pending, skipped, listened, bad_source" },
       { status: 400 }
     );
   }
@@ -110,7 +110,7 @@ export async function PATCH(
 
   const updates: Record<string, unknown> = { status };
 
-  if (status === "approved" || status === "rejected" || status === "skipped") {
+  if (status === "approved" || status === "rejected" || status === "skipped" || status === "bad_source") {
     updates.voted_at = new Date().toISOString();
   }
 
@@ -152,11 +152,12 @@ export async function PATCH(
   }
 
   // Record vote in user_tracks for all voted statuses (enables weight tuning + engagement analytics)
-  if (user && (status === "approved" || status === "rejected" || status === "skipped")) {
+  // Reset super_liked when changing vote — handles re-votes from super-like to regular vote
+  if (user && (status === "approved" || status === "rejected" || status === "skipped" || status === "bad_source")) {
     await supabase
       .from("user_tracks")
       .upsert(
-        { user_id: user.id, track_id: params.id, status, voted_at: updates.voted_at },
+        { user_id: user.id, track_id: params.id, status, super_liked: false, voted_at: updates.voted_at },
         { onConflict: "user_id,track_id", ignoreDuplicates: false }
       );
   }
