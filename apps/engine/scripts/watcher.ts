@@ -26,7 +26,7 @@ const STATUS_FILE = `${process.env.HOME}/.openclaw/data/azorean-engine-status.js
 // ─── CONCURRENCY LIMITS ─────────────────────────────────────
 // Tuned for M4 Mac Mini — all bottlenecks are network I/O
 const CONCURRENCY = {
-  enrich: 25,         // Spotify + YouTube lookups per batch
+  enrich: 3,          // Spotify + YouTube lookups per batch (low to avoid Spotify 429s)
   download: 8,        // yt-dlp audio downloads per batch
   repair: 20,         // Background track repair tasks
   superLike: 2,       // Simultaneous super-like downloads
@@ -34,7 +34,7 @@ const CONCURRENCY = {
 } as const;
 
 const PRIORITY_DOWNLOAD_CONCURRENCY = 20; // Max concurrent downloads for priority pipeline
-const PRIORITY_ENRICH_CONCURRENCY = 40;   // Max concurrent enrichments for priority pipeline
+const PRIORITY_ENRICH_CONCURRENCY = 3;    // Max concurrent enrichments (low to avoid Spotify 429s)
 
 const GARBAGE_TITLES = new Set(["unknown track", "untitled", "id", "?", "unknown", ""]);
 

@@ -126,7 +126,11 @@ type SpotifyTrackItem = {
   album: { name: string; images: Array<{ url: string }> };
 };
 
+// Exponential backoff base delays: 5s → 15s → 45s
+const SPOTIFY_BACKOFF = [5, 15, 45];
+
 async function spotifySearch(query: string, token: string, artist: string, title: string, retries = 0): Promise<SpotifyTrackItem[]> {
+  await sleep(200); // rate-limit gap between sequential Spotify requests
   const q = encodeURIComponent(query);
   const res = await fetch(`${SPOTIFY_API}/search?q=${q}&type=track&limit=5`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -136,8 +140,9 @@ async function spotifySearch(query: string, token: string, artist: string, title
       log("fail", `Spotify rate-limited 3 times — giving up for "${query}"`);
       return [];
     }
-    const rawWait = parseInt(res.headers.get("Retry-After") || "2", 10);
-    const waitSec = Math.min(rawWait, 5); // Cap at 5s — fail fast, YouTube is the priority
+    const retryAfter = parseInt(res.headers.get("Retry-After") || "0", 10);
+    const backoff = SPOTIFY_BACKOFF[retries] || 45;
+    const waitSec = Math.max(retryAfter, backoff);
     log("wait", `Spotify rate-limited — waiting ${waitSec}s (retry ${retries + 1}/3)`);
     await sleep(waitSec * 1000);
     return spotifySearch(query, token, artist, title, retries + 1);
@@ -189,7 +194,6 @@ export async function spotifyLookup(artist: string, title: string) {
     for (const item of items) {
       if (!seen.has(item.id)) { seen.add(item.id); allCandidates.push(item); }
     }
-    await sleep(100);
   }
 
   if (!allCandidates.length) return null;
@@ -302,6 +306,7 @@ export async function youtubeLookup(artist: string, title: string): Promise<YouT
 export async function spotifyArtistGenres(artistIds: string[], retries = 0): Promise<string[]> {
   if (!artistIds.length) return [];
   try {
+    await sleep(200); // rate-limit gap between sequential Spotify requests
     const token = await getSpotifyToken();
     const ids = artistIds.slice(0, 50).join(",");
     const res = await fetch(`${SPOTIFY_API}/artists?ids=${ids}`, {
@@ -312,8 +317,9 @@ export async function spotifyArtistGenres(artistIds: string[], retries = 0): Pro
         log("fail", "Spotify artist genres rate-limited 3 times — giving up");
         return [];
       }
-      const rawWait = parseInt(res.headers.get("Retry-After") || "5", 10);
-      const waitSec = Math.min(rawWait, 30);
+      const retryAfter = parseInt(res.headers.get("Retry-After") || "0", 10);
+      const backoff = SPOTIFY_BACKOFF[retries] || 45;
+      const waitSec = Math.max(retryAfter, backoff);
       await sleep(waitSec * 1000);
       return spotifyArtistGenres(artistIds, retries + 1);
     }
