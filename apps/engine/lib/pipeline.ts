@@ -690,7 +690,14 @@ export async function downloadTrack(track: any): Promise<boolean> {
     { stdout: "ignore", stderr: "ignore" },
   );
 
-  const exitCode = await withTimeout(dlProc.exited, DL_TIMEOUT, `${track.artist} - ${track.title}`);
+  let exitCode: number;
+  try {
+    exitCode = await withTimeout(dlProc.exited, DL_TIMEOUT, `${track.artist} - ${track.title}`);
+  } catch (err) {
+    // Kill the orphaned yt-dlp process on timeout
+    try { dlProc.kill(); } catch {}
+    throw err;
+  }
   if (exitCode !== 0) {
     await db.from("tracks").update({
       dl_attempts: (track.dl_attempts || 0) + 1,

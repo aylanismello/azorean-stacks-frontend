@@ -118,16 +118,23 @@ async function processSeed(seedId: string) {
 
     if (source.name === "lotradio") {
       // Lot Radio: tracklist matching ONLY — find episodes where a DJ played the seed track
+      // Paginated to avoid Supabase's default 1000-row cap
       try {
         const seedArtistLower = seed.artist.toLowerCase().trim();
         const seedTitleLower = seed.title.toLowerCase().trim();
-        const { data: dbEpisodes } = await db
-          .from("episodes")
-          .select("url, title, aired_date, metadata")
-          .eq("source", "lotradio")
-          .not("metadata", "is", null);
+        const PAGE_SIZE = 1000;
+        let from = 0;
 
-        if (dbEpisodes) {
+        while (true) {
+          const { data: dbEpisodes } = await db
+            .from("episodes")
+            .select("url, title, aired_date, metadata")
+            .eq("source", "lotradio")
+            .not("metadata", "is", null)
+            .range(from, from + PAGE_SIZE - 1);
+
+          if (!dbEpisodes || dbEpisodes.length === 0) break;
+
           for (const ep of dbEpisodes as any[]) {
             const tracklist: Array<{ artist: string; title: string }> = ep.metadata?.tracklist || [];
             if (tracklist.length === 0) continue;
@@ -139,6 +146,9 @@ async function processSeed(seedId: string) {
               sourceEpisodes.push({ url: ep.url, title: ep.title || ep.url, date: ep.aired_date || null });
             }
           }
+
+          if (dbEpisodes.length < PAGE_SIZE) break;
+          from += PAGE_SIZE;
         }
         log("info", `Lot Radio: ${sourceEpisodes.length} tracklist matches for ${seedLabel}`);
       } catch (err) {
@@ -1396,12 +1406,15 @@ function startWatcher() {
                 .eq("spotify_url", "")  // empty string = enrichment ran, found nothing
                 .limit(100);
               if (unfindable?.length) {
-                const ids = unfindable.map((t: any) => t.id);
-                await db.from("tracks").update({
-                  status: "skipped",
-                  metadata: { skip_reason: "no_youtube_or_spotify_match" },
-                }).in("id", ids);
-                log("info", `[Drain] Marked ${ids.length} unfindable tracks as skipped`);
+                // Merge skip_reason into existing metadata to preserve co_occurrence, genres, etc.
+                for (const t of unfindable) {
+                  const { data: existing } = await db.from("tracks").select("metadata").eq("id", t.id).single();
+                  await db.from("tracks").update({
+                    status: "skipped",
+                    metadata: { ...(existing?.metadata || {}), skip_reason: "no_youtube_or_spotify_match" },
+                  }).eq("id", t.id);
+                }
+                log("info", `[Drain] Marked ${unfindable.length} unfindable tracks as skipped`);
               }
               return;
             }
@@ -1446,12 +1459,15 @@ function startWatcher() {
                     .gte("dl_attempts", 3)
                     .limit(100);
                   if (gaveUp?.length) {
-                    const ids = gaveUp.map((t: any) => t.id);
-                    await db.from("tracks").update({
-                      status: "failed",
-                      metadata: { fail_reason: "download_failed_3_attempts" },
-                    }).in("id", ids);
-                    log("info", `[DL Drain] Marked ${ids.length} tracks as failed (3+ download attempts)`);
+                    // Merge fail_reason into existing metadata to preserve co_occurrence, genres, etc.
+                    for (const t of gaveUp) {
+                      const { data: existing } = await db.from("tracks").select("metadata").eq("id", t.id).single();
+                      await db.from("tracks").update({
+                        status: "failed",
+                        metadata: { ...(existing?.metadata || {}), fail_reason: "download_failed_3_attempts" },
+                      }).eq("id", t.id);
+                    }
+                    log("info", `[DL Drain] Marked ${gaveUp.length} tracks as failed (3+ download attempts)`);
                   }
                   return;
                 }
