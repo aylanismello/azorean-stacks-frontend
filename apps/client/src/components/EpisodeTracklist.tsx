@@ -20,7 +20,7 @@ interface TrackListItem {
   is_re_seed?: boolean;
   is_artist_seed?: boolean;
   super_liked?: boolean;
-  vote_status?: "approved" | "rejected" | "skipped" | "listened" | "pending" | null;
+  vote_status?: "approved" | "rejected" | "skipped" | "listened" | "bad_source" | "pending" | null;
   // Ranked queue scoring metadata
   _match_type?: "full" | "artist" | "unknown";
   _ranked_score?: number;
@@ -207,6 +207,7 @@ export function EpisodeTracklist(props: TracklistProps) {
     if (t.vote_status === "rejected") return <span className="w-2 h-2 rounded-full bg-red-400 flex-shrink-0" title="Rejected" />;
     if (t.vote_status === "skipped") return <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" title="Skipped" />;
     if (t.vote_status === "listened") return <span className="w-2 h-2 rounded-full bg-foreground/25 flex-shrink-0" title="Listened" />;
+    if (t.vote_status === "bad_source") return <span className="w-2 h-2 rounded-full bg-orange-400 flex-shrink-0" title="Bad source" />;
     return <span className="w-1.5 h-1.5 rounded-full bg-foreground/10 flex-shrink-0" title="Pending" />;
   };
 

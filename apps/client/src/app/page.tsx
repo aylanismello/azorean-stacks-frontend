@@ -441,7 +441,7 @@ function StackPageContent() {
     }
   };
 
-  const handleVote = async (id: string, status: "approved" | "rejected" | "skipped", advance: boolean = true) => {
+  const handleVote = async (id: string, status: "approved" | "rejected" | "skipped" | "bad_source", advance: boolean = true) => {
     userHasInteracted.current = true;
     try {
       const res = await fetch(`/api/tracks/${id}`, {

@@ -9,7 +9,7 @@ import { useSpotify } from "./SpotifyProvider";
 
 interface TrackCardProps {
   track: Track;
-  onVote: (id: string, status: "approved" | "rejected" | "skipped", advance?: boolean) => Promise<void>;
+  onVote: (id: string, status: "approved" | "rejected" | "skipped" | "bad_source", advance?: boolean) => Promise<void>;
   onSuperLike?: (id: string) => Promise<void>;
   onSkipEpisode?: () => void;
   skippingEpisode?: boolean;
@@ -50,12 +50,13 @@ function sourceLabel(source: string): string {
   return labels[source] || source;
 }
 
-/** Derive short label for the download source — where the audio was fetched from */
+/** Derive short label for the original download source — where the audio file was fetched from */
 function audioSourceLabel(track: Track): string {
-  if (track.storage_path && track.youtube_url) return "YT";
-  if (track.storage_path) return "DL";
   if (track.youtube_url) return "YT";
+  if ((track as any).soundcloud_url) return "SC";
+  if (track.spotify_url && track.preview_url) return "SP";
   if (track.preview_url) return "Preview";
+  if (track.storage_path) return "DL";
   return "Audio";
 }
 
@@ -147,7 +148,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   }, [track.id, onSuperLike, superLiking, reportEngagement]);
 
   const handleVote = useCallback(
-    async (status: "approved" | "rejected" | "skipped", advance: boolean = true) => {
+    async (status: "approved" | "rejected" | "skipped" | "bad_source", advance: boolean = true) => {
       if (votingRef.current) return;
       if (!advance) {
         if (superLiked) return; // already super-liked, don't double-approve
@@ -499,6 +500,16 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
         </svg>
+      </button>
+
+      {/* Bad source — wrong audio / can't judge */}
+      <button
+        onClick={() => handleVote("bad_source", true)}
+        disabled={voting}
+        className="flex items-center justify-center w-9 h-9 rounded-full bg-surface-2 md:bg-black/40 md:backdrop-blur-md border border-orange-400/30 text-orange-400/70 hover:bg-orange-950/50 hover:border-orange-400/60 hover:text-orange-400 transition-all active:scale-90 disabled:opacity-50"
+        title="Bad source — wrong audio"
+      >
+        <span className="text-sm">⚠️</span>
       </button>
 
       {/* Skip (neutral) */}

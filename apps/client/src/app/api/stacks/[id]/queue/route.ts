@@ -144,15 +144,15 @@ export async function GET(
     .eq("status", "pending")
     .or("storage_path.not.is.null,spotify_url.neq.,preview_url.not.is.null");
 
-  // Filter out tracks the user has already listened to (heard past 80% without voting)
-  const { data: listenedRows } = await db
+  // Filter out tracks the user has already listened to or flagged as bad source
+  const { data: excludedRows } = await db
     .from("user_tracks")
     .select("track_id")
     .eq("user_id", user.id)
-    .eq("status", "listened");
+    .in("status", ["listened", "bad_source"]);
 
-  const listenedTrackIds = new Set((listenedRows || []).map((r: any) => r.track_id));
-  const pendingTracks = (rawPendingTracks || []).filter((t: any) => !listenedTrackIds.has(t.id));
+  const excludedTrackIds = new Set((excludedRows || []).map((r: any) => r.track_id));
+  const pendingTracks = (rawPendingTracks || []).filter((t: any) => !excludedTrackIds.has(t.id));
 
   if (!pendingTracks?.length) {
     return NextResponse.json({
