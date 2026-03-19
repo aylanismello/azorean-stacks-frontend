@@ -412,6 +412,8 @@ export async function GET(
       },
       _match_type: matchType,
       _seed_name: seedLabel,
+      _seed_artist: seed.artist,
+      _seed_title: seed.title,
     };
   });
 

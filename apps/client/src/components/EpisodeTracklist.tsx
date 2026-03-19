@@ -20,7 +20,7 @@ interface TrackListItem {
   is_re_seed?: boolean;
   is_artist_seed?: boolean;
   super_liked?: boolean;
-  vote_status?: "approved" | "rejected" | "skipped" | "listened" | "bad_source" | "pending" | null;
+  vote_status?: "approved" | "rejected" | "skipped" | "listened" | "pending" | null;
   // Ranked queue scoring metadata
   _match_type?: "full" | "artist" | "unknown";
   _ranked_score?: number;
@@ -202,13 +202,17 @@ export function EpisodeTracklist(props: TracklistProps) {
   };
 
   const voteDot = (t: TrackListItem) => {
-    if (t.super_liked) return <span className="w-2 h-2 rounded-full bg-yellow-400 flex-shrink-0" title="Super liked" />;
-    if (t.vote_status === "approved") return <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" title="Approved" />;
-    if (t.vote_status === "rejected") return <span className="w-2 h-2 rounded-full bg-red-400 flex-shrink-0" title="Rejected" />;
-    if (t.vote_status === "skipped") return <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" title="Skipped" />;
-    if (t.vote_status === "listened") return <span className="w-2 h-2 rounded-full bg-foreground/25 flex-shrink-0" title="Listened" />;
-    if (t.vote_status === "bad_source") return <span className="w-2 h-2 rounded-full bg-orange-400 flex-shrink-0" title="Bad source" />;
-    return <span className="w-1.5 h-1.5 rounded-full bg-foreground/10 flex-shrink-0" title="Pending" />;
+    if (t.super_liked)
+      return <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 flex-shrink-0" title="Super liked" />;
+    if (t.vote_status === "approved")
+      return <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" title="Approved" />;
+    if (t.vote_status === "rejected")
+      return <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" title="Rejected" />;
+    if (t.vote_status === "skipped")
+      return <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="Skipped" />;
+    if (t.vote_status === "listened")
+      return <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" title="Listened" />;
+    return null;
   };
 
   // Header stats
@@ -266,15 +270,8 @@ export function EpisodeTracklist(props: TracklistProps) {
                   key={t.id}
                   ref={isPlaying ? playingRef : undefined}
                   onClick={() => {
-                    if (t.is_seed) return;
-                    // Let the parent handle playback via globalPlayer.playFromQueue
-                    // to maintain single source of truth. Fall back to direct play
-                    // only if no onTrackSelect handler is provided.
-                    if (onTrackSelect) {
-                      onTrackSelect(t.id);
-                    } else {
-                      handlePlay(t);
-                    }
+                    onTrackSelect?.(t.id);
+                    handlePlay(t);
                   }}
                   disabled={false}
                   className={`w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2.5 transition-colors group border ${
@@ -354,6 +351,9 @@ export function EpisodeTracklist(props: TracklistProps) {
                       <p className={`text-[10px] truncate ${
                         t.vote_status === "rejected" ? "line-through text-muted/30" : "text-muted"
                       }`}>{t.artist}</p>
+                      {t._match_type === "full" && t.storage_path && (
+                        <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-green-400/70" title="Exact seed match" />
+                      )}
                     </div>
                   </div>
 

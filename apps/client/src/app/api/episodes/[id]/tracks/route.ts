@@ -51,8 +51,10 @@ export async function GET(
   const seedArtists = new Set<string>();
   for (const row of (episodeSeedRows || []) as any[]) {
     const seed = Array.isArray(row.seeds) ? row.seeds[0] : row.seeds;
-    const isReSeed = row.match_type === "re_seed" || row.match_type === "re-seed";
     const isArtistMatch = row.match_type === "artist" || row.match_type === "artist_match";
+    // Use seeds.source (not episode_seeds.match_type) to classify seed vs re-seed.
+    // A seed with source="manual" is always a 🌱 seed, never a 🌿 re-seed.
+    const isReSeed = seed?.source === "re-seed";
     if (isArtistMatch) {
       if (seed?.artist) {
         // Split comma-separated seed artists so each individual name matches

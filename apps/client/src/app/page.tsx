@@ -1094,13 +1094,15 @@ function TrackContextModal({
   onClose: () => void;
 }) {
   const meta = (track.metadata ?? {}) as Record<string, unknown>;
-  const seedArtist = (seedContext?.artist || track.seed_track?.artist || meta.seed_artist) as string | undefined;
-  const seedTitle = (seedContext?.title || track.seed_track?.title || meta.seed_title) as string | undefined;
+  const seedArtist = (seedContext?.artist || (track as any)._seed_artist || track.seed_track?.artist || meta.seed_artist) as string | undefined;
+  const seedTitle = (seedContext?.title || (track as any)._seed_title || track.seed_track?.title || meta.seed_title) as string | undefined;
   const coOccurrence = meta.co_occurrence as number | undefined;
   const genre = meta.genre as string | undefined;
   const discoveryMethod = meta.discovery_method as string | undefined;
   const curatorSlug = meta.curator_slug as string | undefined;
   const matchType = (track as any)._match_type as string | undefined;
+  const rankedScore = (track as any)._ranked_score as number | undefined;
+  const scoreComponents = (track as any)._score_components as Record<string, number> | undefined;
 
   const modeLabel = () => {
     if (episodeTitle) return `Episode: ${episodeTitle}${episodePos && episodeTotal ? ` — track ${episodePos} of ${episodeTotal}` : ""}`;
@@ -1164,7 +1166,12 @@ function TrackContextModal({
               📡 Curator Radar{curatorSlug && <span className="text-foreground/50"> · {curatorSlug}</span>}
             </p>
           ) : matchType === "artist" ? (
-            <p className="text-sm text-foreground/80">🌿 Re-seed Discovery</p>
+            <p className="text-sm text-foreground/80">
+              🌿 Re-seed Discovery
+              {seedArtist && (
+                <span className="text-foreground/50"> · via {seedArtist}{seedTitle ? ` — ${seedTitle}` : ""}</span>
+              )}
+            </p>
           ) : (
             <p className="text-sm text-foreground/80">🌱 Seed Discovery</p>
           )}
@@ -1188,19 +1195,35 @@ function TrackContextModal({
         </div>
 
         {/* Taste signals */}
-        {(typeof track.taste_score === "number" || genre) && (
+        {(typeof track.taste_score === "number" || genre || typeof rankedScore === "number") && (
           <div>
             <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Taste Signals</p>
             <div className="flex flex-wrap gap-2">
+              {typeof rankedScore === "number" && (
+                <span className={`text-xs font-mono px-2 py-0.5 rounded ${rankedScore >= 50 ? "bg-green-500/15 text-green-400" : rankedScore >= 25 ? "bg-amber-500/15 text-amber-400" : "bg-red-500/15 text-red-400"}`}>
+                  rank {rankedScore}/100
+                </span>
+              )}
               {typeof track.taste_score === "number" && track.taste_score !== 0 && (
                 <span className={`text-xs font-mono px-2 py-0.5 rounded ${track.taste_score > 0 ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400"}`}>
-                  score {track.taste_score > 0 ? "+" : ""}{track.taste_score.toFixed(2)}
+                  taste {track.taste_score > 0 ? "+" : ""}{track.taste_score.toFixed(2)}
                 </span>
               )}
               {genre && (
                 <span className="text-xs px-2 py-0.5 rounded bg-surface-2 text-muted">{genre}</span>
               )}
             </div>
+            {scoreComponents && (
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {Object.entries(scoreComponents).map(([key, val]) => (
+                  val !== 0 && (
+                    <span key={key} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-2 text-muted">
+                      {key.replace(/_/g, " ")} {val > 0 ? "+" : ""}{val}
+                    </span>
+                  )
+                ))}
+              </div>
+            )}
           </div>
         )}
 
