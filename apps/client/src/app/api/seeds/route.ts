@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await supabase
     .from("seeds")
     .select("*")
-    .or(`user_id.eq.${user.id},user_id.is.null`)
+    .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -229,7 +229,7 @@ export async function DELETE(req: NextRequest) {
     .from("seeds")
     .select("id")
     .eq("id", seed_id)
-    .or(`user_id.eq.${user.id},user_id.is.null`)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (!seed) {
@@ -368,7 +368,7 @@ export async function POST(req: NextRequest) {
   const { data: existingSeed } = await supabase
     .from("seeds")
     .select("id")
-    .or(`user_id.eq.${user.id},user_id.is.null`)
+    .eq("user_id", user.id)
     .ilike("artist", escArtist)
     .ilike("title", escTitle)
     .limit(1)

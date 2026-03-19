@@ -70,6 +70,9 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   const [superLiked, setSuperLiked] = useState(false);
   const [superLiking, setSuperLiking] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [rejected, setRejected] = useState(false);
+  const [skippedVote, setSkippedVote] = useState(false);
+  const [badSource, setBadSource] = useState(false);
   const [seeded, setSeeded] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [swipeX, setSwipeX] = useState(0);
@@ -80,12 +83,24 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   // Restore vote state from track data on mount (returning to a previously-voted track)
   useEffect(() => {
     const vs = (track as any).vote_status || track.status;
-    if (vs === "approved") setKept(true);
-    if ((track as any).super_liked) setSuperLiked(true);
+    // Reset all vote states first (mutual exclusivity)
+    setKept(false);
+    setSuperLiked(false);
+    setRejected(false);
+    setSkippedVote(false);
+    setBadSource(false);
+    // Set active state based on vote_status
+    if (vs === "approved") {
+      setKept(true);
+      if ((track as any).super_liked) setSuperLiked(true);
+    } else if (vs === "rejected") {
+      setRejected(true);
+    } else if (vs === "skipped") {
+      setSkippedVote(true);
+    } else if (vs === "bad_source") {
+      setBadSource(true);
+    }
     if ((track as any).seed_id || (track as any).is_seeded) setSeeded(true);
-    // Reset states when track changes
-    if (vs !== "approved") setKept(false);
-    if (!(track as any).super_liked) setSuperLiked(false);
   }, [track.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCopy = useCallback(async () => {
@@ -136,6 +151,10 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   const handleSuperLike = useCallback(async () => {
     if (superLiking || votingRef.current) return;
     setSuperLiking(true);
+    // Reset all other vote states (mutual exclusivity)
+    setRejected(false);
+    setSkippedVote(false);
+    setBadSource(false);
     setSuperLiked(true);
     setKept(true); // super like implies approval — mark heart as done too
     reportEngagement();
@@ -153,9 +172,21 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   const handleVote = useCallback(
     async (status: "approved" | "rejected" | "skipped" | "bad_source", advance: boolean = true) => {
       if (votingRef.current) return;
+      // Reset all vote states (mutual exclusivity) before setting new one
+      setRejected(false);
+      setSkippedVote(false);
+      setBadSource(false);
+      if (status !== "approved") {
+        setKept(false);
+        setSuperLiked(false);
+      }
+      // Set the new vote state
+      if (status === "rejected") setRejected(true);
+      else if (status === "skipped") setSkippedVote(true);
+      else if (status === "bad_source") setBadSource(true);
+      else if (status === "approved") setKept(true);
       if (!advance) {
         if (superLiked) return; // already super-liked, don't double-approve
-        setKept(true);
         reportEngagement();
         await onVote(track.id, status, false);
         return;
@@ -495,7 +526,11 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
       <button
         onClick={() => handleVote("rejected", true)}
         disabled={voting}
-        className="flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-full bg-surface-2 md:bg-black/40 md:backdrop-blur-md border-2 border-red-400/30 text-red-400/80 hover:bg-red-950/50 hover:border-red-400/60 hover:text-red-400 transition-all active:scale-90 disabled:opacity-50"
+        className={`flex items-center justify-center w-14 h-14 md:w-16 md:h-16 rounded-full border-2 transition-all active:scale-90 disabled:opacity-50 ${
+          rejected
+            ? "bg-red-500/30 md:bg-red-500/30 border-red-400 text-red-400 ring-2 ring-red-400/40"
+            : "bg-surface-2 md:bg-black/40 md:backdrop-blur-md border-red-400/30 text-red-400/80 hover:bg-red-950/50 hover:border-red-400/60 hover:text-red-400"
+        }`}
         title="Reject track"
         aria-label="Reject track"
       >
@@ -508,7 +543,11 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
       <button
         onClick={() => handleVote("bad_source", true)}
         disabled={voting}
-        className="flex items-center justify-center w-10 h-10 md:w-11 md:h-11 rounded-full bg-surface-2 md:bg-black/40 md:backdrop-blur-md border-2 border-orange-400/30 text-orange-400/80 hover:bg-orange-950/50 hover:border-orange-400/60 hover:text-orange-400 transition-all active:scale-90 disabled:opacity-50"
+        className={`flex items-center justify-center w-10 h-10 md:w-11 md:h-11 rounded-full border-2 transition-all active:scale-90 disabled:opacity-50 ${
+          badSource
+            ? "bg-orange-500/30 md:bg-orange-500/30 border-orange-400 text-orange-400 ring-2 ring-orange-400/40"
+            : "bg-surface-2 md:bg-black/40 md:backdrop-blur-md border-orange-400/30 text-orange-400/80 hover:bg-orange-950/50 hover:border-orange-400/60 hover:text-orange-400"
+        }`}
         title="Bad source — wrong track or bad audio"
       >
         <span className="text-sm">⚠️</span>
@@ -518,7 +557,11 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
       <button
         onClick={() => handleVote("skipped", true)}
         disabled={voting}
-        className="flex items-center justify-center w-11 h-11 md:w-12 md:h-12 rounded-full bg-surface-2 md:bg-black/40 md:backdrop-blur-md border-2 border-amber-400/30 text-amber-400/80 hover:bg-amber-950/50 hover:border-amber-400/60 hover:text-amber-400 transition-all active:scale-90 disabled:opacity-50"
+        className={`flex items-center justify-center w-11 h-11 md:w-12 md:h-12 rounded-full border-2 transition-all active:scale-90 disabled:opacity-50 ${
+          skippedVote
+            ? "bg-amber-500/30 md:bg-amber-500/30 border-amber-400 text-amber-400 ring-2 ring-amber-400/40"
+            : "bg-surface-2 md:bg-black/40 md:backdrop-blur-md border-amber-400/30 text-amber-400/80 hover:bg-amber-950/50 hover:border-amber-400/60 hover:text-amber-400"
+        }`}
         title="Skip — no opinion"
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -750,6 +793,15 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
                   </svg>
                 </span>
               )}
+              {rejected && (
+                <span className="flex-shrink-0 text-red-400 drop-shadow-lg text-xs" title="Rejected">✕</span>
+              )}
+              {skippedVote && (
+                <span className="flex-shrink-0 text-amber-400 drop-shadow-lg text-xs" title="Skipped">→</span>
+              )}
+              {badSource && (
+                <span className="flex-shrink-0 text-orange-400 drop-shadow-lg text-xs" title="Bad source">⚠️</span>
+              )}
             </div>
           </div>
 
@@ -862,7 +914,11 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
             <button
               onClick={() => handleVote("rejected", true)}
               disabled={voting}
-              className="flex items-center justify-center w-13 h-13 rounded-full bg-black/40 backdrop-blur-md border-2 border-red-400/40 text-red-400/90 active:scale-90 transition-all disabled:opacity-50"
+              className={`flex items-center justify-center w-13 h-13 rounded-full backdrop-blur-md border-2 active:scale-90 transition-all disabled:opacity-50 ${
+                rejected
+                  ? "bg-red-500/30 border-red-400 text-red-400 ring-2 ring-red-400/40"
+                  : "bg-black/40 border-red-400/40 text-red-400/90"
+              }`}
               title="Reject track"
               aria-label="Reject track"
             >
@@ -875,7 +931,11 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
             <button
               onClick={() => handleVote("bad_source", true)}
               disabled={voting}
-              className="flex items-center justify-center w-9 h-9 rounded-full bg-black/40 backdrop-blur-md border-2 border-orange-400/40 text-orange-400/90 active:scale-90 transition-all disabled:opacity-50"
+              className={`flex items-center justify-center w-9 h-9 rounded-full backdrop-blur-md border-2 active:scale-90 transition-all disabled:opacity-50 ${
+                badSource
+                  ? "bg-orange-500/30 border-orange-400 text-orange-400 ring-2 ring-orange-400/40"
+                  : "bg-black/40 border-orange-400/40 text-orange-400/90"
+              }`}
               title="Bad source — wrong track or bad audio"
             >
               <span className="text-xs">⚠️</span>
@@ -885,7 +945,11 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
             <button
               onClick={() => handleVote("skipped", true)}
               disabled={voting}
-              className="flex items-center justify-center w-11 h-11 rounded-full bg-black/40 backdrop-blur-md border-2 border-amber-400/40 text-amber-400/90 active:scale-90 transition-all disabled:opacity-50"
+              className={`flex items-center justify-center w-11 h-11 rounded-full backdrop-blur-md border-2 active:scale-90 transition-all disabled:opacity-50 ${
+                skippedVote
+                  ? "bg-amber-500/30 border-amber-400 text-amber-400 ring-2 ring-amber-400/40"
+                  : "bg-black/40 border-amber-400/40 text-amber-400/90"
+              }`}
               title="Skip — no opinion"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1115,6 +1179,21 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
                 <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
               </svg>
               liked
+            </span>
+          )}
+          {rejected && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-500/15 rounded-lg text-xs text-red-400 font-medium" title="Rejected">
+              ✕ rejected
+            </span>
+          )}
+          {skippedVote && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-500/15 rounded-lg text-xs text-amber-400 font-medium" title="Skipped">
+              → skipped
+            </span>
+          )}
+          {badSource && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-500/15 rounded-lg text-xs text-orange-400 font-medium" title="Bad source">
+              ⚠️ bad source
             </span>
           )}
           {playingIndicator}
