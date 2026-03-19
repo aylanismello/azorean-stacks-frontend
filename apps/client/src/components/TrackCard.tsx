@@ -732,7 +732,13 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
                 {track.taste_score > 0 ? "+" : ""}{track.taste_score.toFixed(2)}
               </span>
             )}
-            {Array.isArray(meta.enrichment_sources) && (meta.enrichment_sources as string[]).map((src: string) => {
+            {Array.isArray(meta.enrichment_sources) && (meta.enrichment_sources as string[])
+              .filter((src: string) => {
+                // Hide enrichment pills that match the download source
+                const dlSource = (meta.audio_source as string) || (track.youtube_url ? "youtube" : null);
+                return src !== dlSource;
+              })
+              .map((src: string) => {
               const labels: Record<string, string> = { spotify: "SP", youtube: "YT", soundcloud: "SC", musicbrainz: "MB" };
               const colors: Record<string, string> = {
                 spotify: "text-[#1DB954]", youtube: "text-red-400", soundcloud: "text-orange-400", musicbrainz: "text-purple-400",
@@ -1010,9 +1016,14 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
               {track.taste_score > 0 ? "+" : ""}{track.taste_score.toFixed(2)}
             </span>
           )}
-          {/* Enrichment source pills */}
+          {/* Enrichment source pills — hide if same as download source */}
           {Array.isArray(meta.enrichment_sources) && (meta.enrichment_sources as string[]).length > 0 && (
-            (meta.enrichment_sources as string[]).map((src: string) => {
+            (meta.enrichment_sources as string[])
+              .filter((src: string) => {
+                const dlSource = (meta.audio_source as string) || (track.youtube_url ? "youtube" : null);
+                return src !== dlSource;
+              })
+              .map((src: string) => {
               const labels: Record<string, string> = { spotify: "SP", youtube: "YT", soundcloud: "SC", musicbrainz: "MB" };
               const colors: Record<string, string> = {
                 spotify: "bg-[#1DB954]/15 text-[#1DB954]",
