@@ -60,6 +60,18 @@ interface GlobalPlayerContextType {
   switchSource: (to: "audio" | "spotify") => void;
   /** Preload next track's audio in background */
   preloadTrack: (track: PlayerTrack) => void;
+  /** Ordered playback queue */
+  queue: PlayerTrack[];
+  /** Current position within the queue */
+  currentIndex: number;
+  /** Replace the playback queue; if startIndex is provided, seek to that position */
+  setQueue: (queue: PlayerTrack[], startIndex?: number) => void;
+  /** Jump to a specific position in the queue and start playing */
+  playFromQueue: (index: number, origin?: string) => void;
+  /** Advance to the next track in the queue; returns false if at end */
+  next: () => boolean;
+  /** Go back to the previous track in the queue; returns false if at start */
+  prev: () => boolean;
 }
 
 const GlobalPlayerContext = createContext<GlobalPlayerContextType>({
@@ -84,6 +96,12 @@ const GlobalPlayerContext = createContext<GlobalPlayerContextType>({
   stop: () => {},
   switchSource: () => {},
   preloadTrack: () => {},
+  queue: [],
+  currentIndex: 0,
+  setQueue: () => {},
+  playFromQueue: () => {},
+  next: () => false,
+  prev: () => false,
 });
 
 export function useGlobalPlayer() {
@@ -120,6 +138,12 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
   const [trackStartedAt, setTrackStartedAt] = useState<number | null>(null);
   const [connectionQuality, setConnectionQuality] = useState<ConnectionQuality>("good");
   const [toast, setToast] = useState<PlayerToast | null>(null);
+
+  // Queue management
+  const [queue, setQueueState] = useState<PlayerTrack[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const queueRef = useRef<PlayerTrack[]>([]);
+  const currentIndexRef = useRef(0);
   // Tracks whether we've already fired the 'listened' mark for the current track session
   const listenedFiredRef = useRef(false);
 
@@ -449,6 +473,25 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     } catch {}
   }, [spotify]);
 
+  const setQueue = useCallback((newQueue: PlayerTrack[], startIndex?: number) => {
+    queueRef.current = newQueue;
+    setQueueState(newQueue);
+    if (startIndex !== undefined) {
+      currentIndexRef.current = startIndex;
+      setCurrentIndex(startIndex);
+    } else {
+      // Preserve current track position in updated queue
+      const currentId = currentTrackRef.current?.id;
+      if (currentId) {
+        const newIdx = newQueue.findIndex(t => t.id === currentId);
+        if (newIdx >= 0) {
+          currentIndexRef.current = newIdx;
+          setCurrentIndex(newIdx);
+        }
+      }
+    }
+  }, []);
+
   const loadTrack = useCallback((track: PlayerTrack, origin?: string) => {
     // Stop whatever is currently playing
     stopAudio();
@@ -462,6 +505,13 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     setBuffering(false);
     setTrackStartedAt(null);
     if (origin !== undefined) setPlaybackOrigin(origin);
+
+    // Sync queue index
+    const queueIdx = queueRef.current.findIndex(t => t.id === track.id);
+    if (queueIdx >= 0) {
+      currentIndexRef.current = queueIdx;
+      setCurrentIndex(queueIdx);
+    }
 
     // Determine source but don't start playback — prefer downloaded audio over Spotify
     if (track.audioUrl) {
@@ -507,6 +557,13 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
       : (typeof window !== "undefined" ? window.location.pathname + window.location.search : "/");
     setPlaybackOrigin(newOrigin);
 
+    // Sync queue index
+    const queueIdx = queueRef.current.findIndex(t => t.id === track.id);
+    if (queueIdx >= 0) {
+      currentIndexRef.current = queueIdx;
+      setCurrentIndex(queueIdx);
+    }
+
     // Decide source: prefer downloaded audio over Spotify
     if (track.audioUrl) {
       setSource("audio");
@@ -532,6 +589,28 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
       setNoSource(true);
     }
   }, [spotify, stopAudio, stopSpotify]);
+
+  const playFromQueue = useCallback((index: number, origin?: string) => {
+    const track = queueRef.current[index];
+    if (!track) return;
+    currentIndexRef.current = index;
+    setCurrentIndex(index);
+    play(track, origin);
+  }, [play]);
+
+  const next = useCallback(() => {
+    const nextIdx = currentIndexRef.current + 1;
+    if (nextIdx >= queueRef.current.length) return false;
+    playFromQueue(nextIdx);
+    return true;
+  }, [playFromQueue]);
+
+  const prev = useCallback(() => {
+    const prevIdx = currentIndexRef.current - 1;
+    if (prevIdx < 0) return false;
+    playFromQueue(prevIdx);
+    return true;
+  }, [playFromQueue]);
 
   const togglePlayPause = useCallback(() => {
     if (!currentTrack) return;
@@ -639,6 +718,11 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     setPlaybackOrigin(null);
     setTrackStartedAt(null);
     setConnectionQuality("good");
+    // Clear queue
+    queueRef.current = [];
+    setQueueState([]);
+    currentIndexRef.current = 0;
+    setCurrentIndex(0);
     // Clean up preload
     if (preloadAudioRef.current) {
       preloadAudioRef.current.src = "";
@@ -708,6 +792,12 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
         stop,
         switchSource,
         preloadTrack,
+        queue,
+        currentIndex,
+        setQueue,
+        playFromQueue,
+        next,
+        prev,
       }}
     >
       {children}
