@@ -438,10 +438,10 @@ function StackPageContent() {
 
       // Update local state — super-liked tracks are approved
       setTracks((prev) =>
-        prev.map((t) => t.id === id ? { ...t, status: "approved", super_liked: true, voted_at: new Date().toISOString() } : t)
+        prev.map((t) => t.id === id ? { ...t, status: "approved", vote_status: "approved", super_liked: true, voted_at: new Date().toISOString() } as any : t)
       );
       setSessionTracks((prev) =>
-        prev.map((t) => t.id === id ? { ...t, status: "approved", super_liked: true, voted_at: new Date().toISOString() } : t)
+        prev.map((t) => t.id === id ? { ...t, status: "approved", vote_status: "approved", super_liked: true, voted_at: new Date().toISOString() } as any : t)
       );
 
       setVoteCount((c) => c + 1);
@@ -470,10 +470,10 @@ function StackPageContent() {
       // Update the track's status locally so the UI reflects the vote
       // Clear super_liked when changing vote (e.g. super-like → rejected)
       setTracks((prev) =>
-        prev.map((t) => t.id === id ? { ...t, status, super_liked: false, voted_at: new Date().toISOString() } : t)
+        prev.map((t) => t.id === id ? { ...t, status, vote_status: status, super_liked: false, voted_at: new Date().toISOString() } as any : t)
       );
       setSessionTracks((prev) =>
-        prev.map((t) => t.id === id ? { ...t, status, super_liked: false, voted_at: new Date().toISOString() } : t)
+        prev.map((t) => t.id === id ? { ...t, status, vote_status: status, super_liked: false, voted_at: new Date().toISOString() } as any : t)
       );
 
       setVoteCount((c) => c + 1);

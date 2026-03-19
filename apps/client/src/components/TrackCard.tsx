@@ -79,9 +79,13 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
 
   // Restore vote state from track data on mount (returning to a previously-voted track)
   useEffect(() => {
-    if (track.status === "approved" || track.user_track?.status === "approved") setKept(true);
-    if (track.super_liked) setSuperLiked(true);
-    if (track.seed_id) setSeeded(true);
+    const vs = (track as any).vote_status || track.status;
+    if (vs === "approved") setKept(true);
+    if ((track as any).super_liked) setSuperLiked(true);
+    if ((track as any).seed_id || (track as any).is_seeded) setSeeded(true);
+    // Reset states when track changes
+    if (vs !== "approved") setKept(false);
+    if (!(track as any).super_liked) setSuperLiked(false);
   }, [track.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCopy = useCallback(async () => {

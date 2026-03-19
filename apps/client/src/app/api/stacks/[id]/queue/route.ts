@@ -154,6 +154,20 @@ export async function GET(
   const excludedTrackIds = new Set((excludedRows || []).map((r: any) => r.track_id));
   const pendingTracks = (rawPendingTracks || []).filter((t: any) => !excludedTrackIds.has(t.id));
 
+  // Fetch ALL user_tracks for these tracks to include vote_status + super_liked in response
+  const allTrackIds = (pendingTracks || []).map((t: any) => t.id);
+  const userVoteMap = new Map<string, { status: string; super_liked: boolean }>();
+  if (allTrackIds.length > 0) {
+    const { data: allVotes } = await db
+      .from("user_tracks")
+      .select("track_id, status, super_liked")
+      .eq("user_id", user.id)
+      .in("track_id", allTrackIds);
+    for (const v of (allVotes || []) as any[]) {
+      userVoteMap.set(v.track_id, { status: v.status, super_liked: !!v.super_liked });
+    }
+  }
+
   if (!pendingTracks?.length) {
     return NextResponse.json({
       tracks: [],
@@ -399,11 +413,15 @@ export async function GET(
       normalizedSeedTrack.title.toLowerCase().trim() === (t.title || "").toLowerCase().trim()
     );
 
+    const userVote = userVoteMap.get(t.id);
     return {
       ...t,
       seed_track: normalizedSeedTrack,
       episode,
       is_seed: isSeed,
+      status: userVote?.status || t.status || "pending",
+      super_liked: userVote?.super_liked || false,
+      vote_status: userVote?.status || null,
       _ranked_score: Math.round(total),
       _score_components: {
         ...components,
