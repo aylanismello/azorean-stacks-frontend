@@ -494,14 +494,12 @@ function StackPageContent() {
         for (let i = curPos + 1; i < tracks.length; i++) {
           if (tracks[i].id !== id && tracks[i].status === "pending" && isTrackPlayable(tracks[i])) { nextPos = i; break; }
         }
-        if (nextPos < 0) {
-          // Wrap around — find first pending + playable before current
-          for (let i = 0; i < curPos; i++) {
-            if (tracks[i].id !== id && tracks[i].status === "pending" && isTrackPlayable(tracks[i])) { nextPos = i; break; }
-          }
-        }
+        // Never wrap backwards — only advance forward in the tracklist
         if (nextPos >= 0) {
           globalPlayer.playFromQueue(nextPos);
+        } else {
+          // No more pending tracks ahead — advance to next episode
+          advanceToNextEpisode();
         }
       } else {
         // All-pending mode: update momentum refs then remove voted track + reorder

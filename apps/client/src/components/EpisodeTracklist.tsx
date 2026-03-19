@@ -354,9 +354,7 @@ export function EpisodeTracklist(props: TracklistProps) {
                       <p className={`text-[10px] truncate ${
                         t.vote_status === "rejected" ? "line-through text-muted/30" : "text-muted"
                       }`}>{t.artist}</p>
-                      {t._match_type === "full" && t.storage_path && (
-                        <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-green-400/70" title="Exact seed match" />
-                      )}
+
                     </div>
                   </div>
 
