@@ -141,7 +141,8 @@ export async function GET(
       "id, artist, title, source, source_url, source_context, status, episode_id, cover_art_url, spotify_url, youtube_url, storage_path, preview_url, metadata, created_at, seed_track_id, taste_score, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url, url)"
     )
     .in("episode_id", episodeIds)
-    .eq("status", "pending");
+    .eq("status", "pending")
+    .not("storage_path", "is", null);
 
   // Filter out tracks the user has already listened to (heard past 80% without voting)
   const { data: listenedRows } = await db
