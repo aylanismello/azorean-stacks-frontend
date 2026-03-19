@@ -332,6 +332,19 @@ export async function spotifyArtistGenres(artistIds: string[], retries = 0): Pro
 const MB_API = "https://musicbrainz.org/ws/2";
 const MB_USER_AGENT = "AzoreanStacks/1.0 (picoisazorean@gmail.com)";
 let lastMbRequestAt = 0;
+let mbQueuePromise: Promise<void> = Promise.resolve();
+
+// Sequential queue for MusicBrainz — ensures 1 request per second globally
+function withMbRateLimit<T>(fn: () => Promise<T>): Promise<T> {
+  const ticket = mbQueuePromise.then(async () => {
+    const now = Date.now();
+    const elapsed = now - lastMbRequestAt;
+    if (elapsed < 1100) await sleep(1100 - elapsed);
+    lastMbRequestAt = Date.now();
+  });
+  mbQueuePromise = ticket.catch(() => {});
+  return ticket.then(fn);
+}
 
 export interface MusicBrainzResult {
   artist: string;
@@ -344,11 +357,7 @@ export interface MusicBrainzResult {
 }
 
 export async function musicbrainzLookup(artist: string, title: string): Promise<MusicBrainzResult | null> {
-  // Rate limit: 1 request per second (MusicBrainz enforces this strictly)
-  const now = Date.now();
-  const elapsed = now - lastMbRequestAt;
-  if (elapsed < 1100) await sleep(1100 - elapsed);
-  lastMbRequestAt = Date.now();
+  // Rate limiting handled by withMbRateLimit() caller
 
   const { primaryArtist, cleanTitle } = normalizeForSearch(artist, title);
   const query = encodeURIComponent(`artist:"${primaryArtist}" AND recording:"${cleanTitle}"`);
@@ -434,7 +443,7 @@ export async function enrichTrack(track: any): Promise<boolean> {
           } else {
             updates.spotify_url = "";
           }
-        }), 15_000, `spotify:${label}`).catch((err) => {
+        }), 5_000, `spotify:${label}`).catch((err) => {
           log("fail", `Spotify error for ${label}: ${err instanceof Error ? err.message : err}`);
           updates.spotify_url = "";
         })
@@ -453,7 +462,7 @@ export async function enrichTrack(track: any): Promise<boolean> {
       : Promise.resolve(),
     // MusicBrainz lookup (fallback metadata — 5s timeout, 1req/s rate limited)
     !track.metadata?.musicbrainz_id
-      ? withTimeout(musicbrainzLookup(track.artist, track.title), 5_000, `mb:${label}`).then((mb) => {
+      ? withTimeout(withMbRateLimit(() => musicbrainzLookup(track.artist, track.title)), 10_000, `mb:${label}`).then((mb) => {
           mbResult = mb;
         }).catch((err) => {
           log("fail", `MusicBrainz error for ${label}: ${err instanceof Error ? err.message : err}`);
