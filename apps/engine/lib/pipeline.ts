@@ -518,6 +518,143 @@ export async function enrichTrack(track: any): Promise<boolean> {
   return true;
 }
 
+// ─── FAST ENRICH (YouTube only) ─────────────────────────────
+
+export async function enrichTrackFast(track: any): Promise<boolean> {
+  const label = `${track.artist} – ${track.title}`;
+  const t0 = Date.now();
+  const updates: Record<string, unknown> = {};
+  let ytFound = !!track.youtube_url;
+  let ytSource: "youtube" | "soundcloud" = "youtube";
+
+  // Only do YouTube + SoundCloud lookup — no Spotify, no MusicBrainz
+  if (!track.youtube_url) {
+    try {
+      const yt = await youtubeLookup(track.artist, track.title);
+      if (yt) {
+        updates.youtube_url = yt.url;
+        ytFound = true;
+        ytSource = yt.source;
+      }
+    } catch (err) {
+      log("fail", `YouTube error for ${label}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  // If nothing found, mark as searched so we don't retry
+  if (!ytFound) {
+    updates.youtube_url = "";
+    updates.spotify_url = "";
+  }
+
+  // Track enrichment sources
+  const sources: string[] = ytFound ? [ytSource] : [];
+  const existingMeta = (track.metadata || {}) as Record<string, unknown>;
+  updates.metadata = { ...existingMeta, enrichment_sources: sources, enriched_at: new Date().toISOString() };
+
+  const { error } = await db.from("tracks").update(updates).eq("id", track.id);
+  if (error) {
+    log("fail", `DB update failed for ${label}: ${error.message}`);
+    return false;
+  }
+
+  log(ytFound ? "ok" : "skip", `[Fast] ${label} [${ytFound ? ytSource : "no-youtube"}] (${elapsed(t0)})`);
+  return true;
+}
+
+// ─── SLOW METADATA BACKFILL ─────────────────────────────────
+
+export async function enrichTrackMetadata(track: any): Promise<boolean> {
+  const label = `${track.artist} – ${track.title}`;
+  const t0 = Date.now();
+  const updates: Record<string, unknown> = {};
+  let spotFound = !!track.spotify_url;
+  let mbResult: MusicBrainzResult | null = null;
+
+  // Run Spotify and MusicBrainz in parallel
+  await Promise.allSettled([
+    // Spotify lookup (5s timeout)
+    !track.spotify_url
+      ? withTimeout(spotifyLookup(track.artist, track.title).then(async (spot) => {
+          if (spot) {
+            spotFound = true;
+            updates.spotify_url = spot.spotify_url;
+            if (!track.preview_url && spot.preview_url) updates.preview_url = spot.preview_url;
+            if (!track.cover_art_url && spot.cover_art_url && spot.spotify_confidence >= 75) {
+              updates.cover_art_url = spot.cover_art_url;
+            }
+            const genres = await spotifyArtistGenres(spot.artist_ids);
+            updates.metadata = {
+              ...(track.metadata || {}),
+              spotify_id: spot.spotify_id,
+              album: spot.album,
+              spotify_confidence: spot.spotify_confidence,
+              ...(genres.length > 0 ? { genres } : {}),
+            };
+          } else {
+            updates.spotify_url = "";
+          }
+        }), 5_000, `spotify:${label}`).catch((err) => {
+          log("fail", `Spotify error for ${label}: ${err instanceof Error ? err.message : err}`);
+          updates.spotify_url = "";
+        })
+      : Promise.resolve(),
+    // MusicBrainz lookup (rate limited)
+    !track.metadata?.musicbrainz_id
+      ? withTimeout(withMbRateLimit(() => musicbrainzLookup(track.artist, track.title)), 10_000, `mb:${label}`).then((mb) => {
+          mbResult = mb;
+        }).catch((err) => {
+          log("fail", `MusicBrainz error for ${label}: ${err instanceof Error ? err.message : err}`);
+        })
+      : Promise.resolve(),
+  ]);
+
+  // Merge MusicBrainz data
+  if (mbResult) {
+    const mb = mbResult as MusicBrainzResult;
+    const metaBase = (updates.metadata || track.metadata || {}) as Record<string, unknown>;
+    updates.metadata = {
+      ...metaBase,
+      musicbrainz_id: mb.musicbrainz_id,
+      ...(mb.album ? { mb_album: mb.album } : {}),
+      ...(mb.release_date ? { mb_release_date: mb.release_date } : {}),
+      ...(mb.genres?.length ? { mb_genres: mb.genres } : {}),
+      ...(mb.isrc ? { isrc: mb.isrc } : {}),
+      ...(!metaBase.genres && mb.genres?.length ? { genres: mb.genres } : {}),
+    };
+    log("ok", `MusicBrainz: found ${mb.musicbrainz_id} for ${label}`);
+  }
+
+  // Artwork fallback: use NTS episode artwork
+  if (!track.cover_art_url && !updates.cover_art_url && track.episode_id) {
+    const { data: ep } = await db.from("episodes")
+      .select("artwork_url").eq("id", track.episode_id).single();
+    if (ep?.artwork_url) {
+      updates.cover_art_url = ep.artwork_url;
+      log("info", `Using episode artwork as cover art for ${label}`);
+    }
+  }
+
+  // Append to existing enrichment sources
+  const finalMeta = (updates.metadata || track.metadata || {}) as Record<string, unknown>;
+  const existingSources: string[] = (finalMeta.enrichment_sources as string[]) || [];
+  const newSources = [...existingSources];
+  if (spotFound && !newSources.includes("spotify")) newSources.push("spotify");
+  if (mbResult && !newSources.includes("musicbrainz")) newSources.push("musicbrainz");
+  updates.metadata = { ...finalMeta, enrichment_sources: newSources, enriched_at: new Date().toISOString() };
+
+  const { error } = await db.from("tracks").update(updates).eq("id", track.id);
+  if (error) {
+    log("fail", `DB update failed for ${label}: ${error.message}`);
+    return false;
+  }
+
+  const sp = spotFound ? "spotify" : "no-spotify";
+  const mb = mbResult ? "musicbrainz" : "no-mb";
+  log("ok", `[Metadata] ${label} [${sp}, ${mb}] (${elapsed(t0)})`);
+  return true;
+}
+
 // ─── DOWNLOAD ONE TRACK ────────────────────────────────────
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, readdirSync } from "fs";

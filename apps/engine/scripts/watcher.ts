@@ -12,7 +12,7 @@ import { getSupabase } from "../lib/supabase";
 import {
   log, elapsed, sleep,
   isSameTrack,
-  enrichTrack, downloadTrack,
+  enrichTrack, enrichTrackFast, enrichTrackMetadata, downloadTrack,
   spotifyLookup,
   logEngineEvent,
 } from "../lib/pipeline";
@@ -33,7 +33,7 @@ const CONCURRENCY = {
   ntsMaxEpisodes: 10, // Max episodes to check per source per seed
 } as const;
 
-const PRIORITY_DOWNLOAD_CONCURRENCY = 15; // Max concurrent downloads for priority pipeline
+const PRIORITY_DOWNLOAD_CONCURRENCY = 20; // Max concurrent downloads for priority pipeline
 const PRIORITY_ENRICH_CONCURRENCY = 40;   // Max concurrent enrichments for priority pipeline
 
 const GARBAGE_TITLES = new Set(["unknown track", "untitled", "id", "?", "unknown", ""]);
@@ -567,7 +567,7 @@ async function processTrack(trackId: string, prefetched?: any) {
   });
 
   if (shouldEnrich) {
-    await enrichTrack(track);
+    await enrichTrackFast(track);
   }
 
   const { data: refreshed } = await db.from("tracks")
@@ -983,7 +983,7 @@ async function processPrioritySeed(seedId: string) {
   let enriched = 0;
   for (let i = 0; i < tracksToProcess.length; i += PRIORITY_ENRICH_CONCURRENCY) {
     const batch = tracksToProcess.slice(i, i + PRIORITY_ENRICH_CONCURRENCY);
-    const results = await Promise.allSettled(batch.map(enrichTrack));
+    const results = await Promise.allSettled(batch.map(enrichTrackFast));
     for (const r of results) {
       if (r.status === "fulfilled" && r.value) enriched++;
     }
@@ -1495,6 +1495,49 @@ function startWatcher() {
               }
             }, 15_000); // Every 15s — small fast batches
           }, 5_000); // Start 5s after watcher connects
+
+          // Every 60s: backfill metadata (Spotify + MusicBrainz) for tracks
+          // that already have youtube_url but haven't been spotify-enriched yet.
+          // This runs at low priority so it never blocks youtube lookups or downloads.
+          let metadataBackfillRunning = false;
+          setInterval(async () => {
+            if (shuttingDown) return;
+            if (metadataBackfillRunning) return;
+            metadataBackfillRunning = true;
+            try {
+              const { data: needsMetadata, error } = await db.from("tracks")
+                .select("*")
+                .not("youtube_url", "is", null)
+                .neq("youtube_url", "")
+                .is("spotify_url", null)
+                .in("status", ["pending", "approved"])
+                .order("created_at", { ascending: true })
+                .limit(10);
+              if (error) {
+                log("fail", `[Metadata Backfill] Query failed: ${error.message}`);
+                return;
+              }
+              if (!needsMetadata?.length) return;
+              log("info", `[Metadata Backfill] Enriching ${needsMetadata.length} tracks with Spotify/MusicBrainz`);
+              let enriched = 0;
+              // Low concurrency — 3 at a time to respect rate limits
+              for (let i = 0; i < needsMetadata.length; i += 3) {
+                if (shuttingDown) break;
+                const batch = needsMetadata.slice(i, i + 3);
+                const results = await Promise.allSettled(batch.map(enrichTrackMetadata));
+                for (const r of results) {
+                  if (r.status === "fulfilled" && r.value) enriched++;
+                }
+              }
+              if (enriched > 0) {
+                log("ok", `[Metadata Backfill] Enriched ${enriched}/${needsMetadata.length} tracks`);
+              }
+            } catch (err) {
+              log("fail", `[Metadata Backfill] Error: ${err instanceof Error ? err.message : err}`);
+            } finally {
+              metadataBackfillRunning = false;
+            }
+          }, 60_000);
 
           // Every 10 min: warn + resubscribe if no Realtime events received
           setInterval(() => {
