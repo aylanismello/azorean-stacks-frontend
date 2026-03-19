@@ -201,10 +201,17 @@ export function EpisodeTracklist(props: TracklistProps) {
     return "text-foreground/60";
   };
 
-  const audioDot = (t: TrackListItem) => {
-    const hasAudio = !!(t.storage_path || t.audio_url || t.preview_url || t.spotify_url);
-    if (hasAudio)
-      return <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" title="Playable" />;
+  const voteDot = (t: TrackListItem) => {
+    if (t.super_liked)
+      return <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 flex-shrink-0" title="Super liked" />;
+    if (t.vote_status === "approved")
+      return <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" title="Approved" />;
+    if (t.vote_status === "rejected")
+      return <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" title="Rejected" />;
+    if (t.vote_status === "skipped")
+      return <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="Skipped" />;
+    if (t.vote_status === "listened")
+      return <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" title="Listened" />;
     return null;
   };
 
@@ -263,7 +270,6 @@ export function EpisodeTracklist(props: TracklistProps) {
                   key={t.id}
                   ref={isPlaying ? playingRef : undefined}
                   onClick={() => {
-                    if (t.is_seed) return;
                     onTrackSelect?.(t.id);
                     handlePlay(t);
                   }}
@@ -374,9 +380,9 @@ export function EpisodeTracklist(props: TracklistProps) {
                     </span>
                   )}
 
-                  {/* Right: playable dot */}
+                  {/* Right: vote status dot */}
                   <span className="flex-shrink-0">
-                    {audioDot(t)}
+                    {voteDot(t)}
                   </span>
                 </button>
               );
