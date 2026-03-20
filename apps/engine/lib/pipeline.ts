@@ -336,7 +336,7 @@ export async function spotifyArtistGenres(artistIds: string[], retries = 0): Pro
 // ─── MUSICBRAINZ ────────────────────────────────────────────
 
 const MB_API = "https://musicbrainz.org/ws/2";
-const MB_USER_AGENT = "AzoreanStacks/1.0 (picoisazorean@gmail.com)";
+const MB_USER_AGENT = "AzoreanStacks/1.0 (contact@azorean.studio)";
 let lastMbRequestAt = 0;
 let mbQueuePromise: Promise<void> = Promise.resolve();
 
