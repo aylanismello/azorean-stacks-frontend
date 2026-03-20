@@ -8,6 +8,9 @@
  *
  * Usage: bun run watcher
  */
+import { initSentry, Sentry } from "../lib/sentry";
+initSentry();
+
 import { getSupabase } from "../lib/supabase";
 import {
   log, elapsed, sleep,
@@ -1160,6 +1163,10 @@ async function processSeedQueue() {
       await processSeed(seedId);
     } catch (err) {
       log("fail", `Pipeline error for seed ${seedId}: ${err instanceof Error ? err.message : err}`);
+      Sentry.captureException(err, {
+        tags: { component: "watcher", action: "seed_process" },
+        extra: { seed_id: seedId },
+      });
       await logEngineEvent("error", "failed", {
         seedId,
         message: `Pipeline error: ${err instanceof Error ? err.message : err}`,
@@ -1183,6 +1190,10 @@ async function processSuperLikeQueue() {
           await processSuperLike(trackId);
         } catch (err) {
           log("fail", `Super Like error for track ${trackId}: ${err instanceof Error ? err.message : err}`);
+          Sentry.captureException(err, {
+            tags: { component: "watcher", action: "super_like" },
+            extra: { track_id: trackId },
+          });
           await logEngineEvent("error", "failed", {
             message: `Super Like error: ${err instanceof Error ? err.message : err}`,
             metadata: { track_id: trackId },
@@ -1212,6 +1223,10 @@ async function processRepairQueue() {
           await processTrack(trackId, trackMap.get(trackId));
         } catch (err) {
           log("fail", `Repair error for track ${trackId}: ${err instanceof Error ? err.message : err}`);
+          Sentry.captureException(err, {
+            tags: { component: "watcher", action: "repair" },
+            extra: { track_id: trackId },
+          });
         }
       }),
     );
@@ -1375,6 +1390,9 @@ function startWatcher() {
               });
             } catch (err) {
               log("fail", `[Radar] Curator radar failed: ${err instanceof Error ? err.message : err}`);
+              Sentry.captureException(err, {
+                tags: { component: "watcher", action: "curator_radar" },
+              });
               await logEngineEvent("radar_curator_run", "failed", {
                 message: `Curator radar error: ${err instanceof Error ? err.message : err}`,
               });
@@ -1512,6 +1530,9 @@ function startWatcher() {
                 }
               } catch (err) {
                 log("fail", `[DL Drain] Error: ${err instanceof Error ? err.message : err}`);
+                Sentry.captureException(err, {
+                  tags: { component: "watcher", action: "dl_drain" },
+                });
               } finally {
                 downloadDrainRunning = false;
               }
@@ -1556,6 +1577,9 @@ function startWatcher() {
               }
             } catch (err) {
               log("fail", `[Metadata Backfill] Error: ${err instanceof Error ? err.message : err}`);
+              Sentry.captureException(err, {
+                tags: { component: "watcher", action: "metadata_backfill" },
+              });
             } finally {
               metadataBackfillRunning = false;
             }

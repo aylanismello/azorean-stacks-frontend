@@ -13,6 +13,9 @@
  *   bun run download --limit 50       # cap batch size
  *   bun run download --duration 60    # loop for 60 minutes
  */
+import { initSentry, Sentry } from "../lib/sentry";
+initSentry();
+
 import { parseArgs } from "util";
 import { getSupabase } from "../lib/supabase";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, readdirSync } from "fs";
@@ -248,6 +251,9 @@ async function main() {
 }
 
 main().catch((err) => {
+  Sentry.captureException(err, {
+    tags: { component: "download" },
+  });
   console.error("Downloader failed:", err);
   process.exit(1);
 });
