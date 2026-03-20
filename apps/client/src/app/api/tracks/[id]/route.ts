@@ -93,20 +93,31 @@ export async function PATCH(
     // Clear stale audio metadata so the engine re-downloads fresh
     delete updatedMeta.audio_source;
 
+    const updatePayload = {
+      youtube_url: isYoutube ? source_url : null,
+      storage_path: null,
+      status: "pending",
+      metadata: updatedMeta,
+    };
+    console.log(`[fix_source] Updating track ${params.id}:`, JSON.stringify(updatePayload));
+
     const { data: track, error } = await supabase
       .from("tracks")
-      .update({
-        youtube_url: isYoutube ? source_url : null,
-        storage_path: null,
-        status: "pending",
-        metadata: updatedMeta,
-      })
+      .update(updatePayload)
       .eq("id", params.id)
       .select("*")
       .single();
 
     if (error) {
+      console.error(`[fix_source] Update failed for track ${params.id}:`, error);
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    console.log(`[fix_source] Update result for track ${params.id}: storage_path=${track.storage_path}, status=${track.status}`);
+
+    // Verify storage_path was actually cleared
+    if (track.storage_path !== null) {
+      console.error(`[fix_source] storage_path was NOT cleared for track ${params.id}: ${track.storage_path}`);
     }
 
     return NextResponse.json(track);
