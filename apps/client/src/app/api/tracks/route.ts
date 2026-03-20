@@ -1,63 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase, getServiceClient } from "@/lib/supabase";
+import { diversifyTracks } from "@/lib/diversify";
 
 export const dynamic = "force-dynamic";
-
-// Reorder tracks to avoid repetition: no more than 2 consecutive from same episode,
-// no more than 3 from same seed_artist, and sprinkle unscored wildcards every 5th slot.
-function diversifyTracks(tracks: any[]): any[] {
-  const scored = tracks.filter((t) => t.taste_score != null && t.taste_score !== 0);
-  const unscored = tracks.filter((t) => t.taste_score == null || t.taste_score === 0);
-
-  const result: any[] = [];
-  const pool = [...scored];
-  let unscoredIdx = 0;
-  let consecEpId: string | null = null;
-  let consecEpCount = 0;
-  let consecSeed: string | null = null;
-  let consecSeedCount = 0;
-
-  while (pool.length > 0) {
-    // Insert unscored wildcard at every 5th position (indices 4, 9, 14…)
-    if (result.length > 0 && result.length % 5 === 4 && unscoredIdx < unscored.length) {
-      const u = unscored[unscoredIdx++];
-      result.push(u);
-      consecEpId = u.episode_id || null;
-      consecEpCount = 1;
-      consecSeed = (u.metadata?.seed_artist as string) || null;
-      consecSeedCount = 1;
-      continue;
-    }
-
-    // Find first pool track that doesn't violate consecutive constraints
-    let idx = -1;
-    for (let i = 0; i < pool.length; i++) {
-      const t = pool[i];
-      const epId = t.episode_id || null;
-      const seed = (t.metadata?.seed_artist as string) || null;
-      const episodeViolation = epId !== null && epId === consecEpId && consecEpCount >= 2;
-      const seedViolation = seed !== null && seed === consecSeed && consecSeedCount >= 3;
-      if (!episodeViolation && !seedViolation) {
-        idx = i;
-        break;
-      }
-    }
-    if (idx === -1) idx = 0; // fallback — can't satisfy constraints
-
-    const [track] = pool.splice(idx, 1);
-    result.push(track);
-
-    const epId = track.episode_id || null;
-    const seed = (track.metadata?.seed_artist as string) || null;
-    if (epId !== null && epId === consecEpId) consecEpCount++;
-    else { consecEpId = epId; consecEpCount = 1; }
-    if (seed !== null && seed === consecSeed) consecSeedCount++;
-    else { consecSeed = seed; consecSeedCount = 1; }
-  }
-
-  result.push(...unscored.slice(unscoredIdx));
-  return result;
-}
 
 // Enrich tracks with episode_seeds match_type for discovery method differentiation
 async function attachMatchTypes(tracks: any[]) {
@@ -285,6 +230,10 @@ export async function GET(req: NextRequest) {
     const seedArr = Array.isArray(track.seeds) ? track.seeds : [];
     track.seed_id = seedArr.length > 0 ? seedArr[0].id : null;
     delete track.seeds;
+    // Expose score components and ranked score from metadata
+    const meta = (track.metadata || {}) as Record<string, unknown>;
+    track._score_components = (meta._score_components as Record<string, number>) || {};
+    track._ranked_score = track.taste_score ?? 0;
     if (track.storage_path) {
       signPromises.push(
         supabase.storage

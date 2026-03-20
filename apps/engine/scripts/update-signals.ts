@@ -276,6 +276,27 @@ async function computeAndUpsertSignals(db: any, tracks: any[], userId: string | 
     }
   }
 
+  // ─── CO-OCCURRENCE SIGNALS ──────────────────────────────────
+  // Artists appearing across multiple seed episodes → positive signal
+  console.log(`Computing co-occurrence signals...`);
+
+  // Build artist → set of episode IDs from voted tracks
+  const artistEpisodes = new Map<string, Set<string>>();
+  for (const track of tracks) {
+    if (!track.artist || !track.episode_id) continue;
+    const key = track.artist.toLowerCase().trim();
+    if (!artistEpisodes.has(key)) artistEpisodes.set(key, new Set());
+    artistEpisodes.get(key)!.add(track.episode_id);
+  }
+
+  for (const [artistKey, epSet] of artistEpisodes) {
+    if (epSet.size >= 2) {
+      // Normalize: log scale so 2 episodes = moderate, 5+ = strong
+      const strength = Math.min(1.0, Math.log2(epSet.size) / 3);
+      addSignal("co_occurrence", artistKey, strength);
+    }
+  }
+
   console.log(`Computed ${signals.size} unique signals`);
 
   // ─── ARTIST NEGATIVE SIGNAL IMPROVEMENT ───────────────────
@@ -349,13 +370,13 @@ async function computeAndUpsertSignals(db: any, tracks: any[], userId: string | 
   }
 
   // ─── SCORE PENDING TRACKS ─────────────────────────────────
-  // Updated weights:
-  //   genre: 0.30 (was 0.50)
-  //   artist: 0.25 (was 0.35)
-  //   seed_affinity: 0.20 (NEW)
-  //   curator: 0.15 (NEW)
-  //   episode_density: 0.10 (NEW)
-  //   album: removed
+  // Unified weights (rebalanced with co-occurrence):
+  //   artist: 0.20
+  //   genre: 0.25
+  //   seed_affinity: 0.20
+  //   curator: 0.15
+  //   episode_density: 0.10
+  //   co_occurrence: 0.10
 
   console.log(`\n=== Scoring Pending Tracks ===`);
 
@@ -387,7 +408,7 @@ async function computeAndUpsertSignals(db: any, tracks: any[], userId: string | 
   while (true) {
     const { data: batch } = await db
       .from("tracks")
-      .select("id, artist, metadata, episode_id")
+      .select("id, artist, metadata, episode_id, seed_track_id")
       .eq("status", "pending")
       .range(page * 1000, (page + 1) * 1000 - 1);
     if (!batch || batch.length === 0) break;
@@ -397,6 +418,17 @@ async function computeAndUpsertSignals(db: any, tracks: any[], userId: string | 
   }
 
   console.log(`Scoring ${pending.length} pending tracks`);
+
+  // Build per-episode vote stats for negative penalties
+  const episodeVoteStats = new Map<string, { approved: number; rejected: number }>();
+  for (const track of tracks) {
+    if (!track.episode_id) continue;
+    const w = trackWeight(track);
+    const acc = episodeVoteStats.get(track.episode_id) || { approved: 0, rejected: 0 };
+    if (w > 0) acc.approved++;
+    else if (w < -0.5) acc.rejected++; // rejected (not skipped)
+    episodeVoteStats.set(track.episode_id, acc);
+  }
 
   // Build episode → curator lookup for pending tracks
   const { data: epCuratorLinks } = await db
@@ -423,20 +455,22 @@ async function computeAndUpsertSignals(db: any, tracks: any[], userId: string | 
   let scoreErrors = 0;
 
   // Batch updates: collect scores then update in chunks
-  const updates: Array<{ id: string; taste_score: number }> = [];
+  const updates: Array<{ id: string; taste_score: number; metadata: Record<string, unknown> }> = [];
 
   for (const track of pending) {
     const meta = (track.metadata || {}) as Record<string, unknown>;
     const components: Array<{ weight: number; typeWeight: number }> = [];
 
-    // Artist signal (0.25)
+    // Artist signal (0.20)
     const artistKey = `artist::${(track.artist || "").toLowerCase().trim()}`;
-    const artistWeight = signalMap.get(artistKey);
-    if (artistWeight !== undefined) {
-      components.push({ weight: artistWeight, typeWeight: 0.25 });
+    const artistSignal = signalMap.get(artistKey);
+    const scoreComponents: Record<string, number> = {};
+    if (artistSignal !== undefined) {
+      components.push({ weight: artistSignal, typeWeight: 0.20 });
+      scoreComponents.artist = Math.round(artistSignal * 1000) / 1000;
     }
 
-    // Genre signals — average all matching genres, apply type weight (0.30)
+    // Genre signals — average all matching genres, apply type weight (0.25)
     const genres = Array.isArray(meta.genres) ? meta.genres : [];
     const genreWeights: number[] = [];
     for (const g of genres) {
@@ -446,7 +480,8 @@ async function computeAndUpsertSignals(db: any, tracks: any[], userId: string | 
     }
     if (genreWeights.length > 0) {
       const avgGenre = genreWeights.reduce((a, b) => a + b, 0) / genreWeights.length;
-      components.push({ weight: avgGenre, typeWeight: 0.30 });
+      components.push({ weight: avgGenre, typeWeight: 0.25 });
+      scoreComponents.genre = Math.round(avgGenre * 1000) / 1000;
     }
 
     // Seed affinity signal (0.20)
@@ -456,6 +491,7 @@ async function computeAndUpsertSignals(db: any, tracks: any[], userId: string | 
       const seedAffinityWeight = signalMap.get(seedAffinityKey);
       if (seedAffinityWeight !== undefined) {
         components.push({ weight: seedAffinityWeight, typeWeight: 0.20 });
+        scoreComponents.seed = Math.round(seedAffinityWeight * 1000) / 1000;
       }
     }
 
@@ -469,6 +505,7 @@ async function computeAndUpsertSignals(db: any, tracks: any[], userId: string | 
           const curatorWeight = signalMap.get(curatorKey);
           if (curatorWeight !== undefined) {
             components.push({ weight: curatorWeight, typeWeight: 0.15 });
+            scoreComponents.curator = Math.round(curatorWeight * 1000) / 1000;
           }
         }
       }
@@ -480,7 +517,16 @@ async function computeAndUpsertSignals(db: any, tracks: any[], userId: string | 
       const epDensityWeight = signalMap.get(epDensityKey);
       if (epDensityWeight !== undefined) {
         components.push({ weight: epDensityWeight, typeWeight: 0.10 });
+        scoreComponents.episode_density = Math.round(epDensityWeight * 1000) / 1000;
       }
+    }
+
+    // Co-occurrence signal (0.10)
+    const coOccKey = `co_occurrence::${(track.artist || "").toLowerCase().trim()}`;
+    const coOccWeight = signalMap.get(coOccKey);
+    if (coOccWeight !== undefined) {
+      components.push({ weight: coOccWeight, typeWeight: 0.10 });
+      scoreComponents.co_occurrence = Math.round(coOccWeight * 1000) / 1000;
     }
 
     // Composite score: weighted average of components
@@ -491,7 +537,46 @@ async function computeAndUpsertSignals(db: any, tracks: any[], userId: string | 
       score = Math.round(score * 1000) / 1000;
     }
 
-    updates.push({ id: track.id, taste_score: score });
+    // ── Negative penalties ──────────────────────────────────────────────
+    let penalty = 0;
+
+    // Rejected artist penalty
+    const artistNegSignal = signalMap.get(artistKey);
+    if (artistNegSignal !== undefined && artistNegSignal < -0.5) {
+      penalty += 0.15; // heavily rejected artist
+    }
+
+    // Bad episode penalty (>50% rejection rate from episode density data)
+    if (track.episode_id) {
+      const epStats = episodeVoteStats.get(track.episode_id);
+      if (epStats) {
+        const epTotal = epStats.approved + epStats.rejected;
+        if (epTotal >= 3 && epStats.rejected / epTotal > 0.5) {
+          penalty += 0.20; // bad episode
+        }
+      }
+    }
+
+    // Bad curator penalty
+    if (track.episode_id) {
+      const curatorId = epToCuratorMap.get(track.episode_id);
+      if (curatorId) {
+        const slug = curatorIdToSlug.get(curatorId);
+        if (slug) {
+          const curatorSig = signalMap.get(`curator::${slug.toLowerCase()}`);
+          if (curatorSig !== undefined && curatorSig < -0.3) {
+            penalty += 0.10; // bad curator
+          }
+        }
+      }
+    }
+
+    score = Math.round((score - penalty) * 1000) / 1000;
+    scoreComponents.penalty = penalty > 0 ? -Math.round(penalty * 1000) / 1000 : 0;
+
+    // Store score components in metadata
+    const updatedMeta = { ...(track.metadata || {}), _score_components: scoreComponents };
+    updates.push({ id: track.id, taste_score: score, metadata: updatedMeta });
   }
 
   // Write scores in batches of 100
@@ -499,7 +584,7 @@ async function computeAndUpsertSignals(db: any, tracks: any[], userId: string | 
     const batch = updates.slice(i, i + 100);
     const results = await Promise.allSettled(
       batch.map((u) =>
-        db.from("tracks").update({ taste_score: u.taste_score }).eq("id", u.id)
+        db.from("tracks").update({ taste_score: u.taste_score, metadata: u.metadata }).eq("id", u.id)
       )
     );
     for (const r of results) {
