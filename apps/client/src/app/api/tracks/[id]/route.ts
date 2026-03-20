@@ -98,7 +98,6 @@ export async function PATCH(
       .update({
         youtube_url: isYoutube ? source_url : null,
         storage_path: null,
-        audio_url: null,
         status: "pending",
         metadata: updatedMeta,
       })
