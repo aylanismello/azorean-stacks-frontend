@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 import { supabase, getServiceClient } from "@/lib/supabase";
 import { diversifyTracks } from "@/lib/diversify";
 
@@ -33,8 +34,6 @@ async function attachMatchTypes(tracks: any[]) {
 }
 
 // GET /api/tracks?status=pending&limit=20
-// TODO(user-isolation): When multi-user taste scoring is implemented, add per-user filtering
-// here so that status, taste_score, and super_liked queries are scoped to the authenticated user.
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const status = searchParams.get("status") || "pending";
@@ -50,6 +49,32 @@ export async function GET(req: NextRequest) {
   const seedArtist = searchParams.get("seed_artist");
 
   const isPending = status === "pending";
+
+  // Get current user to filter out their bad_source/listened tracks
+  const auth = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return req.cookies.getAll(); },
+        setAll() {},
+      },
+    }
+  );
+  const { data: { user } } = await auth.auth.getUser();
+
+  // Fetch track IDs the user has marked as bad_source or listened
+  let excludedTrackIds = new Set<string>();
+  if (user && isPending) {
+    const db = getServiceClient();
+    const { data: excludedRows } = await db
+      .from("user_tracks")
+      .select("track_id")
+      .eq("user_id", user.id)
+      .in("status", ["bad_source", "listened"]);
+    excludedTrackIds = new Set((excludedRows || []).map((r: any) => r.track_id));
+  }
+
   const orderCol = orderBy === "taste_score"
     ? "taste_score"
     : isPending ? "created_at" : status === "approved" || status === "rejected" ? "voted_at" : "created_at";
@@ -211,7 +236,8 @@ export async function GET(req: NextRequest) {
   }
 
   // Normalize joins & generate signed URLs in parallel
-  const tracks = data || [];
+  // Filter out user's bad_source/listened tracks
+  const tracks = (data || []).filter((t: any) => !excludedTrackIds.has(t.id));
   const signPromises: Promise<void>[] = [];
 
   for (const track of tracks) {
