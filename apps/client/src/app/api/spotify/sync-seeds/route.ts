@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 import { getServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -140,6 +141,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Spotify not connected" }, { status: 401 });
   }
 
+  // Get current user for per-user approved/super-liked queries
+  const auth = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return request.cookies.getAll(); },
+        setAll() {},
+      },
+    }
+  );
+  const { data: { user } } = await auth.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const supabase = getServiceClient();
 
   // 1. Get all seeds with their linked track's spotify_url
@@ -151,23 +168,50 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: seedsError.message }, { status: 500 });
   }
 
-  // 2. Get all approved tracks with spotify_url, ordered by voted_at (newest first)
-  const { data: approvedTracks, error: tracksError } = await supabase
-    .from("tracks")
-    .select("id, spotify_url")
-    .eq("status", "approved")
-    .not("spotify_url", "is", null)
-    .neq("spotify_url", "")
-    .order("voted_at", { ascending: false, nullsFirst: false });
-
-  if (tracksError) {
-    return NextResponse.json({ error: tracksError.message }, { status: 500 });
+  // 2. Get user's approved track_ids from user_tracks, then fetch spotify_urls
+  const approvedTrackIds: string[] = [];
+  let approvedPage = 0;
+  while (true) {
+    const { data: batch } = await supabase
+      .from("user_tracks")
+      .select("track_id")
+      .eq("user_id", user.id)
+      .eq("status", "approved")
+      .order("voted_at", { ascending: false, nullsFirst: false })
+      .range(approvedPage * 1000, (approvedPage + 1) * 1000 - 1);
+    if (!batch || batch.length === 0) break;
+    approvedTrackIds.push(...batch.map((r: any) => r.track_id));
+    if (batch.length < 1000) break;
+    approvedPage++;
   }
 
-  // 3. Get super-liked tracks (most recent first)
+  let approvedTracks: Array<{ id: string; spotify_url: string }> = [];
+  if (approvedTrackIds.length > 0) {
+    const allApproved: Array<{ id: string; spotify_url: string }> = [];
+    let trackPage = 0;
+    while (true) {
+      const pageIds = approvedTrackIds.slice(trackPage * 1000, (trackPage + 1) * 1000);
+      if (pageIds.length === 0) break;
+      const { data: batch } = await supabase
+        .from("tracks")
+        .select("id, spotify_url")
+        .in("id", pageIds)
+        .not("spotify_url", "is", null)
+        .neq("spotify_url", "");
+      if (batch) allApproved.push(...(batch as any));
+      trackPage++;
+      if (pageIds.length < 1000) break;
+    }
+    // Preserve voted_at order from approvedTrackIds
+    const orderMap = new Map(approvedTrackIds.map((id, i) => [id, i]));
+    approvedTracks = allApproved.sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
+  }
+
+  // 3. Get super-liked tracks for this user (most recent first)
   const { data: superLikedRows } = await supabase
     .from("user_tracks")
     .select("track_id, tracks(spotify_url)")
+    .eq("user_id", user.id)
     .eq("super_liked", true)
     .order("voted_at", { ascending: false, nullsFirst: false });
 

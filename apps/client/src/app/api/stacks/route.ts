@@ -88,7 +88,7 @@ export async function GET(req: NextRequest) {
   while (true) {
     const { data: batch } = await supabase
       .from("tracks")
-      .select("episode_id, status, cover_art_url, artist, title, source_url, source_context, storage_path")
+      .select("id, episode_id, status, cover_art_url, artist, title, source_url, source_context, storage_path")
       .in("episode_id", Array.from(allEpisodeIds))
       .range(tracksPage * 1000, (tracksPage + 1) * 1000 - 1);
     if (!batch || batch.length === 0) break;
@@ -98,7 +98,30 @@ export async function GET(req: NextRequest) {
   }
   const tracks = allTracks;
 
-  // Aggregate stats per episode
+  // Get user's votes for these tracks
+  const allTrackIds = tracks.map((t: any) => t.id);
+  const userVoteMap = new Map<string, string>();
+  if (allTrackIds.length > 0) {
+    let votePage = 0;
+    while (true) {
+      const pageIds = allTrackIds.slice(votePage * 1000, (votePage + 1) * 1000);
+      if (pageIds.length === 0) break;
+      const { data: batch } = await supabase
+        .from("user_tracks")
+        .select("track_id, status")
+        .eq("user_id", user.id)
+        .in("track_id", pageIds);
+      if (batch) {
+        for (const v of batch as any[]) {
+          userVoteMap.set(v.track_id, v.status);
+        }
+      }
+      votePage++;
+      if (pageIds.length < 1000) break;
+    }
+  }
+
+  // Aggregate stats per episode using user_tracks votes
   const episodeStats: Record<string, {
     pending: number; approved: number; rejected: number; total: number;
     playable: number; processing: number; unavailable: number;
@@ -117,20 +140,26 @@ export async function GET(req: NextRequest) {
     const s = episodeStats[epId];
     s.total++;
     if (t.storage_path) s.playable++;
-    if (t.status === "pending") s.pending++;
-    else if (t.status === "approved") s.approved++;
-    else if (t.status === "rejected") s.rejected++;
+
+    // Use user's vote status, fall back to pipeline status
+    const userVote = userVoteMap.get(t.id);
+    const effectiveStatus = userVote && userVote !== "pending" ? userVote : t.status;
+
+    if (effectiveStatus === "approved") s.approved++;
+    else if (effectiveStatus === "rejected") s.rejected++;
+    else if (effectiveStatus === "pending") s.pending++;
 
     // Processing: pending enrichment or download (no storage_path yet, not terminal)
     if (t.status === "pending" && !t.storage_path) s.processing++;
-    // Unavailable: skipped, failed, or dead-end (no online source found)
+    // Unavailable: skipped, failed, or dead-end (pipeline states)
     if (t.status === "skipped" || t.status === "failed" ||
         (t.status !== "pending" && t.status !== "approved" && t.status !== "rejected" && !t.storage_path)) {
       s.unavailable++;
     }
 
     if (!s.cover_art_url && t.cover_art_url) s.cover_art_url = t.cover_art_url;
-    if (s.sample_tracks.length < 3 && t.status === "pending") {
+    // Sample tracks: unvoted by this user
+    if (s.sample_tracks.length < 3 && (!userVote || userVote === "pending")) {
       s.sample_tracks.push({ artist: t.artist, title: t.title });
     }
   }

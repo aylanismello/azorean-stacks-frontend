@@ -95,20 +95,20 @@ export async function GET(req: NextRequest) {
   const episodeTrackStats: Record<string, { total: number; with_audio: number; enriched: number }> = {};
 
   if (allEpisodeIds.length > 0) {
-    // Paginated stats query — only the columns needed for counting (no artist/title)
-    const allStatsRows: { episode_id: string; status: string | null; storage_path: string | null; spotify_url: string | null; youtube_url: string | null }[] = [];
+    // Paginated stats query — get track_id + pipeline data for counting
+    const allStatsRows: { episode_id: string; track_id: string; storage_path: string | null; spotify_url: string | null; youtube_url: string | null }[] = [];
     let statsPage = 0;
     while (true) {
       const { data: batch } = await supabase
         .from("episode_tracks")
-        .select("episode_id, tracks(status, storage_path, spotify_url, youtube_url)")
+        .select("episode_id, track_id, tracks(storage_path, spotify_url, youtube_url)")
         .in("episode_id", allEpisodeIds)
         .range(statsPage * 1000, (statsPage + 1) * 1000 - 1);
       if (!batch || batch.length === 0) break;
       for (const row of batch as any[]) {
         allStatsRows.push({
           episode_id: row.episode_id,
-          status: row.tracks?.status ?? null,
+          track_id: row.track_id,
           storage_path: row.tracks?.storage_path ?? null,
           spotify_url: row.tracks?.spotify_url ?? null,
           youtube_url: row.tracks?.youtube_url ?? null,
@@ -118,17 +118,43 @@ export async function GET(req: NextRequest) {
       statsPage++;
     }
 
+    // Get user's votes for all these tracks to determine "curated" status
+    const allStatTrackIds = allStatsRows.map((r) => r.track_id);
+    const userVoteMap = new Map<string, string>();
+    if (allStatTrackIds.length > 0) {
+      let votePage = 0;
+      while (true) {
+        const pageIds = allStatTrackIds.slice(votePage * 1000, (votePage + 1) * 1000);
+        if (pageIds.length === 0) break;
+        const { data: batch } = await supabase
+          .from("user_tracks")
+          .select("track_id, status")
+          .eq("user_id", user.id)
+          .in("track_id", pageIds);
+        if (batch) {
+          for (const v of batch as any[]) {
+            userVoteMap.set(v.track_id, v.status);
+          }
+        }
+        votePage++;
+        if (pageIds.length < 1000) break;
+      }
+    }
+
     const episodesWithPending = new Set<string>();
     for (const t of allStatsRows) {
-      if (!t.episode_id || !t.status) continue;
-      if (t.status === "pending") episodesWithPending.add(t.episode_id);
+      if (!t.episode_id) continue;
+      // A track is "pending" for this user if they haven't voted on it
+      const userVote = userVoteMap.get(t.track_id);
+      const isPendingForUser = !userVote || userVote === "pending";
+      if (isPendingForUser) episodesWithPending.add(t.episode_id);
       if (!episodeTrackStats[t.episode_id]) episodeTrackStats[t.episode_id] = { total: 0, with_audio: 0, enriched: 0 };
       episodeTrackStats[t.episode_id].total++;
       if (t.storage_path) episodeTrackStats[t.episode_id].with_audio++;
       if (t.spotify_url || t.youtube_url) episodeTrackStats[t.episode_id].enriched++;
     }
 
-    // An episode is curated if it has no pending tracks
+    // An episode is curated if the user has voted on all its tracks
     allEpisodeIds.forEach((id) => {
       if (!episodesWithPending.has(id)) curatedEpisodeIds.add(id);
     });

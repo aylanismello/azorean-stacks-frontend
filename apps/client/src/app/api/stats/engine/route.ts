@@ -1,11 +1,25 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 import { getServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const db = getServiceClient();
+
+    // Auth for user-specific rejected count
+    const auth = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() { return req.cookies.getAll(); },
+          setAll() {},
+        },
+      }
+    );
+    const { data: { user } } = await auth.auth.getUser();
 
     // ── Pipeline breakdown ──────────────────────────────────────────────
 
@@ -15,13 +29,17 @@ export async function GET() {
       .select("id", { count: "exact", head: true });
 
     // ── Mutually exclusive categories (by status first, then data) ──
-    // Status is the primary key: rejected, skipped, failed are terminal.
-    // For pending/approved: sub-categorize by pipeline stage.
+    // Status is pipeline state only. User votes are in user_tracks.
 
-    // 1. Rejected by user
-    const { count: rejected } = await db
-      .from("tracks").select("id", { count: "exact", head: true })
-      .eq("status", "rejected");
+    // 1. Rejected by current user (from user_tracks)
+    let rejected = 0;
+    if (user) {
+      const { count: rejectedCount } = await db
+        .from("user_tracks").select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("status", "rejected");
+      rejected = rejectedCount || 0;
+    }
 
     // 2. Skipped (unfindable online)
     const { count: skippedUnfindable } = await db

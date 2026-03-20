@@ -1,14 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 import { getServiceClient } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/curators/[id]/episodes — episodes for a curator with seed match info
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const db = getServiceClient();
+
+  // Auth for per-user vote stats
+  const auth = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return req.cookies.getAll(); },
+        setAll() {},
+      },
+    }
+  );
+  const { data: { user } } = await auth.auth.getUser();
 
   // Get episodes for this curator
   const { data: episodes, error } = await db
@@ -55,13 +69,13 @@ export async function GET(
     });
   }
 
-  // Get track stats per episode via episode_tracks (paginated)
+  // Get track IDs per episode via episode_tracks (paginated)
   const trackRows: any[] = [];
   let trackPage = 0;
   while (true) {
     const { data: batch } = await db
       .from("episode_tracks")
-      .select("episode_id, tracks(status)")
+      .select("episode_id, track_id")
       .in("episode_id", episodeIds)
       .range(trackPage * 1000, (trackPage + 1) * 1000 - 1);
     if (!batch || batch.length === 0) break;
@@ -70,15 +84,57 @@ export async function GET(
     trackPage++;
   }
 
+  // Build per-episode stats from user_tracks
   const statsByEpisode: Record<string, { total: number; pending: number; approved: number; rejected: number }> = {};
-  for (const row of trackRows as any[]) {
-    const eid = row.episode_id;
-    if (!statsByEpisode[eid]) statsByEpisode[eid] = { total: 0, pending: 0, approved: 0, rejected: 0 };
-    statsByEpisode[eid].total++;
-    const s = row.tracks?.status;
-    if (s === "pending") statsByEpisode[eid].pending++;
-    else if (s === "approved") statsByEpisode[eid].approved++;
-    else if (s === "rejected") statsByEpisode[eid].rejected++;
+
+  if (user && trackRows.length > 0) {
+    const allTrackIds = trackRows.map((r: any) => r.track_id);
+    const trackEpMap = new Map<string, string>();
+    for (const r of trackRows) {
+      trackEpMap.set(r.track_id, r.episode_id);
+    }
+
+    // Initialize totals
+    for (const r of trackRows) {
+      if (!statsByEpisode[r.episode_id]) statsByEpisode[r.episode_id] = { total: 0, pending: 0, approved: 0, rejected: 0 };
+      statsByEpisode[r.episode_id].total++;
+    }
+
+    // Fetch user votes for these tracks (paginated)
+    const userVotes = new Map<string, string>();
+    let votePage = 0;
+    while (true) {
+      const pageIds = allTrackIds.slice(votePage * 1000, (votePage + 1) * 1000);
+      if (pageIds.length === 0) break;
+      const { data: batch } = await db
+        .from("user_tracks")
+        .select("track_id, status")
+        .eq("user_id", user.id)
+        .in("track_id", pageIds);
+      if (batch) {
+        for (const v of batch as any[]) {
+          userVotes.set(v.track_id, v.status);
+        }
+      }
+      votePage++;
+      if (pageIds.length < 1000) break;
+    }
+
+    // Count per episode
+    for (const r of trackRows) {
+      const epStats = statsByEpisode[r.episode_id];
+      const vote = userVotes.get(r.track_id);
+      if (vote === "approved") epStats.approved++;
+      else if (vote === "rejected") epStats.rejected++;
+      else epStats.pending++;
+    }
+  } else {
+    // No auth — just count totals
+    for (const r of trackRows) {
+      if (!statsByEpisode[r.episode_id]) statsByEpisode[r.episode_id] = { total: 0, pending: 0, approved: 0, rejected: 0 };
+      statsByEpisode[r.episode_id].total++;
+      statsByEpisode[r.episode_id].pending++;
+    }
   }
 
   const shaped = episodes.map((ep) => ({

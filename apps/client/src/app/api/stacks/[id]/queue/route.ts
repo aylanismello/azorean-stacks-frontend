@@ -70,7 +70,7 @@ export async function GET(
   );
   const episodeIds = Array.from(episodeMatchTypes.keys());
 
-  // 3. Fetch pending tracks with audio, sorted by pre-computed taste_score
+  // 3. Fetch tracks with audio from these episodes, sorted by pre-computed taste_score
   const { data: rawTracks } = await db
     .from("tracks")
     .select(
@@ -81,14 +81,23 @@ export async function GET(
     .not("storage_path", "is", null)
     .order("taste_score", { ascending: false, nullsFirst: false });
 
-  // 4. Filter out user's listened/bad_source tracks
-  const { data: excludedRows } = await db
-    .from("user_tracks")
-    .select("track_id")
-    .eq("user_id", user.id)
-    .in("status", ["listened", "bad_source"]);
+  // 4. Filter out ALL tracks the user has voted on (any status in user_tracks)
+  const allExcluded: string[] = [];
+  let excludePage = 0;
+  while (true) {
+    const { data: batch } = await db
+      .from("user_tracks")
+      .select("track_id")
+      .eq("user_id", user.id)
+      .in("status", ["approved", "rejected", "skipped", "bad_source", "listened"])
+      .range(excludePage * 1000, (excludePage + 1) * 1000 - 1);
+    if (!batch || batch.length === 0) break;
+    allExcluded.push(...batch.map((r: any) => r.track_id));
+    if (batch.length < 1000) break;
+    excludePage++;
+  }
 
-  const excludedIds = new Set((excludedRows || []).map((r: any) => r.track_id));
+  const excludedIds = new Set(allExcluded);
   const pendingTracks = (rawTracks || []).filter((t: any) => !excludedIds.has(t.id));
 
   // Fetch user votes for these tracks
