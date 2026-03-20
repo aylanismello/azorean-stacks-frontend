@@ -8,32 +8,6 @@ import { EpisodeTracklist, TracklistSheet } from "@/components/EpisodeTracklist"
 import { useGlobalPlayer, PlayerTrack } from "@/components/GlobalPlayerProvider";
 import { useSpotify } from "@/components/SpotifyProvider";
 
-function mergeTrackSession(existing: Track[], incoming: Track[]): Track[] {
-  const merged = new Map(existing.map((track) => [track.id, track]));
-  for (const track of incoming) {
-    merged.set(track.id, { ...merged.get(track.id), ...track });
-  }
-
-  const seen = new Set<string>();
-  const ordered: Track[] = [];
-
-  for (const track of existing) {
-    const next = merged.get(track.id);
-    if (!next || seen.has(track.id)) continue;
-    ordered.push(next);
-    seen.add(track.id);
-  }
-
-  for (const track of incoming) {
-    const next = merged.get(track.id);
-    if (!next || seen.has(track.id)) continue;
-    ordered.push(next);
-    seen.add(track.id);
-  }
-
-  return ordered;
-}
-
 export default function StackPage() {
   return (
     <Suspense
@@ -48,7 +22,7 @@ export default function StackPage() {
   );
 }
 
-/** Convert a local Track to a PlayerTrack for the global player queue */
+/** Convert an API Track to a PlayerTrack with all fields the UI needs */
 function toPlayerTrack(track: Track): PlayerTrack {
   return {
     id: track.id,
@@ -60,7 +34,95 @@ function toPlayerTrack(track: Track): PlayerTrack {
     episodeId: track.episode_id,
     episodeTitle: track.episode?.title,
     youtubeUrl: track.youtube_url,
+
+    // Vote / status
+    vote_status: (track as any).vote_status || track.status || "pending",
+    super_liked: track.super_liked || false,
+    status: track.status,
+
+    // Seed indicators
+    is_seed: track.is_seed,
+    is_re_seed: track.is_re_seed,
+    is_artist_seed: (track as any).is_artist_seed,
+
+    // Discovery metadata
+    source: track.source,
+    episode_id: track.episode_id,
+    episode_title: track.episode?.title || null,
+    storage_path: track.storage_path,
+    youtube_url: track.youtube_url,
+    preview_url: track.preview_url,
+    seed_id: track.seed_id,
+    seed_track: track.seed_track,
+    taste_score: track.taste_score,
+
+    // Source context
+    source_url: track.source_url,
+    source_context: track.source_context,
+
+    // Episode join data
+    episode: track.episode,
+
+    // Metadata bag
+    metadata: track.metadata,
+
+    // Scoring metadata
+    _ranked_score: (track as any)._ranked_score,
+    _score_components: (track as any)._score_components,
+    _match_type: (track as any)._match_type,
+    _seed_name: (track as any)._seed_name,
+
+    // Voted timestamp
+    voted_at: track.voted_at,
   };
+}
+
+/** Convert a PlayerTrack back to a Track-like object for components that still expect Track */
+function toTrackLike(pt: PlayerTrack): Track {
+  return {
+    id: pt.id,
+    artist: pt.artist,
+    title: pt.title,
+    cover_art_url: pt.coverArtUrl,
+    spotify_url: pt.spotifyUrl,
+    audio_url: pt.audioUrl,
+    youtube_url: pt.youtubeUrl || pt.youtube_url || null,
+    preview_url: pt.preview_url || null,
+    episode_id: pt.episodeId || pt.episode_id || null,
+    episode: pt.episode || null,
+    source: pt.source || "",
+    source_url: pt.source_url || null,
+    source_context: pt.source_context || null,
+    seed_track_id: null,
+    download_url: null,
+    storage_path: pt.storage_path || null,
+    seed_track: pt.seed_track || null,
+    metadata: pt.metadata || {},
+    status: (pt.vote_status || pt.status || "pending") as Track["status"],
+    created_at: "",
+    voted_at: pt.voted_at || null,
+    downloaded_at: null,
+    dl_attempts: 0,
+    dl_failed_at: null,
+    seed_id: pt.seed_id,
+    taste_score: pt.taste_score,
+    super_liked: pt.super_liked,
+    is_seed: pt.is_seed,
+    is_re_seed: pt.is_re_seed,
+    // Pass through scoring metadata
+    _ranked_score: pt._ranked_score,
+    _score_components: pt._score_components,
+    _match_type: pt._match_type,
+    _seed_name: pt._seed_name,
+    // Pass through vote_status for TrackCard
+    vote_status: pt.vote_status,
+    is_artist_seed: pt.is_artist_seed,
+  } as any;
+}
+
+/** Check if a PlayerTrack has playable audio */
+function isPlayable(t: PlayerTrack): boolean {
+  return !!(t.audioUrl || t.storage_path || t.preview_url);
 }
 
 function StackPageContent() {
@@ -80,7 +142,6 @@ function StackPageContent() {
   // URL-driven state
   const episodeId = searchParams.get("episode_id");
   const episodeTitle = searchParams.get("episode_title");
-  const fromStacks = searchParams.get("from") === "stacks";
   const fromSeedId = searchParams.get("seed_id");
   const fromEpisodes = searchParams.get("from") === "episodes";
 
@@ -94,8 +155,7 @@ function StackPageContent() {
   const isRankedMode = stackSource === "ranked";
   const isTasteMode = stackSource === "taste" || stackSource === "genre" || isSeedMode || isRankedMode || (!stackSource && !episodeId);
 
-  const [tracks, setTracks] = useState<Track[]>([]);
-  const [sessionTracks, setSessionTracks] = useState<Track[]>([]);
+  // Page-level UI state (no track state — provider owns that)
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -111,19 +171,9 @@ function StackPageContent() {
   const [advancingEpisode, setAdvancingEpisode] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
 
-  // Session-level rejection/approval momentum (not persisted to DB)
-  const rejectionCounts = useRef<Map<string, number>>(new Map()); // episode_id → reject count
-  const seedRejections = useRef<Map<string, number>>(new Map());  // seed_artist → reject count
-  const recentApprovals = useRef<Array<{ genres: string[]; seedArtist: string | null }>>([]); // last 5
-
   // Don't auto-play until the user has interacted (vote, skip, click track, etc.)
   const userHasInteracted = useRef(false);
 
-  // Track whether we've already reconciled player state after a fetch
-  const reconciledTrackId = useRef<string | null>(null);
-  // Prevent reconciliation from firing on navigation to a new stack
-  const skipReconcileRef = useRef(false);
-  const stackIdentityRef = useRef<string>("");
   // Ref for global player's current track (avoids stale closures in fetchTracks)
   const playerCurrentTrackRef = useRef(globalPlayer.currentTrack);
   useEffect(() => { playerCurrentTrackRef.current = globalPlayer.currentTrack; }, [globalPlayer.currentTrack]);
@@ -133,82 +183,13 @@ function StackPageContent() {
   }, [episodeId]);
 
   // Whether we're operating in "episode mode" (full episode tracks + position index)
-  // This is true both for URL-driven episodes AND derived episodes in all-pending
   const [hasEpisodeTracks, setHasEpisodeTracks] = useState(!!episodeId);
 
-  // Helper: check if a track has playable audio
-  const isTrackPlayable = (t: Track) => !!(t.audio_url || t.storage_path);
+  // The current track is ALWAYS from the provider — single source of truth
+  const currentTrack = globalPlayer.currentTrack;
 
-  // The track currently shown on the card — derived from global player (single source of truth)
-  const currentTrack = (() => {
-    // If the global player has a track loaded, find it in our local tracks
-    if (globalPlayer.currentTrack) {
-      const found = tracks.find(t => t.id === globalPlayer.currentTrack!.id);
-      if (found) return found;
-    }
-    // Fallback for initial load (before player has a track):
-    // show first playable track without playing it
-    if (hasEpisodeTracks) {
-      const idx = Math.min(globalPlayer.currentIndex, Math.max(tracks.length - 1, 0));
-      const t = tracks[idx];
-      if (t && isTrackPlayable(t)) return t;
-      for (let i = idx + 1; i < tracks.length; i++) {
-        if (isTrackPlayable(tracks[i])) return tracks[i];
-      }
-      for (let i = 0; i < idx; i++) {
-        if (isTrackPlayable(tracks[i])) return tracks[i];
-      }
-      return null;
-    }
-    return tracks.find(isTrackPlayable) ?? null;
-  })();
-
-  // Position of current track in the local tracks array (for display)
-  const currentDisplayIndex = currentTrack ? tracks.findIndex(t => t.id === currentTrack.id) : 0;
-
-  const lastEpisodeIdRef = useRef<string | null>(episodeId);
-
-  // Push tracks from heavily-rejected episodes/seeds to the back of the queue
-  const reorderByMomentum = useCallback((trackList: Track[]): Track[] => {
-    const normal: Track[] = [];
-    const deprioritized: Track[] = [];
-    for (const track of trackList) {
-      const epId = track.episode_id || null;
-      const seedArtist = (track.metadata["seed_artist"] as string) || null;
-      const epCount = epId ? (rejectionCounts.current.get(epId) ?? 0) : 0;
-      const seedCount = seedArtist ? (seedRejections.current.get(seedArtist) ?? 0) : 0;
-      if (epCount >= 3 || seedCount >= 4) deprioritized.push(track);
-      else normal.push(track);
-    }
-    return [...normal, ...deprioritized];
-  }, []);
-
-  // Promote tracks matching recent approval genre/seed patterns to the front
-  const boostByChain = useCallback((trackList: Track[]): Track[] => {
-    if (recentApprovals.current.length < 2) return trackList;
-    const genreCounts = new Map<string, number>();
-    const seedCounts = new Map<string, number>();
-    for (const a of recentApprovals.current) {
-      for (const g of a.genres) genreCounts.set(g, (genreCounts.get(g) ?? 0) + 1);
-      if (a.seedArtist) seedCounts.set(a.seedArtist, (seedCounts.get(a.seedArtist) ?? 0) + 1);
-    }
-    const boostedGenres = new Set(Array.from(genreCounts.entries()).filter(([, c]) => c >= 2).map(([g]) => g));
-    const boostedSeeds = new Set(Array.from(seedCounts.entries()).filter(([, c]) => c >= 2).map(([s]) => s));
-    if (boostedGenres.size === 0 && boostedSeeds.size === 0) return trackList;
-    const front: Track[] = [];
-    const rest: Track[] = [];
-    for (const track of trackList) {
-      const genres = (track.metadata["genres"] as string[]) || [];
-      const seedArtist = (track.metadata["seed_artist"] as string) || null;
-      if (genres.some((g) => boostedGenres.has(g)) || (seedArtist && boostedSeeds.has(seedArtist))) {
-        front.push(track);
-      } else {
-        rest.push(track);
-      }
-    }
-    return [...front, ...rest];
-  }, []);
-
+  // Position of current track in the queue (for display)
+  const currentDisplayIndex = globalPlayer.currentIndex;
 
   const buildUrl = useCallback((_extra?: string) => {
     // Episode mode: fetch ALL tracks in episode order (not just pending)
@@ -237,197 +218,72 @@ function StackPageContent() {
   }, [episodeId, isRankedMode, fromSeedId, isTasteMode, hideLowScored, genreFilter, seedFilter]);
 
   const fetchTracks = useCallback(async () => {
-    reconciledTrackId.current = null;
     try {
       const res = await fetch(buildUrl());
       if (!res.ok) throw new Error(`Failed to load tracks (${res.status})`);
       const data = await res.json();
-      let newTracks: Track[] = data.tracks || [];
-      // Client-side reordering in taste/genre/seed modes only (not ranked — API handles ordering)
-      if (!episodeId && isTasteMode && !isRankedMode) {
-        newTracks = reorderByMomentum(newTracks);
-        newTracks = boostByChain(newTracks);
-      }
-      setTracks(newTracks);
-      setSessionTracks((prev) =>
-        episodeId || !isTasteMode ? newTracks : mergeTrackSession(prev, newTracks)
-      );
+      const apiTracks: Track[] = data.tracks || [];
+      const playerTracks = apiTracks.map(toPlayerTrack);
+
       setTotal(data.total || 0);
       setError(null);
       setAdvancingEpisode(false);
 
-      // Sync queue to global player — but never interrupt active playback.
-      // When re-mounting after navigation (e.g. Seeds tab → back), the global
-      // player still holds the playing track. Preserve it instead of resetting.
-      const playerTracks = newTracks.map(toPlayerTrack);
+      // Hand tracks to the provider — it owns the queue.
+      // Never interrupt active playback.
       const playingTrack = playerCurrentTrackRef.current;
 
-      if (episodeId && newTracks.length > 0) {
-        const firstPlayablePending = newTracks.findIndex((t) => t.status === "pending" && isTrackPlayable(t));
+      if (episodeId && playerTracks.length > 0) {
+        const firstPlayablePending = playerTracks.findIndex((t) => t.status === "pending" && isPlayable(t));
         const startIndex = firstPlayablePending >= 0 ? firstPlayablePending : 0;
         setHasEpisodeTracks(true);
 
         if (playingTrack) {
-          const playingIdx = newTracks.findIndex(t => t.id === playingTrack.id);
+          const playingIdx = playerTracks.findIndex(t => t.id === playingTrack.id);
           if (playingIdx >= 0) {
-            // Playing track is in this episode — preserve playback
             globalPlayer.setQueue(playerTracks, playingIdx);
           } else {
-            // Playing track is from a different context — load this episode
             globalPlayer.setQueue(playerTracks, startIndex);
             globalPlayer.loadTrack(playerTracks[startIndex]);
           }
         } else {
-          // No track playing — initial load
           globalPlayer.setQueue(playerTracks, startIndex);
           globalPlayer.loadTrack(playerTracks[startIndex]);
         }
-        skipReconcileRef.current = false;
-      } else if (newTracks.length > 0) {
+      } else if (playerTracks.length > 0) {
         if (playingTrack) {
-          // Player already has a track — don't interrupt playback.
-          const playingIdx = newTracks.findIndex(t => t.id === playingTrack.id);
+          const playingIdx = playerTracks.findIndex(t => t.id === playingTrack.id);
           if (playingIdx >= 0) {
-            // Playing track found in new results — sync queue to its position
             globalPlayer.setQueue(playerTracks, playingIdx);
           } else {
-            // Playing track not in new results (e.g. status changed) — set queue
-            // without resetting index; reconciliation will handle syncing.
             globalPlayer.setQueue(playerTracks);
           }
         } else {
-          // No track playing — initial load
           globalPlayer.setQueue(playerTracks, 0);
-          const firstPlayable = newTracks.findIndex(isTrackPlayable);
+          const firstPlayable = playerTracks.findIndex(isPlayable);
           if (firstPlayable >= 0) {
             globalPlayer.loadTrack(playerTracks[firstPlayable]);
           }
         }
-        skipReconcileRef.current = false;
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load tracks");
     } finally {
       setLoading(false);
     }
-  }, [buildUrl, episodeId, isTasteMode, reorderByMomentum, boostByChain]);
+  }, [buildUrl, episodeId]);
 
   useEffect(() => {
     fetchTracks();
   }, [fetchTracks]);
 
-  useEffect(() => {
-    setSessionTracks([]);
-    rejectionCounts.current = new Map();
-    seedRejections.current = new Map();
-    recentApprovals.current = [];
-  }, [episodeId, stackSource, genreFilter, seedFilter]);
-
-  // Track stack identity to skip reconciliation when navigating to a different stack
-  const stackIdentity = episodeId || `${stackSource}-${genreFilter}-${seedFilter}`;
-  useEffect(() => {
-    if (stackIdentityRef.current !== stackIdentity) {
-      stackIdentityRef.current = stackIdentity;
-      reconciledTrackId.current = null;
-      skipReconcileRef.current = true;
-    }
-  }, [stackIdentity]);
-
-  // Reconcile tracks with globalPlayer.currentTrack after fetch completes.
-  // When re-mounting (e.g. navigating back to Playing tab), fetchTracks gets fresh
-  // data but globalPlayer still holds the previously-playing track. This syncs them.
-  const reconcilePlayerWithTracks = useCallback(() => {
-    const playerTrack = globalPlayer.currentTrack;
-    if (!playerTrack) return;
-    if (reconciledTrackId.current === playerTrack.id) return;
-
-    setTracks((prev) => {
-      if (prev.length === 0) return prev;
-
-      if (episodeId || hasEpisodeTracks) {
-        // Episode mode: sync queue index to the playing track's position
-        const idx = prev.findIndex((t) => t.id === playerTrack.id);
-        if (idx >= 0) {
-          globalPlayer.setQueue(prev.map(toPlayerTrack), idx);
-        }
-        // Don't reorder episode tracks — position is semantic
-        return prev;
-      }
-
-      // Taste/genre/seed mode: promote or prepend the playing track
-      const idx = prev.findIndex((t) => t.id === playerTrack.id);
-      if (idx === 0) return prev; // already first
-
-      if (idx > 0) {
-        // Found in list — move to front
-        const reordered = [...prev];
-        const [playing] = reordered.splice(idx, 1);
-        reordered.unshift(playing);
-        return reordered;
-      }
-
-      // Not in list — prepend a synthetic track from player state
-      // Guard: in seed/ranked mode, only prepend if the player track is from this seed context.
-      // If it's not in the seed-filtered list, it belongs to a different stack.
-      if (isSeedMode || isRankedMode) return prev;
-
-      const synthetic: Track = {
-        id: playerTrack.id,
-        artist: playerTrack.artist,
-        title: playerTrack.title,
-        cover_art_url: playerTrack.coverArtUrl,
-        spotify_url: playerTrack.spotifyUrl,
-        audio_url: playerTrack.audioUrl,
-        episode_id: playerTrack.episodeId,
-        status: "pending",
-      } as Track;
-      return [synthetic, ...prev];
-    });
-
-    setSessionTracks((prev) => {
-      if (prev.some((track) => track.id === playerTrack.id)) return prev;
-      if (isSeedMode || isRankedMode) return prev;
-
-      const synthetic: Track = {
-        id: playerTrack.id,
-        artist: playerTrack.artist,
-        title: playerTrack.title,
-        cover_art_url: playerTrack.coverArtUrl,
-        spotify_url: playerTrack.spotifyUrl,
-        audio_url: playerTrack.audioUrl,
-        episode_id: playerTrack.episodeId,
-        status: "pending",
-      } as Track;
-
-      return [synthetic, ...prev];
-    });
-
-    reconciledTrackId.current = playerTrack.id;
-    if (!episodeId && !hasEpisodeTracks) {
-      userHasInteracted.current = true;
-    }
-  }, [globalPlayer.currentTrack, episodeId, hasEpisodeTracks, isSeedMode, isRankedMode]);
-
-  // Fire reconciliation when tracks finish loading and player has a current track
-  const playerTrackId = globalPlayer.currentTrack?.id ?? null;
-  useEffect(() => {
-    if (loading) return;
-    if (!playerTrackId) return;
-    if (skipReconcileRef.current) {
-      skipReconcileRef.current = false;
-      return;
-    }
-    reconcilePlayerWithTracks();
-  }, [loading, playerTrackId, reconcilePlayerWithTracks]);
-
   const advanceToNextEpisode = useCallback(async () => {
     setAdvancingEpisode(true);
     try {
-      // Fetch pending tracks — find one from a different episode
       const res = await fetch("/api/tracks?status=pending&limit=20");
       if (!res.ok) throw new Error("Failed to fetch next episode");
       const data = await res.json();
-      const curEpId = derivedEpisodeRef.current.id || episodeId;
+      const curEpId = episodeId || currentTrack?.episodeId;
       const nextTrack = (data.tracks || []).find(
         (t: Track) => t.episode_id && t.episode_id !== curEpId
       ) || data.tracks?.[0];
@@ -438,7 +294,6 @@ function StackPageContent() {
         if (nextTrack.episode?.title) params.set("episode_title", nextTrack.episode.title);
         router.push(`/?${params.toString()}`);
       } else {
-        // No more pending tracks at all
         setAdvancingEpisode(false);
         router.push("/");
       }
@@ -446,7 +301,7 @@ function StackPageContent() {
       setAdvancingEpisode(false);
       router.push("/");
     }
-  }, [router, episodeId]);
+  }, [router, episodeId, currentTrack?.episodeId]);
 
   const handleSuperLike = async (id: string) => {
     userHasInteracted.current = true;
@@ -458,21 +313,13 @@ function StackPageContent() {
       });
       if (!res.ok) throw new Error(`Super like failed (${res.status})`);
 
-      // Auto-sync Spotify playlist when a track is super-liked (it becomes approved)
       if (spotifyConnected) {
         fetch("/api/spotify/sync-seeds", { method: "POST" }).catch(() => {});
       }
 
-      // Update local state — super-liked tracks are approved
-      setTracks((prev) =>
-        prev.map((t) => t.id === id ? { ...t, status: "approved", vote_status: "approved", super_liked: true, voted_at: new Date().toISOString() } as any : t)
-      );
-      setSessionTracks((prev) =>
-        prev.map((t) => t.id === id ? { ...t, status: "approved", vote_status: "approved", super_liked: true, voted_at: new Date().toISOString() } as any : t)
-      );
-
+      // Update vote in provider — single source of truth
+      globalPlayer.updateTrackVote(id, "approved", true);
       setVoteCount((c) => c + 1);
-      // No auto-advance — user taps the [->] button (second tap) to move on
     } catch (err) {
       console.error("Super like error:", err);
       setError("Failed to super like. Please try again.");
@@ -489,122 +336,63 @@ function StackPageContent() {
       });
       if (!res.ok) throw new Error(`Vote failed (${res.status})`);
 
-      // Auto-sync Spotify playlist when a track is approved
       if (status === "approved" && spotifyConnected) {
         fetch("/api/spotify/sync-seeds", { method: "POST" }).catch(() => {});
       }
 
-      // Update the track's status locally so the UI reflects the vote
-      // Preserve super_liked when re-approving (e.g. advance after super-like)
-      // Clear it only when changing to a non-approved status
-      setTracks((prev) =>
-        prev.map((t) => t.id === id ? { ...t, status, vote_status: status, super_liked: status === "approved" ? (t as any).super_liked || false : false, voted_at: new Date().toISOString() } as any : t)
-      );
-      setSessionTracks((prev) =>
-        prev.map((t) => t.id === id ? { ...t, status, vote_status: status, super_liked: status === "approved" ? (t as any).super_liked || false : false, voted_at: new Date().toISOString() } as any : t)
-      );
-
+      // Update vote in provider — single source of truth
+      globalPlayer.updateTrackVote(id, status);
       setVoteCount((c) => c + 1);
 
       if (!advance) return;
 
+      const queue = globalPlayer.queue;
+
       if (hasEpisodeTracks) {
-        // Episode mode: check if any playable pending tracks remain (excluding the one we just voted on)
-        const remainingPending = tracks.filter((t) => t.id !== id && t.status === "pending" && isTrackPlayable(t));
+        // Episode mode: check if any playable pending tracks remain
+        const remainingPending = queue.filter((t) => t.id !== id && (t.vote_status === "pending" || t.status === "pending") && isPlayable(t));
         if (remainingPending.length === 0) {
-          // All tracks voted — advance to next episode
           advanceToNextEpisode();
           return;
         }
-        // Advance to next pending + playable track via global player queue
+        // Advance to next pending + playable track
         const curPos = globalPlayer.currentIndex;
         let nextPos = -1;
-        for (let i = curPos + 1; i < tracks.length; i++) {
-          if (tracks[i].id !== id && tracks[i].status === "pending" && isTrackPlayable(tracks[i])) { nextPos = i; break; }
+        for (let i = curPos + 1; i < queue.length; i++) {
+          if (queue[i].id !== id && (queue[i].vote_status === "pending" || queue[i].status === "pending") && isPlayable(queue[i])) { nextPos = i; break; }
         }
-        // Never wrap backwards — only advance forward in the tracklist
         if (nextPos >= 0) {
           globalPlayer.playFromQueue(nextPos);
         } else {
-          // No more pending tracks ahead — advance to next episode
           advanceToNextEpisode();
         }
       } else {
-        // All-pending mode: update momentum refs then remove voted track + reorder
-        if (isTasteMode) {
-          const votedTrack = tracks.find((t) => t.id === id);
-          if (votedTrack) {
-            const meta = votedTrack.metadata || {};
-            if (status === "rejected") {
-              const epId = votedTrack.episode_id;
-              const seedArtist = meta["seed_artist"] as string | undefined;
-              if (epId) rejectionCounts.current.set(epId, (rejectionCounts.current.get(epId) ?? 0) + 1);
-              if (seedArtist) seedRejections.current.set(seedArtist, (seedRejections.current.get(seedArtist) ?? 0) + 1);
-            } else if (status === "approved") {
-              const genres = (meta["genres"] as string[]) || [];
-              const seedArtist = (meta["seed_artist"] as string) || null;
-              recentApprovals.current = [{ genres, seedArtist }, ...recentApprovals.current].slice(0, 5);
-            }
-          }
+        // Taste/ranked mode: advance to next pending track in queue
+        const curPos = globalPlayer.currentIndex;
+        let nextPos = -1;
+        for (let i = curPos + 1; i < queue.length; i++) {
+          if (queue[i].id !== id && (queue[i].vote_status === "pending" || queue[i].status === "pending") && isPlayable(queue[i])) { nextPos = i; break; }
         }
-        setTracks((prev) => {
-          // DON'T remove voted tracks — keep them for tracklist click-back with vote state
-          // Just find the next unvoted playable track to advance to
-          const currentIdx = prev.findIndex((t) => t.id === id);
-          const pending = prev.filter((t) => t.id !== id && t.status === "pending" && isTrackPlayable(t));
-          let ordered = pending;
-          // In ranked mode, preserve server-side ordering — no client reordering
-          if (isTasteMode && !isRankedMode) {
-            ordered = reorderByMomentum(ordered);
-            ordered = boostByChain(ordered);
-          }
-          // Sync queue to provider with ALL tracks (including voted) and advance to next pending
-          const allUpdated = prev.map((t) => t.id === id ? { ...t, status, vote_status: status } as any : t);
-          globalPlayer.setQueue(allUpdated.map(toPlayerTrack));
-          // Find next pending track after current position
-          let nextIdx = -1;
-          for (let i = currentIdx + 1; i < allUpdated.length; i++) {
-            if (allUpdated[i].status === "pending" && isTrackPlayable(allUpdated[i])) { nextIdx = i; break; }
-          }
-          if (nextIdx < 0 && ordered.length > 0) {
-            // Fallback: play first pending track
-            nextIdx = allUpdated.findIndex((t: any) => t.id === ordered[0].id);
-          }
-          if (nextIdx >= 0) {
-            globalPlayer.playFromQueue(nextIdx);
-          }
-          // Ranked mode: full queue is loaded upfront, no refetch needed
-          if (!isRankedMode && ordered.length <= 3) {
-            const votedId = id;
-            const existingIds = new Set(ordered.map((t) => t.id));
-            fetch(buildUrl())
-              .then((r) => r.ok ? r.json() : null)
-              .then((data) => {
-                if (!data) return;
-                const newTracks = (data.tracks || []).filter(
-                  (t: Track) => t.id !== votedId && !existingIds.has(t.id)
-                );
-                if (newTracks.length > 0) {
-                  setTracks((curr) => {
-                    const currIds = new Set(curr.map((t: Track) => t.id));
-                    const fresh = newTracks.filter((t: Track) => !currIds.has(t.id));
-                    let combined = [...curr, ...fresh];
-                    if (isTasteMode && !isRankedMode) {
-                      combined = reorderByMomentum(combined);
-                      combined = boostByChain(combined);
-                    }
-                    // Re-sync queue with fresh tracks
-                    globalPlayer.setQueue(combined.map(toPlayerTrack));
-                    return combined;
-                  });
-                  setSessionTracks((curr) => mergeTrackSession(curr, newTracks));
-                }
-                setTotal(data.total || 0);
-              });
-          }
-          return allUpdated;
-        });
-        setTotal((prev) => prev - 1);
+        if (nextPos >= 0) {
+          globalPlayer.playFromQueue(nextPos);
+        }
+
+        // Batch loading: if running low on pending tracks, fetch more
+        const pendingAhead = queue.slice(curPos + 1).filter((t) => (t.vote_status === "pending" || t.status === "pending") && isPlayable(t));
+        if (!isRankedMode && pendingAhead.length <= 3) {
+          fetch(buildUrl())
+            .then((r) => r.ok ? r.json() : null)
+            .then((data) => {
+              if (!data) return;
+              const newTracks = (data.tracks || []) as Track[];
+              if (newTracks.length > 0) {
+                globalPlayer.appendToQueue(newTracks.map(toPlayerTrack));
+              }
+              setTotal(data.total || 0);
+            });
+        }
+
+        setTotal((prev) => Math.max(0, prev - 1));
       }
     } catch (err) {
       console.error("Vote error:", err);
@@ -612,38 +400,32 @@ function StackPageContent() {
     }
   };
 
-  // Stabilize episode: once we derive an episode from the top track, lock it
-  // so voting doesn't randomly switch the tracklist to a different episode.
-  // In taste/genre mode, skip episode derivation entirely — cards flow freely.
+  // Episode identity — URL-driven or derived from current track
   const derivedEpisodeRef = useRef<{ id: string | null; title: string | null }>({ id: null, title: null });
-  const topEpisodeId = currentTrack?.episode_id ?? null;
-  const topEpisodeTitle = currentTrack?.episode?.title ?? null;
 
   if (episodeId) {
-    // URL-driven: always use URL value
     derivedEpisodeRef.current = { id: episodeId, title: episodeTitle };
-  } else if (!isTasteMode) {
-    // Legacy all-pending mode (no source param): derive episode from top track
+  } else if (!isTasteMode && currentTrack) {
+    const topEpisodeId = currentTrack.episodeId || currentTrack.episode_id || null;
+    const topEpisodeTitle = currentTrack.episodeTitle || currentTrack.episode_title || currentTrack.episode?.title || null;
     if (topEpisodeId && !derivedEpisodeRef.current.id) {
       derivedEpisodeRef.current = { id: topEpisodeId, title: topEpisodeTitle };
     } else if (topEpisodeId && derivedEpisodeRef.current.id) {
-      const hasLockedEpisodeTracks = tracks.some((t) => t.episode_id === derivedEpisodeRef.current.id);
+      const hasLockedEpisodeTracks = globalPlayer.queue.some((t) => (t.episodeId || t.episode_id) === derivedEpisodeRef.current.id);
       if (!hasLockedEpisodeTracks) {
         derivedEpisodeRef.current = { id: topEpisodeId, title: topEpisodeTitle };
       }
     }
   }
-  // In taste/genre mode: no episode locking. derivedEpisodeRef stays null.
 
   const currentEpisodeId = isTasteMode ? null : derivedEpisodeRef.current.id;
   const currentEpisodeTitle = isTasteMode ? null : derivedEpisodeRef.current.title;
 
   // When a derived episode is detected in legacy all-pending mode, re-fetch ALL tracks
-  // from that episode so we can navigate the full tracklist (not just pending)
   const derivedFetchedRef = useRef<string | null>(null);
   useEffect(() => {
     if (episodeId) return;
-    if (isTasteMode) return; // Taste/genre mode: no episode fetching
+    if (isTasteMode) return;
     if (!currentEpisodeId) return;
     if (derivedFetchedRef.current === currentEpisodeId) return;
     derivedFetchedRef.current = currentEpisodeId;
@@ -652,45 +434,27 @@ function StackPageContent() {
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (!data?.tracks?.length) return;
-        setTracks(data.tracks);
+        const playerTracks = (data.tracks as Track[]).map(toPlayerTrack);
         setTotal(data.total || 0);
         setHasEpisodeTracks(true);
-        const firstPlayable = data.tracks.findIndex((t: Track) => t.status === "pending" && isTrackPlayable(t));
+        const firstPlayable = playerTracks.findIndex((t) => t.status === "pending" && isPlayable(t));
         const startIdx = firstPlayable >= 0 ? firstPlayable : 0;
-        globalPlayer.setQueue(data.tracks.map(toPlayerTrack), startIdx);
-        if (data.tracks[startIdx]) {
-          globalPlayer.loadTrack(toPlayerTrack(data.tracks[startIdx]));
+        globalPlayer.setQueue(playerTracks, startIdx);
+        if (playerTracks[startIdx]) {
+          globalPlayer.loadTrack(playerTracks[startIdx]);
         }
       });
   }, [currentEpisodeId, episodeId, isTasteMode]);
 
-  // Sidebar/tracklist click → jump to that track via global player (single source of truth)
+  // Sidebar/tracklist click → jump to that track via global player
   const handleTrackSelect = useCallback((trackId: string) => {
     userHasInteracted.current = true;
-    // Find the track in the tracks array (includes voted tracks)
-    const track = tracks.find((t) => t.id === trackId);
-    if (track) {
-      // Play directly by track data — don't rely on queue index matching
+    const idx = globalPlayer.queue.findIndex((t) => t.id === trackId);
+    if (idx >= 0) {
       const origin = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/";
-      globalPlayer.play(toPlayerTrack(track), origin);
-      return;
+      globalPlayer.playFromQueue(idx, origin);
     }
-    // Track was voted on and removed from active queue — find it in session history
-    const sessionTrack = sessionTracks.find((t) => t.id === trackId);
-    if (sessionTrack) {
-      // Temporarily add it back to the queue so we can play it
-      const playerTrack = {
-        id: sessionTrack.id,
-        artist: sessionTrack.artist,
-        title: sessionTrack.title,
-        coverArtUrl: sessionTrack.cover_art_url || null,
-        spotifyUrl: sessionTrack.spotify_url || null,
-        audioUrl: sessionTrack.audio_url || sessionTrack.preview_url || null,
-        youtubeUrl: sessionTrack.youtube_url || null,
-      };
-      globalPlayer.play(playerTrack, window.location.pathname + window.location.search);
-    }
-  }, [tracks, sessionTracks, globalPlayer]);
+  }, [globalPlayer]);
 
   const handleSkipEpisode = async () => {
     userHasInteracted.current = true;
@@ -711,7 +475,6 @@ function StackPageContent() {
           router.push("/stacks");
         }
       } else {
-        // Reset derived episode state so we pick up the next episode
         derivedEpisodeRef.current = { id: null, title: null };
         derivedFetchedRef.current = null;
         setHasEpisodeTracks(false);
@@ -736,25 +499,20 @@ function StackPageContent() {
     }
   }, [fromEpisodes, handleGoToStacks]);
 
-  // Card → Player sync is no longer needed — the global player is the single
-  // source of truth. All navigation (tracklist clicks, votes, auto-advance)
-  // goes through globalPlayer.playFromQueue() which updates both the player
-  // and the card atomically.
-  const currentTrackId = currentTrack?.id ?? null;
-
   // Auto-advance on song end — move to next track in order
   const lastEndedCount = useRef(globalPlayer.trackEndedCount);
   useEffect(() => {
     if (globalPlayer.trackEndedCount === lastEndedCount.current) return;
     lastEndedCount.current = globalPlayer.trackEndedCount;
 
+    const queue = globalPlayer.queue;
+
     if (hasEpisodeTracks) {
-      // Episode mode: advance to next playable track via the global player queue.
+      // Episode mode: advance to next playable track via the global player queue
       const curPos = globalPlayer.currentIndex;
       let nextPos = -1;
-      for (let i = curPos + 1; i < tracks.length; i++) {
-        const t = tracks[i];
-        if (t.audio_url || t.preview_url || t.storage_path || t.spotify_url) {
+      for (let i = curPos + 1; i < queue.length; i++) {
+        if (isPlayable(queue[i]) || queue[i].spotifyUrl) {
           nextPos = i;
           break;
         }
@@ -762,77 +520,63 @@ function StackPageContent() {
       if (nextPos >= 0) {
         globalPlayer.playFromQueue(nextPos);
       } else {
-        // No playable tracks ahead — advance to next episode
         advanceToNextEpisode();
       }
       return;
     }
 
-    // All-pending mode: drop finished track, advance via queue
-    if (tracks.length < 2) return;
-    const currentId = globalPlayer.currentTrack?.id;
-    if (!currentId || currentId !== tracks[0]?.id) return;
-    setTracks((prev) => {
-      if (prev.length < 2) return prev;
-      const remaining = prev.slice(1);
-      // Update the queue with remaining tracks and play the first one
-      globalPlayer.setQueue(remaining.map(toPlayerTrack), 0);
-      globalPlayer.playFromQueue(0);
-      // Ranked mode: full queue is loaded upfront, no refetch needed
-      if (!isRankedMode && remaining.length <= 3) {
-        const existingIds = new Set(remaining.map((t) => t.id));
-        fetch(buildUrl())
-          .then((r) => r.ok ? r.json() : null)
-          .then((data) => {
-            if (!data) return;
-            const newTracks = (data.tracks || []).filter(
-              (t: Track) => !existingIds.has(t.id)
-            );
-            if (newTracks.length > 0) {
-              setTracks((curr) => {
-                const currIds = new Set(curr.map((t: Track) => t.id));
-                const fresh = newTracks.filter((t: Track) => !currIds.has(t.id));
-                let combined = [...curr, ...fresh];
-                if (isTasteMode && !isRankedMode) {
-                  combined = reorderByMomentum(combined);
-                  combined = boostByChain(combined);
-                }
-                // Re-sync queue with fresh tracks
-                globalPlayer.setQueue(combined.map(toPlayerTrack));
-                return combined;
-              });
-              setSessionTracks((curr) => mergeTrackSession(curr, newTracks));
-            }
-            setTotal(data.total || 0);
-          });
+    // Taste/ranked mode: advance to next pending track
+    const curPos = globalPlayer.currentIndex;
+    let nextPos = -1;
+    for (let i = curPos + 1; i < queue.length; i++) {
+      if ((queue[i].vote_status === "pending" || queue[i].status === "pending") && (isPlayable(queue[i]) || queue[i].spotifyUrl)) {
+        nextPos = i;
+        break;
       }
-      return remaining;
-    });
-  }, [globalPlayer.trackEndedCount, tracks, globalPlayer.currentTrack?.id, globalPlayer.currentIndex, buildUrl, hasEpisodeTracks, isRankedMode, globalPlayer, advanceToNextEpisode]);
+    }
+    if (nextPos >= 0) {
+      globalPlayer.playFromQueue(nextPos);
+    }
+
+    // Batch loading when running low
+    const pendingAhead = queue.slice(curPos + 1).filter((t) => (t.vote_status === "pending" || t.status === "pending") && isPlayable(t));
+    if (!isRankedMode && pendingAhead.length <= 3) {
+      fetch(buildUrl())
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (!data) return;
+          const newTracks = (data.tracks || []) as Track[];
+          if (newTracks.length > 0) {
+            globalPlayer.appendToQueue(newTracks.map(toPlayerTrack));
+          }
+          setTotal(data.total || 0);
+        });
+    }
+  }, [globalPlayer.trackEndedCount, globalPlayer.currentIndex, globalPlayer.queue, buildUrl, hasEpisodeTracks, isRankedMode, globalPlayer, advanceToNextEpisode]);
 
   // Preload next track's audio when current track reaches 75% completion
   const preloadTriggeredRef = useRef<string | null>(null);
   useEffect(() => {
     if (!globalPlayer.currentTrack || globalPlayer.duration <= 0 || globalPlayer.progress <= 0) return;
     if (globalPlayer.progress / globalPlayer.duration < 0.75) return;
-    // Only trigger once per track
     if (preloadTriggeredRef.current === globalPlayer.currentTrack.id) return;
     preloadTriggeredRef.current = globalPlayer.currentTrack.id;
 
-    // Find the next track in queue
-    let nextTrack: Track | undefined;
+    const queue = globalPlayer.queue;
+    const curIdx = globalPlayer.currentIndex;
+    let nextTrack: PlayerTrack | undefined;
     if (hasEpisodeTracks) {
-      for (let i = globalPlayer.currentIndex + 1; i < tracks.length; i++) {
-        if (tracks[i].status === "pending") { nextTrack = tracks[i]; break; }
+      for (let i = curIdx + 1; i < queue.length; i++) {
+        if (queue[i].status === "pending") { nextTrack = queue[i]; break; }
       }
-    } else if (tracks.length > 1) {
-      nextTrack = tracks[1];
+    } else if (curIdx + 1 < queue.length) {
+      nextTrack = queue[curIdx + 1];
     }
 
-    if (nextTrack && (nextTrack.audio_url || nextTrack.preview_url)) {
-      globalPlayer.preloadTrack(toPlayerTrack(nextTrack));
+    if (nextTrack && (nextTrack.audioUrl || nextTrack.preview_url)) {
+      globalPlayer.preloadTrack(nextTrack);
     }
-  }, [globalPlayer.progress, globalPlayer.duration, globalPlayer.currentTrack?.id, globalPlayer.currentIndex, tracks, hasEpisodeTracks]);
+  }, [globalPlayer.progress, globalPlayer.duration, globalPlayer.currentTrack?.id, globalPlayer.currentIndex, globalPlayer.queue, hasEpisodeTracks]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -843,7 +587,6 @@ function StackPageContent() {
         } else if (tracklistOpen) {
           setTracklistOpen(false);
         }
-        // Do nothing if no modal is open — never navigate away on Escape
         return;
       }
       if (!currentTrack) return;
@@ -863,7 +606,7 @@ function StackPageContent() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tracks, tracklistOpen, contextOpen, globalPlayer]);
+  }, [tracklistOpen, contextOpen, globalPlayer, currentTrack?.id]);
 
   // ── Advancing to next episode ──
   if (advancingEpisode) {
@@ -903,8 +646,8 @@ function StackPageContent() {
   }
 
   // ── Empty ──
-  // Check if we have tracks but none are playable
-  const hasTracksButNonePlayable = tracks.length > 0 && !currentTrack;
+  const queue = globalPlayer.queue;
+  const hasTracksButNonePlayable = queue.length > 0 && !currentTrack;
 
   if (!currentTrack) {
     return (
@@ -915,7 +658,7 @@ function StackPageContent() {
               No playable tracks yet — processing
             </h2>
             <p className="text-sm text-muted max-w-xs">
-              {tracks.length} track{tracks.length !== 1 ? "s" : ""} found but audio is still being processed. Check back soon.
+              {queue.length} track{queue.length !== 1 ? "s" : ""} found but audio is still being processed. Check back soon.
             </p>
             <button
               onClick={fetchTracks}
@@ -973,19 +716,31 @@ function StackPageContent() {
     );
   }
 
-  // Mark seed tracks for the For You / taste / seed sidebar
-  const sessionTracksWithSeedFlag = sessionTracks.map((t) => {
-    if (t.seed_id && t.seed_track &&
-        t.seed_track.artist.toLowerCase() === t.artist.toLowerCase() &&
-        t.seed_track.title.toLowerCase() === t.title.toLowerCase()) {
-      return { ...t, is_seed: true };
-    }
-    return t;
-  });
+  // Convert current PlayerTrack to Track-like for TrackCard + context modal
+  const currentTrackLike = toTrackLike(currentTrack);
+
+  // Convert queue to TrackListItem-like for EpisodeTracklist directTracks mode
+  const queueAsTracklistItems = queue.map((t) => ({
+    id: t.id,
+    artist: t.artist,
+    title: t.title,
+    status: t.vote_status || t.status || "pending",
+    spotify_url: t.spotifyUrl,
+    youtube_url: t.youtubeUrl || t.youtube_url || null,
+    cover_art_url: t.coverArtUrl,
+    preview_url: t.preview_url || t.audioUrl || null,
+    audio_url: t.audioUrl,
+    storage_path: t.storage_path || null,
+    is_seed: t.is_seed,
+    is_re_seed: t.is_re_seed,
+    is_artist_seed: t.is_artist_seed,
+    super_liked: t.super_liked,
+    vote_status: t.vote_status || t.status || "pending",
+    _match_type: t._match_type,
+    _ranked_score: t._ranked_score,
+  }));
 
   // When viewing a specific seed's stack, derive seed context from URL params
-  // so the "via" line and modal always show the correct seed — not whatever
-  // random seed the track might also be linked to.
   const parsedSeedContext = (() => {
     if (!seedName) return null;
     const parts = seedName.split(" — ");
@@ -1067,7 +822,7 @@ function StackPageContent() {
             />
           ) : (
             <EpisodeTracklist
-              directTracks={sessionTracksWithSeedFlag as any}
+              directTracks={queueAsTracklistItems as any}
               listTitle={seedName || genreFilter || "For You"}
               onTrackSelect={handleTrackSelect}
             />
@@ -1078,7 +833,7 @@ function StackPageContent() {
         <div className="flex-1 min-h-0 md:flex md:items-center md:justify-center">
           <TrackCard
             key={currentTrack.id}
-            track={currentTrack}
+            track={currentTrackLike}
             onVote={handleVote}
             onSuperLike={handleSuperLike}
             onSkipEpisode={currentEpisodeId ? handleSkipEpisode : undefined}
@@ -1094,7 +849,7 @@ function StackPageContent() {
         episodeId={currentEpisodeId || undefined}
         episodeTitle={currentEpisodeTitle}
         listTitle={currentEpisodeId ? currentEpisodeTitle : (seedName || genreFilter || "For You")}
-        directTracks={currentEpisodeId ? undefined : (sessionTracksWithSeedFlag as any)}
+        directTracks={currentEpisodeId ? undefined : (queueAsTracklistItems as any)}
         refreshKey={voteCount}
         seedId={fromSeedId}
         open={tracklistOpen}
@@ -1104,8 +859,8 @@ function StackPageContent() {
 
       {/* Keyboard hint (desktop only) */}
       <div className="hidden md:flex justify-center gap-6 py-3 text-xs text-muted md:flex-shrink-0">
-        <span>← / j skip</span>
-        <span>→ / k keep</span>
+        <span>&larr; / j skip</span>
+        <span>&rarr; / k keep</span>
         <span>space play/pause</span>
         <span>esc close</span>
       </div>
@@ -1113,7 +868,7 @@ function StackPageContent() {
       {/* Track context modal */}
       {contextOpen && currentTrack && (
         <TrackContextModal
-          track={currentTrack}
+          track={currentTrackLike}
           stackSource={stackSource}
           genreFilter={genreFilter}
           seedName={seedName}

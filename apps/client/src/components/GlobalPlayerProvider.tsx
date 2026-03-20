@@ -13,6 +13,53 @@ export interface PlayerTrack {
   episodeId?: string | null;
   episodeTitle?: string | null;
   youtubeUrl?: string | null;
+
+  // Vote / status fields — provider owns these
+  vote_status?: "approved" | "rejected" | "skipped" | "listened" | "pending" | "bad_source" | null;
+  super_liked?: boolean;
+  status?: string;
+
+  // Seed indicators
+  is_seed?: boolean;
+  is_re_seed?: boolean;
+  is_artist_seed?: boolean;
+
+  // Discovery metadata
+  source?: string;
+  episode_id?: string | null;
+  episode_title?: string | null;
+  storage_path?: string | null;
+  youtube_url?: string | null;
+  preview_url?: string | null;
+  seed_id?: string | null;
+  seed_track?: { artist: string; title: string } | null;
+  taste_score?: number | null;
+
+  // Source context (episode link, etc.)
+  source_url?: string | null;
+  source_context?: string | null;
+
+  // Episode join data (for context modal)
+  episode?: {
+    id: string;
+    title: string | null;
+    source: string;
+    aired_date: string | null;
+    artwork_url: string | null;
+    url?: string | null;
+  } | null;
+
+  // Metadata bag (genres, seed_artist, etc.)
+  metadata?: Record<string, unknown>;
+
+  // Scoring metadata from ranked queue
+  _ranked_score?: number;
+  _score_components?: Record<string, number>;
+  _match_type?: string;
+  _seed_name?: string;
+
+  // Voted timestamp
+  voted_at?: string | null;
 }
 
 type PlaybackSource = "spotify" | "audio" | null;
@@ -72,6 +119,10 @@ interface GlobalPlayerContextType {
   next: () => boolean;
   /** Go back to the previous track in the queue; returns false if at start */
   prev: () => boolean;
+  /** Update a track's vote status in the queue (no array rebuild, no index change) */
+  updateTrackVote: (trackId: string, status: string, superLiked?: boolean) => void;
+  /** Append new tracks to the end of the queue (for batch loading) */
+  appendToQueue: (tracks: PlayerTrack[]) => void;
 }
 
 const GlobalPlayerContext = createContext<GlobalPlayerContextType>({
@@ -102,6 +153,8 @@ const GlobalPlayerContext = createContext<GlobalPlayerContextType>({
   playFromQueue: () => {},
   next: () => false,
   prev: () => false,
+  updateTrackVote: () => {},
+  appendToQueue: () => {},
 });
 
 export function useGlobalPlayer() {
@@ -492,6 +545,46 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     }
   }, []);
 
+  const updateTrackVote = useCallback((trackId: string, status: string, superLiked?: boolean) => {
+    const updater = (list: PlayerTrack[]) =>
+      list.map((t) =>
+        t.id === trackId
+          ? {
+              ...t,
+              vote_status: status as PlayerTrack["vote_status"],
+              status,
+              super_liked: superLiked ?? (status === "approved" ? t.super_liked : false),
+              voted_at: new Date().toISOString(),
+            }
+          : t
+      );
+    queueRef.current = updater(queueRef.current);
+    setQueueState(updater);
+    // Also update currentTrack if it matches
+    if (currentTrackRef.current?.id === trackId) {
+      setCurrentTrack((prev) =>
+        prev
+          ? {
+              ...prev,
+              vote_status: status as PlayerTrack["vote_status"],
+              status,
+              super_liked: superLiked ?? (status === "approved" ? prev.super_liked : false),
+              voted_at: new Date().toISOString(),
+            }
+          : prev
+      );
+    }
+  }, []);
+
+  const appendToQueue = useCallback((tracks: PlayerTrack[]) => {
+    const existingIds = new Set(queueRef.current.map((t) => t.id));
+    const fresh = tracks.filter((t) => !existingIds.has(t.id));
+    if (fresh.length === 0) return;
+    const updated = [...queueRef.current, ...fresh];
+    queueRef.current = updated;
+    setQueueState(updated);
+  }, []);
+
   const loadTrack = useCallback((track: PlayerTrack, origin?: string) => {
     // Stop whatever is currently playing
     stopAudio();
@@ -798,6 +891,8 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
         playFromQueue,
         next,
         prev,
+        updateTrackVote,
+        appendToQueue,
       }}
     >
       {children}
