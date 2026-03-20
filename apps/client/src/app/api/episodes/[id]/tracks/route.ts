@@ -134,6 +134,7 @@ export async function GET(
           .then(({ data: signed }) => {
             if (signed) (track as any).audio_url = signed.signedUrl;
           })
+          .catch(() => {}) // individual sign failure shouldn't break the tracklist
       );
     }
   }

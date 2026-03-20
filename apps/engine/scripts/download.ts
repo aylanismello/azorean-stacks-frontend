@@ -82,12 +82,16 @@ async function downloadOne(track: any): Promise<boolean> {
   const dlProc = Bun.spawn(
     [YT_DLP_BIN, "-x", "--audio-format", "mp3", "--audio-quality", "0",
      "--no-playlist", "--no-warnings", "-o", outPath, track.youtube_url],
-    { stdout: "ignore", stderr: "ignore" },
+    { stdout: "ignore", stderr: "pipe" },
   );
 
   let exitCode: number;
+  let stderrText = "";
   try {
-    exitCode = await withTimeout(dlProc.exited, DL_TIMEOUT, `${track.artist} - ${track.title}`);
+    [stderrText, exitCode] = await Promise.all([
+      withTimeout(new Response(dlProc.stderr).text(), DL_TIMEOUT + 5_000, "stderr").catch(() => ""),
+      withTimeout(dlProc.exited, DL_TIMEOUT, `${track.artist} - ${track.title}`),
+    ]);
   } catch (err) {
     // Kill the orphaned yt-dlp process on timeout
     try { dlProc.kill(); } catch {}
@@ -95,6 +99,9 @@ async function downloadOne(track: any): Promise<boolean> {
     return false;
   }
   if (exitCode !== 0) {
+    if (stderrText.trim()) {
+      console.error(`    yt-dlp error for ${track.artist} - ${track.title}: ${stderrText.trim().slice(0, 200)}`);
+    }
     await markFailed(track);
     return false;
   }

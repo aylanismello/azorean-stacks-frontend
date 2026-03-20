@@ -407,18 +407,27 @@ async function enqueueBacklogSeeds() {
   }
 
   const seedIds = seeds.map((seed) => seed.id);
-  const [{ data: episodeLinks, error: episodeErr }, { data: runLinks, error: runErr }] = await Promise.all([
-    db.from("episode_seeds").select("seed_id").in("seed_id", seedIds),
-    db.from("discovery_runs").select("seed_id").in("seed_id", seedIds),
-  ]);
 
-  if (episodeErr || runErr) {
-    log("fail", `Backlog scan failed: ${episodeErr?.message || runErr?.message}`);
-    return;
+  // Paginate .in() queries to avoid Supabase 1000-row cap
+  const PAGE = 1000;
+  const allEpisodeLinks: any[] = [];
+  const allRunLinks: any[] = [];
+  for (let i = 0; i < seedIds.length; i += PAGE) {
+    const batch = seedIds.slice(i, i + PAGE);
+    const [{ data: epPage, error: epErr }, { data: runPage, error: runErr }] = await Promise.all([
+      db.from("episode_seeds").select("seed_id").in("seed_id", batch),
+      db.from("discovery_runs").select("seed_id").in("seed_id", batch),
+    ]);
+    if (epErr || runErr) {
+      log("fail", `Backlog scan failed: ${epErr?.message || runErr?.message}`);
+      return;
+    }
+    if (epPage) allEpisodeLinks.push(...epPage);
+    if (runPage) allRunLinks.push(...runPage);
   }
 
-  const seedsWithEpisodes = new Set((episodeLinks || []).map((link: any) => link.seed_id));
-  const seedsWithRuns = new Set((runLinks || []).map((link: any) => link.seed_id));
+  const seedsWithEpisodes = new Set(allEpisodeLinks.map((link: any) => link.seed_id));
+  const seedsWithRuns = new Set(allRunLinks.map((link: any) => link.seed_id));
   const freshSeeds = seeds.filter((seed) => !seedsWithEpisodes.has(seed.id) && !seedsWithRuns.has(seed.id));
 
   if (freshSeeds.length === 0) {

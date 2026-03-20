@@ -395,9 +395,12 @@ async function discover(seedArtist: string, seedTitle: string, seedId: string): 
   const seedPositionsByEpisode = new Map<string, number>();
   const stats = { crawled: 0, skipped: 0, emptyTracklists: 0, failedEpisodes: [] as string[], fullMatchEpisodeIds: [] as string[] };
 
-  for (const source of SOURCES) {
-    await discoverFromSource(source.name, seedArtist, seedTitle, seedId, coMap, episodePositions, seedPositionsByEpisode, stats);
-  }
+  // Run all sources in parallel — they write to different episode URLs so no map collisions
+  await Promise.all(
+    SOURCES.map((source) =>
+      discoverFromSource(source.name, seedArtist, seedTitle, seedId, coMap, episodePositions, seedPositionsByEpisode, stats)
+    )
+  );
 
   log("info", `Discovery scan: ${stats.crawled} crawled, ${stats.skipped} already known, ${coMap.size} unique candidates`);
   if (stats.emptyTracklists > 0) {
@@ -474,14 +477,16 @@ async function runDiscover(): Promise<number> {
   const candidateArtists = [...new Set(uniqueCandidates.map(c => c.artist.toLowerCase().trim()))];
   const existingTrackKeys = new Set<string>();
 
-  // Query in batches of 50 artists to stay under query limits
-  for (let i = 0; i < candidateArtists.length; i += 50) {
-    const batch = candidateArtists.slice(i, i + 50);
-    for (const artistName of batch) {
-      const { data: existing } = await db.from("tracks")
-        .select("artist, title")
-        .ilike("artist", artistName);
-      for (const t of existing || []) {
+  // Query artists in parallel batches of 10 to reduce N+1 overhead
+  for (let i = 0; i < candidateArtists.length; i += 10) {
+    const batch = candidateArtists.slice(i, i + 10);
+    const results = await Promise.all(
+      batch.map((artistName) =>
+        db.from("tracks").select("artist, title").ilike("artist", artistName).then((r: any) => r.data || [])
+      )
+    );
+    for (const existing of results) {
+      for (const t of existing) {
         existingTrackKeys.add(`${(t.artist || "").toLowerCase().trim()}::${(t.title || "").toLowerCase().trim()}`);
       }
     }
@@ -499,7 +504,13 @@ async function runDiscover(): Promise<number> {
   log("info", `Dedup: ${candidates.length} candidates → ${toInsert.length} new, ${dupCount} already in DB`);
 
   // Filter out garbage tracks before insertion
-  const GARBAGE_TITLES = new Set(["unknown track", "untitled", "id", "?", "unknown", ""]);
+  const GARBAGE_TITLES = new Set([
+    "unknown track", "untitled", "id", "?", "unknown", "",
+    "track id", "unreleased", "n/a", "tba", "tbc", "forthcoming",
+    "clip", "drop", "dub plate", "dubplate", "white label",
+  ]);
+  // Patterns that indicate tracklist metadata rather than real tracks
+  const GARBAGE_PATTERNS = /^(intro|outro|jingle|station id|interlude|unknown artist|various artists?)$/i;
   const preFilterCount = toInsert.length;
   const filtered = toInsert.filter((c) => {
     const lTitle = c.title.toLowerCase().trim();
@@ -509,9 +520,19 @@ async function runDiscover(): Promise<number> {
       log("skip", `Filtered garbage title: ${c.artist} – ${c.title}`);
       return false;
     }
+    // Reject tracks matching garbage patterns
+    if (GARBAGE_PATTERNS.test(lTitle) || GARBAGE_PATTERNS.test(lArtist)) {
+      log("skip", `Filtered garbage pattern: ${c.artist} – ${c.title}`);
+      return false;
+    }
     // Reject tracks where artist or title is just a single character
     if (lTitle.length <= 1 || lArtist.length <= 1) {
       log("skip", `Filtered too-short: ${c.artist} – ${c.title}`);
+      return false;
+    }
+    // Reject tracks where artist and title are identical (likely bad parse)
+    if (lArtist === lTitle) {
+      log("skip", `Filtered artist=title: ${c.artist} – ${c.title}`);
       return false;
     }
     return true;

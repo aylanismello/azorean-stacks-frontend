@@ -57,14 +57,20 @@ async function main() {
     return;
   }
 
-  // Find which episodes have 0 tracks
+  // Find which episodes have 0 tracks (paginate .in() to avoid 1000-row cap)
   const episodeIds = allEpisodes.map((e) => e.id);
-  const { data: trackLinks } = await db
-    .from("episode_tracks")
-    .select("episode_id")
-    .in("episode_id", episodeIds);
+  const allTrackLinks: any[] = [];
+  const PAGE = 1000;
+  for (let i = 0; i < episodeIds.length; i += PAGE) {
+    const batch = episodeIds.slice(i, i + PAGE);
+    const { data: page } = await db
+      .from("episode_tracks")
+      .select("episode_id")
+      .in("episode_id", batch);
+    if (page) allTrackLinks.push(...page);
+  }
 
-  const episodesWithTracks = new Set((trackLinks || []).map((l: any) => l.episode_id));
+  const episodesWithTracks = new Set(allTrackLinks.map((l: any) => l.episode_id));
 
   const emptyEpisodes = allEpisodes.filter((e) => !episodesWithTracks.has(e.id)).slice(0, limit);
 

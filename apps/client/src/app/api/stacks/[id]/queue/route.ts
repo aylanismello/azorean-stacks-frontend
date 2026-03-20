@@ -154,7 +154,7 @@ export async function GET(
   // 6. Apply diversity rules
   const diversified = diversifyTracks(enriched);
 
-  // 7. Generate signed audio URLs
+  // 7. Generate signed audio URLs (use allSettled so one failure doesn't break the queue)
   const signPromises: Promise<void>[] = [];
   for (const t of diversified) {
     if (t.storage_path) {
@@ -165,6 +165,7 @@ export async function GET(
           .then(({ data: signed }: any) => {
             if (signed) t.audio_url = signed.signedUrl;
           })
+          .catch(() => {}) // individual sign failure shouldn't break the queue
       );
     }
   }

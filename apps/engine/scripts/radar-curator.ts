@@ -115,15 +115,24 @@ async function computeCuratorAffinities(userId: string | null = null): Promise<C
     const votedTrackIds = userVotes.map((v: any) => v.track_id);
     const userVoteMap = new Map(userVotes.map((v: any) => [v.track_id, v.status]));
 
-    const { data: trackData, error: trackError } = await db
-      .from("tracks")
-      .select("id, episode_id, status, episode:episodes!episode_id(url, title, source)")
-      .in("id", votedTrackIds)
-      .not("episode_id", "is", null);
+    // Paginate .in() to avoid Supabase 1000-row cap
+    const PAGE = 1000;
+    const allTrackData: any[] = [];
+    let trackError: any = null;
+    for (let i = 0; i < votedTrackIds.length; i += PAGE) {
+      const batch = votedTrackIds.slice(i, i + PAGE);
+      const { data: page, error: pageErr } = await db
+        .from("tracks")
+        .select("id, episode_id, status, episode:episodes!episode_id(url, title, source)")
+        .in("id", batch)
+        .not("episode_id", "is", null);
+      if (pageErr) { trackError = pageErr; break; }
+      if (page) allTrackData.push(...page);
+    }
 
     error = trackError;
     // Merge user vote status onto track records
-    reviewedTracks = (trackData || []).map((t: any) => ({
+    reviewedTracks = allTrackData.map((t: any) => ({
       ...t,
       status: userVoteMap.get(t.id) ?? t.status,
     }));
@@ -330,7 +339,7 @@ async function processEpisode(
 }
 
 async function processNtsShow(affinity: CuratorAffinity): Promise<{ episodesChecked: number; tracksAdded: number }> {
-  const episodeLimit = affinity.tier === "high" ? 10 : 12; // fetch 12 for medium (new episodes only anyway)
+  const episodeLimit = affinity.tier === "high" ? 12 : 8; // high-affinity: backfill more; medium: fewer new-only
   log("info", `[${affinity.tier}] Fetching NTS episodes for show: ${affinity.showSlug}`);
 
   const episodes = await fetchShowEpisodes(affinity.showSlug, episodeLimit);

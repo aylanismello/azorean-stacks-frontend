@@ -299,14 +299,20 @@ async function main() {
 
   log("info", `Fetched ${allEpisodes.length} episode URLs from index`);
 
-  // Check which episodes are already in the DB
+  // Check which episodes are already in the DB (paginate .in() to avoid 1000-row cap)
   const urls = allEpisodes.map((e) => e.url);
-  const { data: existing } = await db.from("episodes")
-    .select("url")
-    .in("url", urls)
-    .eq("source", "lotradio");
+  const allExisting: any[] = [];
+  const PAGE = 1000;
+  for (let i = 0; i < urls.length; i += PAGE) {
+    const batch = urls.slice(i, i + PAGE);
+    const { data: page } = await db.from("episodes")
+      .select("url")
+      .in("url", batch)
+      .eq("source", "lotradio");
+    if (page) allExisting.push(...page);
+  }
 
-  const existingUrls = new Set((existing || []).map((e: any) => e.url));
+  const existingUrls = new Set(allExisting.map((e: any) => e.url));
   log("info", `${existingUrls.size} episodes already in DB — will skip`);
 
   let crawled = 0;

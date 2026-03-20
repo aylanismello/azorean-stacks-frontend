@@ -143,7 +143,8 @@ interface SpotifyDetails {
 }
 
 async function scoreSpotify(
-  track: { artist: string; title: string; spotify_url: string | null }
+  track: { artist: string; title: string; spotify_url: string | null },
+  retries = 0,
 ): Promise<{ score: number; details: SpotifyDetails }> {
   if (!track.spotify_url || track.spotify_url === "") {
     return { score: 0, details: { has_url: false } };
@@ -162,10 +163,14 @@ async function scoreSpotify(
     });
 
     if (res.status === 429) {
+      if (retries >= 3) {
+        log("fail", `Spotify rate-limited 3 times — giving up for ${track.artist} – ${track.title}`);
+        return { score: 0, details: { has_url: true, error: "rate_limited" } };
+      }
       const wait = parseInt(res.headers.get("Retry-After") || "5", 10);
-      log("wait", `Spotify rate-limited — waiting ${wait}s`);
+      log("wait", `Spotify rate-limited — waiting ${wait}s (retry ${retries + 1}/3)`);
       await sleep(wait * 1000);
-      return scoreSpotify(track);
+      return scoreSpotify(track, retries + 1);
     }
 
     if (!res.ok) {
