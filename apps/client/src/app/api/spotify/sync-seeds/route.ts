@@ -164,11 +164,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: tracksError.message }, { status: 500 });
   }
 
-  // 3. Get super-liked tracks
+  // 3. Get super-liked tracks (most recent first)
   const { data: superLikedRows } = await supabase
     .from("user_tracks")
     .select("track_id, tracks(spotify_url)")
-    .eq("super_liked", true);
+    .eq("super_liked", true)
+    .order("voted_at", { ascending: false, nullsFirst: false });
 
   // 4. Collect spotify URIs from seed-linked tracks + approved tracks
   const seedTrackIds = (seeds || []).map((s) => s.track_id).filter(Boolean) as string[];
