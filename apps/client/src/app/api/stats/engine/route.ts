@@ -57,13 +57,27 @@ export async function GET() {
       .select("id", { count: "exact", head: true })
       .or("status.eq.failed,and(spotify_url.eq.,youtube_url.is.null)");
 
+    // Rejected: user rejected the track
+    const { count: rejected } = await db
+      .from("tracks")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "rejected");
+
+    // Approved but not downloaded: user approved but no audio yet
+    const { count: approvedNoDl } = await db
+      .from("tracks")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "approved")
+      .is("storage_path", null);
+
     const totalCount = total ?? 0;
     const downloadedCount = downloaded ?? 0;
     const pendingEnrichmentCount = pendingEnrichment ?? 0;
-    const pendingDownloadCount = pendingDownload ?? 0;
+    const pendingDownloadCount = (pendingDownload ?? 0) + (approvedNoDl ?? 0);
     const skippedCount = skippedUnfindable ?? 0;
     const failedDownloadCount = failedDownload ?? 0;
     const failedEnrichmentCount = failedEnrichment ?? 0;
+    const rejectedCount = rejected ?? 0;
 
     const pct = (n: number) =>
       totalCount > 0 ? Math.round((n / totalCount) * 1000) / 10 : 0;
@@ -184,6 +198,7 @@ export async function GET() {
         skipped_unfindable: skippedCount,
         failed_download: failedDownloadCount,
         failed_enrichment: failedEnrichmentCount,
+        rejected: rejectedCount,
         percentages: {
           pending_enrichment: pct(pendingEnrichmentCount),
           pending_download: pct(pendingDownloadCount),
@@ -191,6 +206,7 @@ export async function GET() {
           skipped_unfindable: pct(skippedCount),
           failed_download: pct(failedDownloadCount),
           failed_enrichment: pct(failedEnrichmentCount),
+          rejected: pct(rejectedCount),
         },
       },
       enrichment_sources: {
