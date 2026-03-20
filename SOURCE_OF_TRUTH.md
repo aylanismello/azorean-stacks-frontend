@@ -142,7 +142,7 @@ Mutually exclusive (except re-seed). Changing vote is allowed.
 - Next.js (App Router) + Bun + Supabase
 - Vercel (client), Mac mini (engine)
 - Local dev: `cd apps/client && bun run dev` → localhost:3004
-- Test account: [redacted] / [redacted]
+- Test account: see CLAUDE.md (not committed to git)
 - Always `npx next build` before push
 - Use `Array.from()` not `[...Set]`
 
