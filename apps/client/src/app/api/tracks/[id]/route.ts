@@ -117,7 +117,72 @@ export async function PATCH(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ ...track, queued: true, message: "URL updated. Track will be re-downloaded by the engine shortly." });
+    // Insert a download request so the engine picks it up immediately via Realtime
+    const sourceUrl = isYoutube ? source_url : source_url;
+    const { data: dlRequest, error: dlReqErr } = await supabase
+      .from("download_requests")
+      .insert({
+        track_id: params.id,
+        youtube_url: sourceUrl as string,
+        status: "pending",
+      })
+      .select("id")
+      .single();
+
+    if (dlReqErr || !dlRequest) {
+      console.error(`[fix_source] download_request insert failed:`, dlReqErr);
+      // Fallback: engine loop will pick it up eventually
+      return NextResponse.json({ ...track, queued: true, message: "URL updated. Track will be re-downloaded by the engine shortly." });
+    }
+
+    // Poll for completion — check every 2s for up to 45s
+    const POLL_INTERVAL = 2000;
+    const MAX_WAIT = 45000;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < MAX_WAIT) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+
+      const { data: reqStatus } = await supabase
+        .from("download_requests")
+        .select("status, result_audio_url, error")
+        .eq("id", dlRequest.id)
+        .single();
+
+      if (!reqStatus) break;
+
+      if (reqStatus.status === "completed") {
+        // Re-fetch the track with updated data
+        const { data: updatedTrack } = await supabase
+          .from("tracks")
+          .select("*")
+          .eq("id", params.id)
+          .single();
+
+        return NextResponse.json({
+          ...(updatedTrack || track),
+          audio_url: reqStatus.result_audio_url,
+          downloaded: true,
+          message: "Track downloaded successfully.",
+        });
+      }
+
+      if (reqStatus.status === "failed") {
+        return NextResponse.json({
+          ...track,
+          queued: false,
+          error: reqStatus.error || "Download failed",
+          message: reqStatus.error || "Download failed. You can try again.",
+        }, { status: 502 });
+      }
+    }
+
+    // Timeout — engine is still working on it
+    return NextResponse.json({
+      ...track,
+      queued: true,
+      message: "Download in progress — check back shortly.",
+    });
   }
 
   if (!status || !["approved", "rejected", "pending", "skipped", "listened", "bad_source"].includes(status)) {

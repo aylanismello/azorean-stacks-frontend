@@ -1324,6 +1324,21 @@ function startWatcher() {
     )
     .on(
       "postgres_changes",
+      { event: "INSERT", schema: "public", table: "download_requests", filter: "status=eq.pending" },
+      (payload) => {
+        lastRealtimeEventAt = new Date().toISOString();
+        const requestId = payload.new?.id;
+        if (!requestId) {
+          log("warn", "Received download_request INSERT without id");
+          return;
+        }
+        log("ok", `[DL Request] New download request detected: ${requestId}`);
+        enqueueDownloadRequest(requestId);
+        processDownloadRequestQueue();
+      },
+    )
+    .on(
+      "postgres_changes",
       { event: "UPDATE", schema: "public", table: "user_tracks", filter: "super_liked=eq.true" },
       (payload) => {
         lastRealtimeEventAt = new Date().toISOString();
@@ -1351,9 +1366,22 @@ function startWatcher() {
         await enqueueBacklogSeeds();
         await enqueueBacklogTracks();
         await enqueueBacklogSuperLikes();
+        // Recover any pending download requests missed before watcher startup
+        {
+          const { data: pendingReqs } = await db.from("download_requests")
+            .select("id")
+            .eq("status", "pending")
+            .order("created_at", { ascending: true })
+            .limit(50);
+          if (pendingReqs?.length) {
+            for (const r of pendingReqs) enqueueDownloadRequest(r.id);
+            log("info", `Recovered ${pendingReqs.length} pending download request(s)`);
+          }
+        }
         processSeedQueue();
         processRepairQueue();
         processSuperLikeQueue();
+        processDownloadRequestQueue();
         processPriorityQueue();
 
         // Start polling + health-check intervals only once (survive reconnects)
@@ -1611,6 +1639,115 @@ function startWatcher() {
         }, 5_000);
       }
     });
+}
+
+// ─── DOWNLOAD REQUEST HANDLER ────────────────────────────────
+// Watches download_requests table for INSERT events with status='pending'.
+// Downloads the track via yt-dlp, uploads to storage, updates tracks table,
+// and marks the request as completed with a signed audio URL.
+
+async function processDownloadRequest(requestId: string) {
+  const { data: req, error: reqErr } = await db.from("download_requests")
+    .select("*").eq("id", requestId).single();
+
+  if (reqErr || !req) {
+    log("fail", `[DL Request] Could not read request ${requestId}: ${reqErr?.message ?? "not found"}`);
+    return;
+  }
+
+  if (req.status !== "pending") {
+    log("skip", `[DL Request] ${requestId} already ${req.status}`);
+    return;
+  }
+
+  // Mark as downloading (CAS on 'pending')
+  const { data: claimed } = await db.from("download_requests")
+    .update({ status: "downloading" })
+    .eq("id", requestId)
+    .eq("status", "pending")
+    .select("id")
+    .maybeSingle();
+
+  if (!claimed) {
+    log("skip", `[DL Request] ${requestId} claimed by another processor`);
+    return;
+  }
+
+  log("info", `[DL Request] Processing request ${requestId} for track ${req.track_id}`);
+
+  // Fetch the track to get artist/title for storage path
+  const { data: track, error: trackErr } = await db.from("tracks")
+    .select("*").eq("id", req.track_id).single();
+
+  if (trackErr || !track) {
+    await db.from("download_requests").update({
+      status: "failed",
+      error: `Track not found: ${trackErr?.message ?? "not found"}`,
+      completed_at: new Date().toISOString(),
+    }).eq("id", requestId);
+    log("fail", `[DL Request] Track ${req.track_id} not found`);
+    return;
+  }
+
+  // Use the youtube_url from the request (it may differ from track.youtube_url)
+  const trackForDownload = { ...track, youtube_url: req.youtube_url };
+
+  try {
+    const ok = await downloadTrack(trackForDownload);
+
+    if (ok) {
+      // Fetch updated track to get the signed URL
+      const { data: updated } = await db.from("tracks")
+        .select("storage_path, download_url").eq("id", req.track_id).single();
+
+      await db.from("download_requests").update({
+        status: "completed",
+        result_audio_url: updated?.download_url || null,
+        completed_at: new Date().toISOString(),
+      }).eq("id", requestId);
+
+      log("ok", `[DL Request] Completed: ${track.artist} – ${track.title}`);
+    } else {
+      await db.from("download_requests").update({
+        status: "failed",
+        error: "Download failed (yt-dlp returned non-zero or upload failed)",
+        completed_at: new Date().toISOString(),
+      }).eq("id", requestId);
+
+      log("fail", `[DL Request] Failed: ${track.artist} – ${track.title}`);
+    }
+  } catch (err) {
+    await db.from("download_requests").update({
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+      completed_at: new Date().toISOString(),
+    }).eq("id", requestId);
+
+    log("fail", `[DL Request] Error: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
+const downloadRequestQueue: string[] = [];
+
+function enqueueDownloadRequest(requestId: string) {
+  if (!requestId) return;
+  if (downloadRequestQueue.includes(requestId)) return;
+  downloadRequestQueue.push(requestId);
+}
+
+let downloadRequestProcessing = false;
+async function processDownloadRequestQueue() {
+  if (downloadRequestProcessing) return;
+  downloadRequestProcessing = true;
+  while (downloadRequestQueue.length > 0) {
+    const requestId = downloadRequestQueue.shift()!;
+    try {
+      await processDownloadRequest(requestId);
+    } catch (err) {
+      log("fail", `[DL Request] Queue error for ${requestId}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  downloadRequestProcessing = false;
 }
 
 // ─── GRACEFUL SHUTDOWN ──────────────────────────────────────
