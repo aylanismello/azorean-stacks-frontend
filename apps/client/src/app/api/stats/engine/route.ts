@@ -14,70 +14,52 @@ export async function GET() {
       .from("tracks")
       .select("id", { count: "exact", head: true });
 
-    // Downloaded: has storage_path AND not rejected
-    const { count: downloaded } = await db
-      .from("tracks")
-      .select("id", { count: "exact", head: true })
-      .not("storage_path", "is", null)
-      .neq("status", "rejected");
+    // ── Mutually exclusive categories (by status first, then data) ──
+    // Status is the primary key: rejected, skipped, failed are terminal.
+    // For pending/approved: sub-categorize by pipeline stage.
 
-    // Pending enrichment: status='pending', no spotify_url AND no youtube_url
-    const { count: pendingEnrichment } = await db
-      .from("tracks")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "pending")
-      .is("spotify_url", null)
-      .is("youtube_url", null);
-
-    // Pending download: has youtube_url, no storage_path, status='pending', dl_attempts < 3
-    const { count: pendingDownload } = await db
-      .from("tracks")
-      .select("id", { count: "exact", head: true })
-      .not("youtube_url", "is", null)
-      .is("storage_path", null)
-      .eq("status", "pending")
-      .lt("dl_attempts", 3);
-
-    // Skipped (unfindable): status='skipped'
-    const { count: skippedUnfindable } = await db
-      .from("tracks")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "skipped");
-
-    // Failed download: has youtube_url, dl_attempts >= 3, no storage_path
-    const { count: failedDownload } = await db
-      .from("tracks")
-      .select("id", { count: "exact", head: true })
-      .not("youtube_url", "is", null)
-      .gte("dl_attempts", 3)
-      .is("storage_path", null);
-
-    // Failed enrichment: status='failed' OR (spotify_url='' AND youtube_url is null)
-    const { count: failedEnrichment } = await db
-      .from("tracks")
-      .select("id", { count: "exact", head: true })
-      .or("status.eq.failed,and(spotify_url.eq.,youtube_url.is.null)");
-
-    // Rejected: user rejected the track
+    // 1. Rejected by user
     const { count: rejected } = await db
-      .from("tracks")
-      .select("id", { count: "exact", head: true })
+      .from("tracks").select("id", { count: "exact", head: true })
       .eq("status", "rejected");
 
-    // Approved but not downloaded: user approved but no audio yet
-    const { count: approvedNoDl } = await db
-      .from("tracks")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "approved")
-      .is("storage_path", null);
+    // 2. Skipped (unfindable online)
+    const { count: skippedUnfindable } = await db
+      .from("tracks").select("id", { count: "exact", head: true })
+      .eq("status", "skipped");
+
+    // 3. Failed (enrichment or system error)
+    const { count: failedTracks } = await db
+      .from("tracks").select("id", { count: "exact", head: true })
+      .eq("status", "failed");
+
+    // 4. Downloaded (has audio file, not rejected/skipped/failed)
+    const { count: downloaded } = await db
+      .from("tracks").select("id", { count: "exact", head: true })
+      .not("storage_path", "is", null)
+      .in("status", ["pending", "approved"]);
+
+    // 5. Pending download (has youtube_url, no storage_path, status pending/approved)
+    const { count: pendingDownload } = await db
+      .from("tracks").select("id", { count: "exact", head: true })
+      .not("youtube_url", "is", null).neq("youtube_url", "")
+      .is("storage_path", null)
+      .in("status", ["pending", "approved"]);
+
+    // 6. Pending enrichment (no youtube_url yet, status pending/approved)
+    const { count: pendingEnrichment } = await db
+      .from("tracks").select("id", { count: "exact", head: true })
+      .or("youtube_url.is.null,youtube_url.eq.")
+      .is("storage_path", null)
+      .in("status", ["pending", "approved"]);
 
     const totalCount = total ?? 0;
     const downloadedCount = downloaded ?? 0;
     const pendingEnrichmentCount = pendingEnrichment ?? 0;
-    const pendingDownloadCount = (pendingDownload ?? 0) + (approvedNoDl ?? 0);
+    const pendingDownloadCount = pendingDownload ?? 0;
     const skippedCount = skippedUnfindable ?? 0;
-    const failedDownloadCount = failedDownload ?? 0;
-    const failedEnrichmentCount = failedEnrichment ?? 0;
+    const failedDownloadCount = 0; // merged into failed
+    const failedEnrichmentCount = failedTracks ?? 0;
     const rejectedCount = rejected ?? 0;
 
     const pct = (n: number) =>
