@@ -46,6 +46,10 @@ let lastRealtimeEventAt: string | null = null;
 let currentChannel: ReturnType<typeof db.channel> | null = null;
 let intervalsStarted = false;
 
+// ─── CONNECTION FAILURE TRACKING ────────────────────────────
+let reconnectFailures = 0;
+let firstFailureAt = 0;
+
 function updateStatusFile() {
   try {
     if (!existsSync(STATUS_FILE)) return;
@@ -1326,6 +1330,8 @@ function startWatcher() {
     )
     .subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
+        reconnectFailures = 0;
+        firstFailureAt = 0;
         watcherConnectedAt = new Date().toISOString();
         log("ok", "Realtime subscription active — watching for new seeds");
         logEngineEvent("watcher_connected", "info", {
@@ -1573,10 +1579,22 @@ function startWatcher() {
           }, 10 * 60 * 1000);
         }
       } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
-        log("warn", `Realtime channel ${status} — will attempt reconnect`);
+        reconnectFailures++;
+        if (reconnectFailures === 1) firstFailureAt = Date.now();
+        log("warn", `Realtime channel ${status} — will attempt reconnect (failure ${reconnectFailures})`);
         logEngineEvent("watcher_disconnected", "info", {
-          message: `Channel ${status}`,
+          message: `Channel ${status} (failure ${reconnectFailures})`,
         });
+
+        // Fatal exit if too many consecutive failures within 5 minutes
+        if (reconnectFailures >= 5 && Date.now() - firstFailureAt < 5 * 60_000) {
+          log("fail", `[FATAL] ${reconnectFailures} reconnect failures in ${Math.round((Date.now() - firstFailureAt) / 1000)}s — exiting for launchd restart`);
+          await logEngineEvent("watcher_fatal_exit", "failed", {
+            message: `Exiting after ${reconnectFailures} consecutive Realtime failures`,
+          });
+          process.exit(1);
+        }
+
         // Manual reconnect fallback after 5s
         setTimeout(() => {
           log("info", "Attempting manual reconnect...");
