@@ -82,11 +82,21 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // 3. Get per-episode track stats in one query
-  const { data: tracks } = await supabase
-    .from("tracks")
-    .select("episode_id, status, cover_art_url, artist, title, source_url, source_context, storage_path")
-    .in("episode_id", Array.from(allEpisodeIds));
+  // 3. Get per-episode track stats — paginate past Supabase 1000-row cap
+  const allTracks: any[] = [];
+  let tracksPage = 0;
+  while (true) {
+    const { data: batch } = await supabase
+      .from("tracks")
+      .select("episode_id, status, cover_art_url, artist, title, source_url, source_context, storage_path")
+      .in("episode_id", Array.from(allEpisodeIds))
+      .range(tracksPage * 1000, (tracksPage + 1) * 1000 - 1);
+    if (!batch || batch.length === 0) break;
+    allTracks.push(...batch);
+    if (batch.length < 1000) break;
+    tracksPage++;
+  }
+  const tracks = allTracks;
 
   // Aggregate stats per episode
   const episodeStats: Record<string, {

@@ -238,7 +238,10 @@ function StackTile({
       {seed.total > 0 && (
         <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm rounded-full px-2 py-0.5 flex items-center gap-1">
           <span className="text-[10px] font-mono font-semibold text-green-400">
-            {seed.total_playable}/{seed.total}
+            {seed.total_playable}
+          </span>
+          <span className="text-[10px] font-mono text-white/40">
+            /{seed.total}
           </span>
         </div>
       )}
@@ -261,25 +264,27 @@ function StackTile({
         <p className="text-[10px] text-white/50 truncate mt-0.5 drop-shadow">
           {decodeEntities(seed.title)}
         </p>
-        {/* Stats: eps · playable/total · processing · unavailable */}
+        {/* Stats: eps · total tracks · downloaded · unavailable · pending */}
         <p className="text-[9px] font-mono mt-1 flex flex-wrap gap-x-1.5 items-center">
           <span className="text-white/30">{seed.episodes.length} eps</span>
           {seed.total > 0 && (
             <>
               <span className="text-white/20">·</span>
-              <span className="text-green-400/70">{seed.total_playable}/{seed.total} playable</span>
-            </>
-          )}
-          {seed.total_processing > 0 && (
-            <>
+              <span className="text-white/50">{seed.total} tracks</span>
               <span className="text-white/20">·</span>
-              <span className="text-yellow-400/60">{seed.total_processing} ⏳</span>
+              <span className="text-green-400/70">{seed.total_playable} ✅</span>
             </>
           )}
           {seed.total_unavailable > 0 && (
             <>
               <span className="text-white/20">·</span>
-              <span className="text-white/25">{seed.total_unavailable} ✗</span>
+              <span className="text-red-400/50">{seed.total_unavailable} 🔻</span>
+            </>
+          )}
+          {seed.total_processing > 0 && (
+            <>
+              <span className="text-white/20">·</span>
+              <span className="text-yellow-400/60">{seed.total_processing} pending</span>
             </>
           )}
         </p>
