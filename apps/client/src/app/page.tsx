@@ -256,27 +256,54 @@ function StackPageContent() {
       setError(null);
       setAdvancingEpisode(false);
 
-      // Sync queue to global player
+      // Sync queue to global player — but never interrupt active playback.
+      // When re-mounting after navigation (e.g. Seeds tab → back), the global
+      // player still holds the playing track. Preserve it instead of resetting.
       const playerTracks = newTracks.map(toPlayerTrack);
+      const playingTrack = playerCurrentTrackRef.current;
+
       if (episodeId && newTracks.length > 0) {
         const firstPlayablePending = newTracks.findIndex((t) => t.status === "pending" && isTrackPlayable(t));
         const startIndex = firstPlayablePending >= 0 ? firstPlayablePending : 0;
         setHasEpisodeTracks(true);
-        globalPlayer.setQueue(playerTracks, startIndex);
-        // Load first track without playing (before user interaction)
-        if (skipReconcileRef.current || !playerCurrentTrackRef.current) {
+
+        if (playingTrack) {
+          const playingIdx = newTracks.findIndex(t => t.id === playingTrack.id);
+          if (playingIdx >= 0) {
+            // Playing track is in this episode — preserve playback
+            globalPlayer.setQueue(playerTracks, playingIdx);
+          } else {
+            // Playing track is from a different context — load this episode
+            globalPlayer.setQueue(playerTracks, startIndex);
+            globalPlayer.loadTrack(playerTracks[startIndex]);
+          }
+        } else {
+          // No track playing — initial load
+          globalPlayer.setQueue(playerTracks, startIndex);
           globalPlayer.loadTrack(playerTracks[startIndex]);
-          skipReconcileRef.current = false;
         }
+        skipReconcileRef.current = false;
       } else if (newTracks.length > 0) {
-        globalPlayer.setQueue(playerTracks, 0);
-        if (skipReconcileRef.current || !playerCurrentTrackRef.current) {
+        if (playingTrack) {
+          // Player already has a track — don't interrupt playback.
+          const playingIdx = newTracks.findIndex(t => t.id === playingTrack.id);
+          if (playingIdx >= 0) {
+            // Playing track found in new results — sync queue to its position
+            globalPlayer.setQueue(playerTracks, playingIdx);
+          } else {
+            // Playing track not in new results (e.g. status changed) — set queue
+            // without resetting index; reconciliation will handle syncing.
+            globalPlayer.setQueue(playerTracks);
+          }
+        } else {
+          // No track playing — initial load
+          globalPlayer.setQueue(playerTracks, 0);
           const firstPlayable = newTracks.findIndex(isTrackPlayable);
           if (firstPlayable >= 0) {
             globalPlayer.loadTrack(playerTracks[firstPlayable]);
           }
-          skipReconcileRef.current = false;
         }
+        skipReconcileRef.current = false;
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load tracks");
