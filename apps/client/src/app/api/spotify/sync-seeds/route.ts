@@ -4,6 +4,7 @@ import { getServiceClient } from "@/lib/supabase";
 export const dynamic = "force-dynamic";
 
 const PLAYLIST_NAME = "Azorean Stacks";
+const SUPERLIKE_PLAYLIST_NAME = "Azorean Super Likes";
 
 async function getSpotifyToken(request: NextRequest): Promise<string | null> {
   // Try reading the access token from cookies directly
@@ -51,6 +52,88 @@ async function spotifyFetch(url: string, token: string, options: RequestInit = {
   return res;
 }
 
+async function findOrCreatePlaylist(
+  token: string,
+  userId: string,
+  name: string,
+  description: string
+): Promise<{ id: string; url: string | null }> {
+  // Search existing playlists (paginate up to 200)
+  let offset = 0;
+  const limit = 50;
+  while (true) {
+    const playlistsRes = await spotifyFetch(
+      `https://api.spotify.com/v1/me/playlists?limit=${limit}&offset=${offset}`,
+      token
+    );
+    if (!playlistsRes.ok) break;
+    const playlists = await playlistsRes.json();
+    const items = playlists.items || [];
+
+    for (const p of items) {
+      if (p.name === name) {
+        return { id: p.id, url: p.external_urls?.spotify || null };
+      }
+    }
+
+    if (items.length < limit) break;
+    offset += limit;
+    if (offset > 200) break;
+  }
+
+  // Create if not found
+  const createRes = await spotifyFetch(
+    `https://api.spotify.com/v1/users/${encodeURIComponent(userId)}/playlists`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ name, description, public: false }),
+    }
+  );
+  if (!createRes.ok) {
+    const err = await createRes.text();
+    throw new Error(`Failed to create playlist "${name}": ${err}`);
+  }
+  const created = await createRes.json();
+  return { id: created.id, url: created.external_urls?.spotify || null };
+}
+
+async function syncTracksToPlaylist(
+  token: string,
+  playlistId: string,
+  uris: string[]
+): Promise<void> {
+  if (uris.length === 0) return;
+
+  const chunks = chunkArray(uris, 100);
+
+  // First chunk uses PUT to replace
+  const firstRes = await spotifyFetch(
+    `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
+    token,
+    {
+      method: "PUT",
+      body: JSON.stringify({ uris: chunks[0] }),
+    }
+  );
+  if (!firstRes.ok) {
+    const err = await firstRes.text();
+    throw new Error(`Failed to sync tracks: ${err}`);
+  }
+
+  // Remaining chunks use POST to add
+  for (let i = 1; i < chunks.length; i++) {
+    await spotifyFetch(
+      `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
+      token,
+      {
+        method: "POST",
+        body: JSON.stringify({ uris: chunks[i] }),
+      }
+    );
+  }
+}
+
 export async function POST(request: NextRequest) {
   const token = await getSpotifyToken(request);
   if (!token) {
@@ -81,7 +164,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: tracksError.message }, { status: 500 });
   }
 
-  // 3. Collect spotify URIs from seed-linked tracks + approved tracks
+  // 3. Get super-liked tracks
+  const { data: superLikedRows } = await supabase
+    .from("user_tracks")
+    .select("track_id, tracks(spotify_url)")
+    .eq("super_liked", true);
+
+  // 4. Collect spotify URIs from seed-linked tracks + approved tracks
   const seedTrackIds = (seeds || []).map((s) => s.track_id).filter(Boolean) as string[];
   let seedTrackUrls: Record<string, string> = {};
 
@@ -119,14 +208,27 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (spotifyUris.length === 0) {
+  // Collect super-liked URIs
+  const superLikeUris: string[] = [];
+  const seenSuperUrls = new Set<string>();
+  for (const row of superLikedRows || []) {
+    const track = row.tracks as unknown as { spotify_url: string | null } | null;
+    const spotifyUrl = track?.spotify_url;
+    if (spotifyUrl && !seenSuperUrls.has(spotifyUrl)) {
+      seenSuperUrls.add(spotifyUrl);
+      const uri = urlToUri(spotifyUrl);
+      if (uri) superLikeUris.push(uri);
+    }
+  }
+
+  if (spotifyUris.length === 0 && superLikeUris.length === 0) {
     return NextResponse.json({
       error: "No tracks with Spotify URLs found",
       synced: 0,
     }, { status: 200 });
   }
 
-  // 4. Get Spotify user ID
+  // 5. Get Spotify user ID
   const meRes = await spotifyFetch("https://api.spotify.com/v1/me", token);
   if (!meRes.ok) {
     return NextResponse.json({ error: "Failed to get Spotify user" }, { status: 502 });
@@ -134,92 +236,52 @@ export async function POST(request: NextRequest) {
   const me = await meRes.json();
   const userId = me.id;
 
-  // 5. Find or create playlist
-  let playlistId: string | null = null;
-  let playlistUrl: string | null = null;
+  let mainPlaylistUrl: string | null = null;
+  let mainPlaylistId: string | null = null;
+  let superPlaylistUrl: string | null = null;
+  let superPlaylistId: string | null = null;
 
-  // Check existing playlists (paginate up to 200)
-  let offset = 0;
-  const limit = 50;
-  while (!playlistId) {
-    const playlistsRes = await spotifyFetch(
-      `https://api.spotify.com/v1/me/playlists?limit=${limit}&offset=${offset}`,
-      token
-    );
-    if (!playlistsRes.ok) break;
-    const playlists = await playlistsRes.json();
-    const items = playlists.items || [];
-
-    for (const p of items) {
-      if (p.name === PLAYLIST_NAME) {
-        playlistId = p.id;
-        playlistUrl = p.external_urls?.spotify || null;
-        break;
-      }
+  // 6. Sync main playlist
+  if (spotifyUris.length > 0) {
+    try {
+      const mainPlaylist = await findOrCreatePlaylist(
+        token, userId, PLAYLIST_NAME, "Approved tracks from Azorean Stacks"
+      );
+      mainPlaylistId = mainPlaylist.id;
+      mainPlaylistUrl = mainPlaylist.url;
+      await syncTracksToPlaylist(token, mainPlaylist.id, spotifyUris);
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Failed to sync main playlist" },
+        { status: 502 }
+      );
     }
-
-    if (items.length < limit) break;
-    offset += limit;
-    if (offset > 200) break;
   }
 
-  // Create if not found
-  if (!playlistId) {
-    const createRes = await spotifyFetch(
-      `https://api.spotify.com/v1/users/${encodeURIComponent(userId)}/playlists`,
-      token,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          name: PLAYLIST_NAME,
-          description: "Approved tracks from Azorean Stacks",
-          public: false,
-        }),
-      }
-    );
-    if (!createRes.ok) {
-      const err = await createRes.text();
-      return NextResponse.json({ error: `Failed to create playlist: ${err}` }, { status: 502 });
+  // 7. Sync super-likes playlist
+  if (superLikeUris.length > 0) {
+    try {
+      const superPlaylist = await findOrCreatePlaylist(
+        token, userId, SUPERLIKE_PLAYLIST_NAME, "Super-liked tracks from Azorean Stacks"
+      );
+      superPlaylistId = superPlaylist.id;
+      superPlaylistUrl = superPlaylist.url;
+      await syncTracksToPlaylist(token, superPlaylist.id, superLikeUris);
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Failed to sync super-likes playlist" },
+        { status: 502 }
+      );
     }
-    const created = await createRes.json();
-    playlistId = created.id;
-    playlistUrl = created.external_urls?.spotify || null;
-  }
-
-  // 6. Replace all tracks in the playlist (full sync)
-  // Spotify allows max 100 URIs per request
-  const chunks = chunkArray(spotifyUris, 100);
-
-  // First chunk uses PUT to replace
-  const firstRes = await spotifyFetch(
-    `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
-    token,
-    {
-      method: "PUT",
-      body: JSON.stringify({ uris: chunks[0] }),
-    }
-  );
-  if (!firstRes.ok) {
-    const err = await firstRes.text();
-    return NextResponse.json({ error: `Failed to sync tracks: ${err}` }, { status: 502 });
-  }
-
-  // Remaining chunks use POST to add
-  for (let i = 1; i < chunks.length; i++) {
-    await spotifyFetch(
-      `https://api.spotify.com/v1/playlists/${playlistId}/tracks`,
-      token,
-      {
-        method: "POST",
-        body: JSON.stringify({ uris: chunks[i] }),
-      }
-    );
   }
 
   return NextResponse.json({
     synced: spotifyUris.length,
-    playlist_url: playlistUrl,
-    playlist_id: playlistId,
+    playlist_url: mainPlaylistUrl,
+    playlist_id: mainPlaylistId,
+    super_likes_synced: superLikeUris.length,
+    super_likes_playlist_url: superPlaylistUrl,
+    super_likes_playlist_id: superPlaylistId,
   });
 }
 
