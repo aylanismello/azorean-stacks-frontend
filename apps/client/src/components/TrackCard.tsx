@@ -75,6 +75,10 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   const [badSource, setBadSource] = useState(false);
   const [seeded, setSeeded] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  const [fixModalOpen, setFixModalOpen] = useState(false);
+  const [fixUrl, setFixUrl] = useState("");
+  const [fixSubmitting, setFixSubmitting] = useState(false);
+  const [fixError, setFixError] = useState("");
   const [swipeX, setSwipeX] = useState(0);
   const touchRef = useRef<{ startX: number; startY: number; swiping: boolean } | null>(null);
   const globalPlayer = useGlobalPlayer();
@@ -119,6 +123,44 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
       setSeeding(false);
     }
   }, [track.id, track.artist, track.title, seeding, seeded]);
+
+  const isValidFixUrl = useCallback((url: string) => {
+    const prefixes = [
+      "https://youtube.com",
+      "https://youtu.be",
+      "https://www.youtube.com",
+      "https://soundcloud.com",
+      "https://m.soundcloud.com",
+    ];
+    return prefixes.some((p) => url.startsWith(p));
+  }, []);
+
+  const handleFixSource = useCallback(async () => {
+    if (!isValidFixUrl(fixUrl)) {
+      setFixError("Must be a YouTube or SoundCloud URL");
+      return;
+    }
+    setFixSubmitting(true);
+    setFixError("");
+    try {
+      const res = await fetch(`/api/tracks/${track.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "fix_source", source_url: fixUrl }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setFixError(data.error || "Failed to fix source");
+        return;
+      }
+      setFixModalOpen(false);
+      setFixUrl("");
+    } catch {
+      setFixError("Network error");
+    } finally {
+      setFixSubmitting(false);
+    }
+  }, [track.id, fixUrl, isValidFixUrl]);
 
   // Report engagement metrics to backend before a vote action.
   // Fire-and-forget — don't block the vote on this.
@@ -531,9 +573,9 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
         </svg>
       </button>
 
-      {/* Bad source (⚠️) */}
+      {/* Bad source (⚠️) — desktop: open fix modal; mobile: direct vote */}
       <button
-        onClick={() => handleVote("bad_source", true)}
+        onClick={() => setFixModalOpen(true)}
         disabled={voting}
         className={`flex items-center justify-center w-10 h-10 md:w-11 md:h-11 rounded-full border-2 transition-all active:scale-90 disabled:opacity-50 ${
           badSource
@@ -1218,10 +1260,65 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
     </div>
   );
 
+  const fixSourceModal = fixModalOpen && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => { setFixModalOpen(false); setFixUrl(""); setFixError(""); }}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div
+        className="relative bg-surface-1 border border-foreground/10 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Close button */}
+        <button
+          onClick={() => { setFixModalOpen(false); setFixUrl(""); setFixError(""); }}
+          className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full hover:bg-foreground/10 text-foreground/40 hover:text-foreground/70 transition-colors"
+          aria-label="Close"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+
+        <h3 className="text-lg font-bold text-foreground mb-1">Wrong audio?</h3>
+        <p className="text-sm text-muted mb-4">Paste the correct YouTube or SoundCloud URL</p>
+
+        <input
+          type="url"
+          value={fixUrl}
+          onChange={(e) => { setFixUrl(e.target.value); setFixError(""); }}
+          placeholder="https://youtube.com/watch?v=..."
+          className="w-full px-3 py-2.5 bg-surface-2 border border-foreground/10 rounded-lg text-sm text-foreground placeholder:text-foreground/30 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/30 mb-2"
+          autoFocus
+          onKeyDown={(e) => { if (e.key === "Enter" && fixUrl) handleFixSource(); }}
+        />
+
+        {fixError && (
+          <p className="text-xs text-red-400 mb-2">{fixError}</p>
+        )}
+
+        <div className="flex gap-2 mt-3">
+          <button
+            onClick={handleFixSource}
+            disabled={!fixUrl || fixSubmitting}
+            className="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-500 disabled:bg-green-600/40 text-white text-sm font-medium rounded-lg transition-colors disabled:cursor-not-allowed"
+          >
+            {fixSubmitting ? "Fixing..." : "Fix & Re-download"}
+          </button>
+          <button
+            onClick={() => { setFixModalOpen(false); setFixUrl(""); setFixError(""); handleVote("bad_source", true); }}
+            className="px-4 py-2.5 bg-surface-2 hover:bg-surface-3 text-muted hover:text-foreground text-sm rounded-lg transition-colors"
+          >
+            Skip
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <>
       {mobileLayout}
       {desktopLayout}
+      {fixSourceModal}
     </>
   );
 }

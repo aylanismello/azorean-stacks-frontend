@@ -24,7 +24,7 @@ export async function PATCH(
 ) {
   const supabase = getServiceClient();
   const body = await req.json();
-  const { status, super_liked } = body;
+  const { status, super_liked, source_url } = body;
 
   // Auth required for all votes
   const authClient = getAuthClient(req);
@@ -55,6 +55,62 @@ export async function PATCH(
     }
 
     return NextResponse.json({ ...track, status: "approved", super_liked: true, voted_at: now });
+  }
+
+  // fix_source: user provided a corrected URL — update the track and reset to pending
+  if (status === "fix_source" && source_url) {
+    const validPrefixes = [
+      "https://youtube.com",
+      "https://youtu.be",
+      "https://www.youtube.com",
+      "https://soundcloud.com",
+      "https://m.soundcloud.com",
+    ];
+    if (!validPrefixes.some((p) => (source_url as string).startsWith(p))) {
+      return NextResponse.json({ error: "Invalid URL. Must be YouTube or SoundCloud." }, { status: 400 });
+    }
+
+    const isYoutube = (source_url as string).startsWith("https://youtube.com") ||
+      (source_url as string).startsWith("https://youtu.be") ||
+      (source_url as string).startsWith("https://www.youtube.com");
+
+    // Build update: clear old audio, set new URL, reset to pending
+    const { data: existing } = await supabase
+      .from("tracks")
+      .select("metadata, storage_path")
+      .eq("id", params.id)
+      .single();
+
+    // Delete old audio file from storage if it exists
+    if (existing?.storage_path) {
+      await supabase.storage.from("tracks").remove([existing.storage_path]);
+    }
+
+    const updatedMeta = { ...(existing?.metadata as Record<string, unknown> ?? {}) };
+    if (!isYoutube) {
+      updatedMeta.soundcloud_url = source_url;
+    }
+    // Clear stale audio metadata so the engine re-downloads fresh
+    delete updatedMeta.audio_source;
+
+    const { data: track, error } = await supabase
+      .from("tracks")
+      .update({
+        youtube_url: isYoutube ? source_url : null,
+        storage_path: null,
+        audio_url: null,
+        status: "pending",
+        metadata: updatedMeta,
+      })
+      .eq("id", params.id)
+      .select("*")
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json(track);
   }
 
   if (!status || !["approved", "rejected", "pending", "skipped", "listened", "bad_source"].includes(status)) {
