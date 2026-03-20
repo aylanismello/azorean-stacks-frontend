@@ -92,20 +92,30 @@ export async function PATCH(
   }
 
   // All other votes: upsert to user_tracks only
+  // DB constraint allows: pending, approved, rejected, skipped, listened
+  // bad_source is stored as 'rejected' with notes='bad_source' to distinguish it
+  const dbStatus = status === "bad_source" ? "rejected" : status;
+  const notes = status === "bad_source" ? "bad_source" : undefined;
   const votedAt = ["approved", "rejected", "skipped", "bad_source"].includes(status) ? now : undefined;
 
-  await supabase
+  const { error: upsertError } = await supabase
     .from("user_tracks")
     .upsert(
       {
         user_id: user.id,
         track_id: params.id,
-        status,
+        status: dbStatus,
         super_liked: false,
         ...(votedAt ? { voted_at: votedAt } : {}),
+        ...(notes ? { notes } : {}),
       },
       { onConflict: "user_id,track_id", ignoreDuplicates: false }
     );
+
+  if (upsertError) {
+    console.error(`Vote upsert failed for track ${params.id}:`, upsertError);
+    return NextResponse.json({ error: `Vote failed: ${upsertError.message}` }, { status: 500 });
+  }
 
   // Fetch track data to return
   const { data: track, error } = await supabase

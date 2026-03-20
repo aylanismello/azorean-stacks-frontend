@@ -89,7 +89,7 @@ export async function GET(
       .from("user_tracks")
       .select("track_id")
       .eq("user_id", user.id)
-      .in("status", ["approved", "rejected", "skipped", "bad_source", "listened"])
+      .in("status", ["approved", "rejected", "skipped", "listened"])
       .range(excludePage * 1000, (excludePage + 1) * 1000 - 1);
     if (!batch || batch.length === 0) break;
     allExcluded.push(...batch.map((r: any) => r.track_id));

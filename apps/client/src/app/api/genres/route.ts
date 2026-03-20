@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
         .from("user_tracks")
         .select("track_id")
         .eq("user_id", user.id)
-        .in("status", ["approved", "rejected", "skipped", "bad_source", "listened"])
+        .in("status", ["approved", "rejected", "skipped", "listened"])
         .range(page * 1000, (page + 1) * 1000 - 1);
       if (!batch || batch.length === 0) break;
       for (const r of batch) votedTrackIds.add((r as any).track_id);
