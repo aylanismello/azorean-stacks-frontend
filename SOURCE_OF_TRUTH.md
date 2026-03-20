@@ -191,6 +191,22 @@ Client plays them in order, as-is.
 
 One scoring system = every track has components. No blank modal sections.
 
+### 7. Full user isolation — votes only in user_tracks (future)
+
+**Decision:** Stop writing vote statuses to `tracks.status`. All user opinions live in `user_tracks` only. `tracks.status` reflects pipeline state only (pending/downloaded/failed).
+
+**Why:** Currently approve/reject/skip write to BOTH `tracks.status` (global) AND `user_tracks.status` (per-user), but bad_source/listened only write to `user_tracks`. This inconsistency causes bugs (bad_source tracks reappearing in FYP) and makes multi-user impossible — one user's reject changes the track for everyone.
+
+**The model:**
+- `tracks` = shared immutable pool. Pipeline state only.
+- `seeds` = shared garden. Any user plants, everyone benefits from discovery.
+- `user_tracks` = ALL user opinions (votes, scores, super_liked). Per-user.
+- `taste_signals` = per-user taste profile (already has user_id).
+
+**What changes:** Vote endpoint stops writing to `tracks.status`. All reads go through `user_tracks` for current user. Scoring engine uses `user_tracks` exclusively. Stats page reads from `user_tracks`.
+
+**Status:** Not yet implemented. PR #122 is a bandaid (filters bad_source/listened on read). Full refactor is a separate task.
+
 ## Future Considerations
 
 1. Audio features (BPM, energy, key) for DJ-relevant ranking
