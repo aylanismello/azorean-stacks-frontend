@@ -153,23 +153,18 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
         setFixError(data.error || "Failed to fix source");
         return;
       }
-      // Success — close modal and update the player with the new audio_url
-      setFixModalOpen(false);
-      setFixUrl("");
-      if (data.audio_url && globalPlayer.currentTrack?.id === track.id) {
-        // Update the current track in the player without advancing
-        const origin = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/";
-        globalPlayer.play({
-          id: track.id,
-          artist: track.artist,
-          title: track.title,
-          coverArtUrl: safeCoverUrl(track.cover_art_url) || safeCoverUrl(track.episode?.artwork_url ?? null),
-          spotifyUrl: track.spotify_url,
-          audioUrl: data.audio_url,
-          episodeId: track.episode_id,
-          episodeTitle: track.episode?.title,
-          youtubeUrl: data.youtube_url || track.youtube_url,
-        }, origin);
+      // Success — show queued message and close modal after a delay
+      if (data.queued) {
+        setFixError("");
+        setFixUrl("");
+        setFixModalOpen(false);
+        // Brief toast-like feedback — the bad_source state clears on next vote cycle
+        setTimeout(() => {
+          handleVote("bad_source", true);
+        }, 100);
+      } else {
+        setFixModalOpen(false);
+        setFixUrl("");
       }
     } catch {
       setFixError("Network error");

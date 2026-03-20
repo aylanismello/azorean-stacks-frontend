@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { getServiceClient } from "@/lib/supabase";
-import { spawn } from "child_process";
-import { readFileSync, unlinkSync, existsSync } from "fs";
 
 export const dynamic = "force-dynamic";
 
@@ -59,7 +57,7 @@ export async function PATCH(
     return NextResponse.json({ ...track, status: "approved", super_liked: true, voted_at: now });
   }
 
-  // fix_source: user provided a corrected URL — download inline via yt-dlp, upload to storage
+  // fix_source: user provided a corrected URL — update DB and let the engine re-download
   if (status === "fix_source" && source_url) {
     const validPrefixes = [
       "https://youtube.com",
@@ -79,7 +77,7 @@ export async function PATCH(
     // Fetch existing track data
     const { data: existing } = await supabase
       .from("tracks")
-      .select("*, metadata, storage_path, artist, title")
+      .select("*, metadata, storage_path")
       .eq("id", params.id)
       .single();
 
@@ -92,60 +90,7 @@ export async function PATCH(
       await supabase.storage.from("tracks").remove([existing.storage_path]);
     }
 
-    // Download via yt-dlp inline
-    const tmpPath = `/tmp/fix-source-${params.id}.mp3`;
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const proc = spawn("/opt/homebrew/bin/yt-dlp", [
-          "-x", "--audio-format", "mp3", "--audio-quality", "0",
-          "--no-playlist", "--no-warnings",
-          "-o", tmpPath,
-          source_url as string,
-        ]);
-        let stderr = "";
-        proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-        const timer = setTimeout(() => { proc.kill("SIGTERM"); reject(new Error("Download timed out after 60s")); }, 60_000);
-        proc.on("close", (code) => {
-          clearTimeout(timer);
-          if (code !== 0) reject(new Error(`yt-dlp exited with code ${code}: ${stderr.slice(-500)}`));
-          else resolve();
-        });
-        proc.on("error", (err) => { clearTimeout(timer); reject(err); });
-      });
-    } catch (dlErr: any) {
-      console.error(`[fix_source] Download failed for track ${params.id}:`, dlErr.message);
-      // Clean up tmp file if it exists
-      if (existsSync(tmpPath)) unlinkSync(tmpPath);
-      return NextResponse.json({ error: `Download failed: ${dlErr.message}` }, { status: 500 });
-    }
-
-    // Upload to Supabase storage using same path pattern as engine
-    const sanitize = (s: string): string =>
-      s.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^\w\s\-.,()&+]/g, "").replace(/\s+/g, " ").trim().slice(0, 100) || "unknown";
-    const storagePath = `${sanitize(existing.artist)}/${sanitize(existing.title)}.mp3`;
-
-    let fileBuffer: Buffer;
-    try {
-      fileBuffer = readFileSync(tmpPath);
-    } catch {
-      return NextResponse.json({ error: "Downloaded file not found" }, { status: 500 });
-    } finally {
-      if (existsSync(tmpPath)) unlinkSync(tmpPath);
-    }
-
-    const { error: uploadErr } = await supabase.storage.from("tracks").upload(storagePath, fileBuffer, {
-      contentType: "audio/mpeg", upsert: true,
-    });
-    if (uploadErr) {
-      console.error(`[fix_source] Upload failed for track ${params.id}:`, uploadErr);
-      return NextResponse.json({ error: `Upload failed: ${uploadErr.message}` }, { status: 500 });
-    }
-
-    // Generate signed URL
-    const { data: signed } = await supabase.storage.from("tracks").createSignedUrl(storagePath, 3600);
-
-    // Update track record
+    // Update track: set new URL, clear storage_path so engine re-downloads
     const updatedMeta = { ...(existing.metadata as Record<string, unknown> ?? {}) };
     if (!isYoutube) {
       updatedMeta.soundcloud_url = source_url;
@@ -154,7 +99,7 @@ export async function PATCH(
 
     const updatePayload = {
       youtube_url: isYoutube ? source_url : null,
-      storage_path: storagePath,
+      storage_path: null,
       status: "pending" as const,
       metadata: updatedMeta,
     };
@@ -172,8 +117,7 @@ export async function PATCH(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Return track with audio_url so frontend can play immediately
-    return NextResponse.json({ ...track, audio_url: signed?.signedUrl || null });
+    return NextResponse.json({ ...track, queued: true, message: "URL updated. Track will be re-downloaded by the engine shortly." });
   }
 
   if (!status || !["approved", "rejected", "pending", "skipped", "listened", "bad_source"].includes(status)) {
