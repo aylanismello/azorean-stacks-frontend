@@ -33,6 +33,71 @@ async function attachMatchTypes(tracks: any[]) {
   }
 }
 
+function getAuthClient(req: NextRequest) {
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return req.cookies.getAll(); },
+        setAll() {},
+      },
+    }
+  );
+}
+
+// Normalize track joins and generate signed URLs
+async function normalizeAndSign(tracks: any[]) {
+  const signPromises: Promise<void>[] = [];
+  for (const track of tracks) {
+    if (Array.isArray(track.seed_track)) {
+      track.seed_track = track.seed_track[0] || null;
+    }
+    if (track.seed_track && !track.seed_track.artist) {
+      track.seed_track = null;
+    }
+    if (Array.isArray(track.episode)) {
+      track.episode = track.episode[0] || null;
+    }
+    const seedArr = Array.isArray(track.seeds) ? track.seeds : [];
+    track.seed_id = seedArr.length > 0 ? seedArr[0].id : null;
+    delete track.seeds;
+    const meta = (track.metadata || {}) as Record<string, unknown>;
+    track._score_components = (meta._score_components as Record<string, number>) || {};
+    track._ranked_score = track.taste_score ?? 0;
+    if (track.storage_path) {
+      signPromises.push(
+        supabase.storage
+          .from("tracks")
+          .createSignedUrl(track.storage_path, 3600)
+          .then(({ data: signed }) => {
+            if (signed) track.audio_url = signed.signedUrl;
+          })
+      );
+    }
+  }
+  await Promise.all(signPromises);
+}
+
+// Paginated fetch of track_ids from user_tracks by status
+async function getUserTrackIds(db: ReturnType<typeof getServiceClient>, userId: string, statuses: string[]): Promise<string[]> {
+  const ids: string[] = [];
+  let page = 0;
+  while (true) {
+    const { data: batch } = await db
+      .from("user_tracks")
+      .select("track_id")
+      .eq("user_id", userId)
+      .in("status", statuses)
+      .range(page * 1000, (page + 1) * 1000 - 1);
+    if (!batch || batch.length === 0) break;
+    ids.push(...batch.map((r: any) => r.track_id));
+    if (batch.length < 1000) break;
+    page++;
+  }
+  return ids;
+}
+
 // GET /api/tracks?status=pending&limit=20
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
@@ -50,38 +115,14 @@ export async function GET(req: NextRequest) {
 
   const isPending = status === "pending";
 
-  // Get current user to filter out their bad_source/listened tracks
-  const auth = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return req.cookies.getAll(); },
-        setAll() {},
-      },
-    }
-  );
+  // Get current user
+  const auth = getAuthClient(req);
   const { data: { user } } = await auth.auth.getUser();
 
-  // Fetch track IDs the user has marked as bad_source or listened
-  let excludedTrackIds = new Set<string>();
-  if (user && isPending) {
-    const db = getServiceClient();
-    const { data: excludedRows } = await db
-      .from("user_tracks")
-      .select("track_id")
-      .eq("user_id", user.id)
-      .in("status", ["bad_source", "listened"]);
-    excludedTrackIds = new Set((excludedRows || []).map((r: any) => r.track_id));
-  }
-
-  const orderCol = orderBy === "taste_score"
-    ? "taste_score"
-    : isPending ? "created_at" : status === "approved" || status === "rejected" ? "voted_at" : "created_at";
+  const db = getServiceClient();
 
   // When episode_id is set, fetch ALL tracks in episode order (not filtered by status)
   if (episodeId) {
-    const db = getServiceClient();
     const { data: etLinks } = await db
       .from("episode_tracks")
       .select("track_id, position")
@@ -93,7 +134,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ tracks: [], total: 0 });
     }
 
-    // Build an order map from the junction query (already sorted by position)
     const orderMap = new Map(trackIdsForEpisode.map((id: string, i: number) => [id, i]));
 
     let query = supabase
@@ -114,48 +154,23 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Sort by junction table order (preserves position + insertion order for null positions)
     const tracks = (data || []).sort((a: any, b: any) =>
       (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999)
     );
 
-    const signPromises: Promise<void>[] = [];
-    for (const track of tracks) {
-      if (Array.isArray(track.seed_track)) {
-        track.seed_track = track.seed_track[0] || null;
-      }
-      if (track.seed_track && !track.seed_track.artist) {
-        track.seed_track = null;
-      }
-      if (Array.isArray(track.episode)) {
-        track.episode = track.episode[0] || null;
-      }
-      const seedArr = Array.isArray(track.seeds) ? track.seeds : [];
-      track.seed_id = seedArr.length > 0 ? seedArr[0].id : null;
-      delete track.seeds;
-      if (track.storage_path) {
-        signPromises.push(
-          supabase.storage
-            .from("tracks")
-            .createSignedUrl(track.storage_path, 3600)
-            .then(({ data: signed }) => {
-              if (signed) track.audio_url = signed.signedUrl;
-            })
-        );
-      }
-    }
-    await Promise.all(signPromises);
+    await normalizeAndSign(tracks);
     await attachMatchTypes(tracks);
     return NextResponse.json({ tracks, total: count });
   }
 
-  // Super-liked tab: resolve track IDs from user_tracks, then fetch tracks
+  // Super-liked tab: resolve track IDs from user_tracks for current user
   if (status === "super_liked") {
-    const db = getServiceClient();
-    const { data: utRows, error: utError } = await db
+    let utQuery = db
       .from("user_tracks")
       .select("track_id")
-      .eq("super_liked", true)
+      .eq("super_liked", true);
+    if (user) utQuery = utQuery.eq("user_id", user.id);
+    const { data: utRows, error: utError } = await utQuery
       .order("voted_at", { ascending: false });
 
     if (utError) return NextResponse.json({ error: utError.message }, { status: 500 });
@@ -172,44 +187,75 @@ export async function GET(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     const tracks = (data || []).sort((a: any, b: any) => superLikedIds.indexOf(a.id) - superLikedIds.indexOf(b.id));
-    const signPromises: Promise<void>[] = [];
-    for (const track of tracks) {
-      if (Array.isArray(track.seed_track)) track.seed_track = track.seed_track[0] || null;
-      if (track.seed_track && !track.seed_track.artist) track.seed_track = null;
-      if (Array.isArray(track.episode)) track.episode = track.episode[0] || null;
-      const seedArr = Array.isArray(track.seeds) ? track.seeds : [];
-      track.seed_id = seedArr.length > 0 ? seedArr[0].id : null;
-      delete track.seeds;
-      if (track.storage_path) {
-        signPromises.push(
-          supabase.storage.from("tracks").createSignedUrl(track.storage_path, 3600)
-            .then(({ data: signed }) => { if (signed) track.audio_url = signed.signedUrl; })
-        );
-      }
-    }
-    await Promise.all(signPromises);
+    await normalizeAndSign(tracks);
     return NextResponse.json({ tracks, total: superLikedIds.length });
   }
+
+  // ── User-isolated status views ──────────────────────────────────────────
+
+  // For approved/rejected: fetch from user_tracks, then load those tracks
+  if (user && (status === "approved" || status === "rejected")) {
+    const utIds = await getUserTrackIds(db, user.id, [status]);
+    if (utIds.length === 0) return NextResponse.json({ tracks: [], total: 0 });
+
+    const paged = utIds.slice(offset, offset + limit);
+    let query = supabase
+      .from("tracks")
+      .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url, url), seeds!track_id(id)")
+      .in("id", paged);
+
+    if (search) {
+      const escaped = search.replace(/[%_\\]/g, (c) => `\\${c}`);
+      query = query.or(`artist.ilike.%${escaped}%,title.ilike.%${escaped}%`);
+    }
+    if (source) query = query.eq("source", source);
+    if (genre) query = query.contains("metadata", { genres: [genre] });
+
+    const { data, error } = await query;
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const tracks = data || [];
+    // Overlay user status
+    for (const t of tracks) {
+      (t as any).status = status;
+    }
+    await normalizeAndSign(tracks);
+    await attachMatchTypes(tracks);
+    return NextResponse.json({ tracks, total: utIds.length });
+  }
+
+  // For pending: fetch tracks the user HASN'T voted on
+  // Get all track_ids this user has voted on (any non-pending status)
+  let excludedTrackIds = new Set<string>();
+  if (user && isPending) {
+    const votedIds = await getUserTrackIds(db, user.id, ["approved", "rejected", "skipped", "bad_source", "listened"]);
+    excludedTrackIds = new Set(votedIds);
+  }
+
+  const orderCol = orderBy === "taste_score"
+    ? "taste_score"
+    : isPending ? "created_at" : "created_at";
 
   let query = supabase
     .from("tracks")
     .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url, url), seeds!track_id(id)", { count: "exact" });
 
-  query = query.eq("status", status);
-
-  // Only return playable tracks for pending queries (has storage_path, spotify_url, or preview_url)
+  // For pending: don't filter by tracks.status (it's always 'pending' in the pipeline sense)
+  // Instead we rely on excluding voted tracks above
   if (isPending) {
+    // Only show tracks that are pipeline-pending (not failed/skipped)
+    query = query.eq("status", "pending");
     query = query.or("storage_path.not.is.null,spotify_url.neq.,preview_url.not.is.null");
+  } else {
+    // Fallback for any other status value
+    query = query.eq("status", status);
   }
 
-  // taste_score: highest first; created_at for pending: oldest first; voted_at: newest first
   const ascending = orderBy === "taste_score" ? false : isPending;
-  // In taste mode fetch double the limit so diversification has enough material to work with
   const fetchLimit = orderBy === "taste_score" ? limit * 2 : limit;
   query = query.order(orderCol, { ascending, nullsFirst: false })
     .range(offset, offset + fetchLimit - 1);
   if (search) {
-    // Escape special ilike pattern characters
     const escaped = search.replace(/[%_\\]/g, (c) => `\\${c}`);
     query = query.or(`artist.ilike.%${escaped}%,title.ilike.%${escaped}%`);
   }
@@ -235,44 +281,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Normalize joins & generate signed URLs in parallel
-  // Filter out user's bad_source/listened tracks
+  // Filter out user's voted tracks
   const tracks = (data || []).filter((t: any) => !excludedTrackIds.has(t.id));
-  const signPromises: Promise<void>[] = [];
 
-  for (const track of tracks) {
-    // Self-referential join can return [] instead of null — normalize
-    if (Array.isArray(track.seed_track)) {
-      track.seed_track = track.seed_track[0] || null;
-    }
-    if (track.seed_track && !track.seed_track.artist) {
-      track.seed_track = null;
-    }
-    // Normalize episode join
-    if (Array.isArray(track.episode)) {
-      track.episode = track.episode[0] || null;
-    }
-    // Normalize seeds join → boolean is_seeded + seed_id
-    const seedArr = Array.isArray(track.seeds) ? track.seeds : [];
-    track.seed_id = seedArr.length > 0 ? seedArr[0].id : null;
-    delete track.seeds;
-    // Expose score components and ranked score from metadata
-    const meta = (track.metadata || {}) as Record<string, unknown>;
-    track._score_components = (meta._score_components as Record<string, number>) || {};
-    track._ranked_score = track.taste_score ?? 0;
-    if (track.storage_path) {
-      signPromises.push(
-        supabase.storage
-          .from("tracks")
-          .createSignedUrl(track.storage_path, 3600)
-          .then(({ data: signed }) => {
-            if (signed) track.audio_url = signed.signedUrl;
-          })
-      );
-    }
-  }
-
-  await Promise.all(signPromises);
+  await normalizeAndSign(tracks);
 
   // Apply diversification in taste mode then trim to requested limit
   const finalTracks = orderBy === "taste_score"
