@@ -146,9 +146,54 @@ Mutually exclusive (except re-seed). Changing vote is allowed.
 - Always `npx next build` before push
 - Use `Array.from()` not `[...Set]`
 
-## Open Questions
+## Architecture Decisions (decided 2026-03-19)
 
-1. Unify the two scoring systems? (Probably yes)
-2. Keep real-time session adaptation? (Probably simplify — small dataset, caused bugs)
-3. How often recalculate taste_score? (After each voting session? Daily?)
-4. Add audio features (BPM, energy) for DJ-relevant ranking?
+### 1. Player owns ALL state — page is a dumb view
+
+GlobalPlayerProvider is the single source of truth for queue, current track, and playback. page.tsx has ZERO track state.
+
+- Page fetches tracks from API → hands to provider via `setQueue()` → done
+- TrackCard reads from `globalPlayer.currentTrack`
+- Tracklist reads from `globalPlayer.queue`
+- Voting calls API → provider updates the track in its own queue
+- Navigation → player state survives (provider never unmounts)
+- `next()` = index + 1. Tracklist and player are the same array. Always.
+
+This is how Spotify works. Player is a global singleton. Pages are views.
+
+### 2. Unified scoring — one algorithm, pre-computed
+
+Merge both scoring systems into one. Pre-computed by the engine, stored per track.
+
+Signals: artist affinity, genre affinity, seed proximity, curator trust, episode density, co-occurrence, negative signals (rejected artists/episodes).
+
+Runs in the engine after voting sessions end (10min inactivity) and when new tracks are ingested. Not per-request. Not mid-session.
+
+### 3. No real-time session adaptation
+
+Zero client-side queue manipulation mid-session. No filtering, reordering, or momentum in the client. Skip what you don't like. Engine learns from skips for next session.
+
+### 4. Queue diversity at sort-time only
+
+Diversity rules applied server-side when building the batch:
+- Max 2 consecutive same episode
+- Max 2 consecutive same artist
+- Genre spacing
+- 20% exploration wildcards (medium-scored tracks for discovery)
+
+Client plays them in order, as-is.
+
+### 5. Batch size: 20, tracklist fully visible
+
+20 tracks per batch. Full tracklist visible for auditing. No hiding.
+
+### 6. Taste signals on all tracks
+
+One scoring system = every track has components. No blank modal sections.
+
+## Future Considerations
+
+1. Audio features (BPM, energy, key) for DJ-relevant ranking
+2. Lot Radio and other sources beyond NTS
+3. Multi-user collaborative filtering
+4. Playlist-aware scoring (DJ set flow)
