@@ -148,19 +148,35 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "fix_source", source_url: fixUrl }),
       });
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
         setFixError(data.error || "Failed to fix source");
         return;
       }
+      // Success — close modal and update the player with the new audio_url
       setFixModalOpen(false);
       setFixUrl("");
+      if (data.audio_url && globalPlayer.currentTrack?.id === track.id) {
+        // Update the current track in the player without advancing
+        const origin = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/";
+        globalPlayer.play({
+          id: track.id,
+          artist: track.artist,
+          title: track.title,
+          coverArtUrl: safeCoverUrl(track.cover_art_url) || safeCoverUrl(track.episode?.artwork_url ?? null),
+          spotifyUrl: track.spotify_url,
+          audioUrl: data.audio_url,
+          episodeId: track.episode_id,
+          episodeTitle: track.episode?.title,
+          youtubeUrl: data.youtube_url || track.youtube_url,
+        }, origin);
+      }
     } catch {
       setFixError("Network error");
     } finally {
       setFixSubmitting(false);
     }
-  }, [track.id, fixUrl, isValidFixUrl]);
+  }, [track, fixUrl, isValidFixUrl, globalPlayer]);
 
   // Report engagement metrics to backend before a vote action.
   // Fire-and-forget — don't block the vote on this.
@@ -1261,7 +1277,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
   );
 
   const fixSourceModal = fixModalOpen && (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => { setFixModalOpen(false); setFixUrl(""); setFixError(""); }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => { if (!fixSubmitting) { setFixModalOpen(false); setFixUrl(""); setFixError(""); } }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
         className="relative bg-surface-1 border border-foreground/10 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl"
@@ -1269,8 +1285,9 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
       >
         {/* Close button */}
         <button
-          onClick={() => { setFixModalOpen(false); setFixUrl(""); setFixError(""); }}
-          className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full hover:bg-foreground/10 text-foreground/40 hover:text-foreground/70 transition-colors"
+          onClick={() => { if (!fixSubmitting) { setFixModalOpen(false); setFixUrl(""); setFixError(""); } }}
+          disabled={fixSubmitting}
+          className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full hover:bg-foreground/10 text-foreground/40 hover:text-foreground/70 transition-colors disabled:opacity-30"
           aria-label="Close"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1286,8 +1303,9 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
           value={fixUrl}
           onChange={(e) => { setFixUrl(e.target.value); setFixError(""); }}
           placeholder="https://youtube.com/watch?v=..."
-          className="w-full px-3 py-2.5 bg-surface-2 border border-foreground/10 rounded-lg text-sm text-foreground placeholder:text-foreground/30 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/30 mb-2"
+          className="w-full px-3 py-2.5 bg-surface-2 border border-foreground/10 rounded-lg text-sm text-foreground placeholder:text-foreground/30 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/30 mb-2 disabled:opacity-50"
           autoFocus
+          disabled={fixSubmitting}
           onKeyDown={(e) => { if (e.key === "Enter" && fixUrl) handleFixSource(); }}
         />
 
@@ -1299,13 +1317,19 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
           <button
             onClick={handleFixSource}
             disabled={!fixUrl || fixSubmitting}
-            className="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-500 disabled:bg-green-600/40 text-white text-sm font-medium rounded-lg transition-colors disabled:cursor-not-allowed"
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 hover:bg-green-500 disabled:bg-green-600/40 text-white text-sm font-medium rounded-lg transition-colors disabled:cursor-not-allowed"
           >
-            {fixSubmitting ? "Fixing..." : "Fix & Re-download"}
+            {fixSubmitting && (
+              <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+              </svg>
+            )}
+            {fixSubmitting ? "Downloading..." : "Fix & Re-download"}
           </button>
           <button
             onClick={() => { setFixModalOpen(false); setFixUrl(""); setFixError(""); handleVote("bad_source", true); }}
-            className="px-4 py-2.5 bg-surface-2 hover:bg-surface-3 text-muted hover:text-foreground text-sm rounded-lg transition-colors"
+            disabled={fixSubmitting}
+            className="px-4 py-2.5 bg-surface-2 hover:bg-surface-3 text-muted hover:text-foreground text-sm rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Skip
           </button>
