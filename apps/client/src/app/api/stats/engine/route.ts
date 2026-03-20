@@ -14,11 +14,12 @@ export async function GET() {
       .from("tracks")
       .select("id", { count: "exact", head: true });
 
-    // Downloaded: has storage_path
+    // Downloaded: has storage_path AND not rejected
     const { count: downloaded } = await db
       .from("tracks")
       .select("id", { count: "exact", head: true })
-      .not("storage_path", "is", null);
+      .not("storage_path", "is", null)
+      .neq("status", "rejected");
 
     // Pending enrichment: status='pending', no spotify_url AND no youtube_url
     const { count: pendingEnrichment } = await db
