@@ -155,20 +155,11 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
       }
 
       if (data.downloaded && data.audio_url) {
-        // Instant download succeeded — update player with new audio and close modal
+        // Instant download succeeded — swap the audio URL in the player so the
+        // Audio element reloads with the fresh source (does NOT auto-play).
         setFixUrl("");
         setFixModalOpen(false);
-        globalPlayer.play({
-          id: track.id,
-          artist: track.artist,
-          title: track.title,
-          coverArtUrl: safeCoverUrl(track.cover_art_url) || safeCoverUrl(track.episode?.artwork_url ?? null),
-          spotifyUrl: track.spotify_url,
-          audioUrl: data.audio_url,
-          episodeId: track.episode_id,
-          episodeTitle: track.episode?.title,
-          youtubeUrl: data.youtube_url || track.youtube_url,
-        }, typeof window !== "undefined" ? window.location.pathname + window.location.search : "/");
+        globalPlayer.replaceAudioUrl(track.id, data.audio_url);
       } else if (data.queued) {
         // Engine is downloading in background
         setFixError("");

@@ -123,6 +123,8 @@ interface GlobalPlayerContextType {
   updateTrackVote: (trackId: string, status: string, superLiked?: boolean) => void;
   /** Append new tracks to the end of the queue (for batch loading) */
   appendToQueue: (tracks: PlayerTrack[]) => void;
+  /** Replace a track's audio URL in queue + reload Audio element if currently active (does NOT auto-play) */
+  replaceAudioUrl: (trackId: string, newUrl: string) => void;
 }
 
 const GlobalPlayerContext = createContext<GlobalPlayerContextType>({
@@ -155,6 +157,7 @@ const GlobalPlayerContext = createContext<GlobalPlayerContextType>({
   prev: () => false,
   updateTrackVote: () => {},
   appendToQueue: () => {},
+  replaceAudioUrl: () => {},
 });
 
 export function useGlobalPlayer() {
@@ -585,6 +588,48 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
     setQueueState(updated);
   }, []);
 
+  const replaceAudioUrl = useCallback((trackId: string, newUrl: string) => {
+    // Update the track in the queue
+    const updater = (list: PlayerTrack[]) =>
+      list.map((t) => (t.id === trackId ? { ...t, audioUrl: newUrl } : t));
+    queueRef.current = updater(queueRef.current);
+    setQueueState(updater);
+
+    // Update currentTrack if it matches
+    if (currentTrackRef.current?.id === trackId) {
+      setCurrentTrack((prev) => (prev ? { ...prev, audioUrl: newUrl } : prev));
+      urlObtainedAtRef.current.set(trackId, Date.now());
+
+      // Reload the Audio element with the new URL (don't auto-play)
+      if (sourceRef.current === "audio") {
+        const audio = audioRef.current;
+        if (audio) {
+          audio.pause();
+          audio.src = newUrl;
+          audio.load();
+          setPlaying(false);
+          setProgress(0);
+          setDuration(0);
+          setBuffering(false);
+          setNoSource(false);
+        }
+      } else {
+        // Track was on spotify or had no source — switch to audio source
+        setSource("audio");
+        setNoSource(false);
+        const audio = audioRef.current;
+        if (audio) {
+          audio.src = newUrl;
+          audio.load();
+          setPlaying(false);
+          setProgress(0);
+          setDuration(0);
+          setBuffering(false);
+        }
+      }
+    }
+  }, []);
+
   const loadTrack = useCallback((track: PlayerTrack, origin?: string) => {
     // Stop whatever is currently playing
     stopAudio();
@@ -893,6 +938,7 @@ export function GlobalPlayerProvider({ children }: { children: React.ReactNode }
         prev,
         updateTrackVote,
         appendToQueue,
+        replaceAudioUrl,
       }}
     >
       {children}
