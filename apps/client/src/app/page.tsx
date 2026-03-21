@@ -247,14 +247,16 @@ function StackPageContent() {
           globalPlayer.loadTrack(playerTracks[startIndex]);
         }
       } else if (playerTracks.length > 0) {
-        if (playingTrack) {
-          const playingIdx = playerTracks.findIndex(t => t.id === playingTrack.id);
-          if (playingIdx >= 0) {
-            globalPlayer.setQueue(playerTracks, playingIdx);
-          } else {
-            globalPlayer.setQueue(playerTracks);
+        const existingQueue = globalPlayer.queue;
+        if (existingQueue.length > 0) {
+          // Queue already populated — append only genuinely new tracks to preserve vote state
+          const existingIds = new Set(existingQueue.map(t => t.id));
+          const newTracks = playerTracks.filter(t => !existingIds.has(t.id));
+          if (newTracks.length > 0) {
+            globalPlayer.appendToQueue(newTracks);
           }
         } else {
+          // Initial load — set the full queue
           globalPlayer.setQueue(playerTracks, 0);
           const firstPlayable = playerTracks.findIndex(isPlayable);
           if (firstPlayable >= 0) {
