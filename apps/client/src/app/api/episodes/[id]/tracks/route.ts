@@ -14,7 +14,7 @@ export async function GET(
   // Include seed_track_id so we can identify the seed track in the tracklist
   const { data: junctionRows, error } = await db
     .from("episode_tracks")
-    .select("position, tracks(id, artist, title, status, spotify_url, youtube_url, storage_path, cover_art_url, preview_url, dl_attempts, dl_failed_at, seed_track_id)")
+    .select("position, tracks(id, artist, title, status, spotify_url, youtube_url, storage_path, cover_art_url, preview_url, dl_attempts, dl_failed_at, seed_track_id, is_seed, is_re_seed, is_artist_seed)")
     .eq("episode_id", params.id)
     .order("position", { ascending: true, nullsFirst: false });
 
@@ -25,60 +25,6 @@ export async function GET(
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  // Optional seed_id scoping — when viewing from a specific seed context,
-  // only mark tracks relative to that seed (not all seeds linked to this episode)
-  const contextSeedId = req.nextUrl.searchParams.get("seed_id");
-
-  // Look up which seeds are connected to this episode
-  let episodeSeedQuery = db
-    .from("episode_seeds")
-    .select("seed_id, match_type, seeds(id, artist, title, source, track_id)")
-    .eq("episode_id", params.id);
-
-  if (contextSeedId) {
-    episodeSeedQuery = episodeSeedQuery.eq("seed_id", contextSeedId);
-  }
-
-  const { data: episodeSeedRows } = await episodeSeedQuery;
-
-  // Build sets for seed matching: prefer direct track_id, fall back to artist::title
-  const seedTrackIds = new Set<string>();
-  const reSeedTrackIds = new Set<string>();
-  const seedPairs = new Set<string>();
-  const reSeedPairs = new Set<string>();
-  const seedArtists = new Set<string>();
-  for (const row of (episodeSeedRows || []) as any[]) {
-    const seed = Array.isArray(row.seeds) ? row.seeds[0] : row.seeds;
-    const isArtistMatch = row.match_type === "artist" || row.match_type === "artist_match";
-    // Use seeds.source (not episode_seeds.match_type) to classify seed vs re-seed.
-    // A seed with source="manual" is always a 🌱 seed, never a 🌿 re-seed.
-    const isReSeed = seed?.source === "re-seed";
-    if (isArtistMatch) {
-      if (seed?.artist) {
-        // Split comma-separated seed artists so each individual name matches
-        for (const a of seed.artist.split(/,\s*/)) {
-          seedArtists.add(a.toLowerCase().trim());
-        }
-      }
-    } else {
-      if (seed?.track_id) {
-        if (isReSeed) {
-          reSeedTrackIds.add(seed.track_id);
-        } else {
-          seedTrackIds.add(seed.track_id);
-        }
-      }
-      if (seed?.artist && seed?.title) {
-        const key = `${seed.artist.toLowerCase().trim()}::${seed.title.toLowerCase().trim()}`;
-        if (isReSeed) {
-          reSeedPairs.add(key);
-        } else {
-          seedPairs.add(key);
-        }
-      }
-    }
   }
 
   const trackIds = data.map((t: any) => t.id);
@@ -116,13 +62,7 @@ export async function GET(
   const signPromises: Promise<void>[] = [];
 
   for (const track of tracks) {
-    // Add seed/re-seed/super_liked flags (prefer direct track_id match, fall back to artist::title)
-    const trackKey = `${track.artist.toLowerCase().trim()}::${track.title.toLowerCase().trim()}`;
-    (track as any).is_seed = seedTrackIds.has(track.id) || seedPairs.has(trackKey);
-    (track as any).is_re_seed = reSeedTrackIds.has(track.id) || reSeedPairs.has(trackKey);
-    // Multi-artist matching: split comma-separated artists and check each individually
-    const trackArtists = track.artist.split(/,\s*/).map((a: string) => a.toLowerCase().trim());
-    (track as any).is_artist_seed = !(track as any).is_seed && trackArtists.some((a: string) => seedArtists.has(a));
+    // Seed flags come directly from tracks table columns
     (track as any).super_liked = superLikedIds.has(track.id);
     (track as any).vote_status = voteStatusMap.get(track.id) || null;
 

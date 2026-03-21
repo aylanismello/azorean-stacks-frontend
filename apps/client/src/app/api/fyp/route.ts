@@ -88,6 +88,10 @@ export async function GET(req: NextRequest) {
     track.seed_track = seedTrackMap.get(track.seed_track_id) || null;
     track.episode = episodeMap.get(track.episode_id) || null;
     track._match_type = matchTypeMap.get(track.episode_id) || null;
+    // Seed classification columns from RPC (stored on tracks table)
+    track.is_seed = track.is_seed ?? false;
+    track.is_re_seed = track.is_re_seed ?? false;
+    track.is_artist_seed = track.is_artist_seed ?? false;
     const meta = (track.metadata || {}) as Record<string, unknown>;
     track._score_components = (meta._score_components as Record<string, number>) || {};
     track._ranked_score = track.taste_score ?? 0;
