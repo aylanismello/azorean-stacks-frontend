@@ -819,7 +819,7 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
               {onShowContext && (
                 <button
                   onClick={onShowContext}
-                  className="flex-shrink-0 w-5 h-5 rounded-full border border-white/20 text-white/30 flex items-center justify-center text-[10px] font-bold active:scale-90 transition-all"
+                  className="flex-shrink-0 w-6 h-6 rounded-full bg-black/40 backdrop-blur-sm border border-white/40 text-white/70 flex items-center justify-center text-xs font-bold active:scale-90 transition-all"
                   title="Why this track?"
                   aria-label="Track context"
                 >
