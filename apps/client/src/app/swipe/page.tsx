@@ -396,9 +396,12 @@ function SwipePageContent() {
       globalPlayer.updateTrackVote(currentTrack.id, status, superLiked);
     } catch (err) {
       console.error("Vote error:", err);
+      // Don't remove the card if the vote failed — let the user retry
+      votingRef.current = false;
+      return;
     }
 
-    // Remove current card, advance to next
+    // Remove current card, advance to next (only on successful vote)
     setTracks((prev) => {
       const next = prev.slice(1);
       if (next.length === 0) {

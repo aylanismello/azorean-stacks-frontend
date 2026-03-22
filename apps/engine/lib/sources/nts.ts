@@ -3,7 +3,7 @@
  * Wraps the existing NTS API functions in the DiscoverySource interface.
  */
 import type { DiscoverySource, SourceEpisode, SourceTrack } from "../sources";
-import { log } from "../pipeline";
+import { log, normalizeForSearch } from "../pipeline";
 
 const NTS_API = "https://www.nts.live/api/v2";
 const NTS_SEARCH_LIMIT = 60;
@@ -75,7 +75,11 @@ export const ntsSource: DiscoverySource = {
   name: "nts",
 
   async searchForSeed(artist: string, title: string): Promise<SourceEpisode[]> {
-    const query = `${artist} ${title}`;
+    // Strip featuring artists and video noise so NTS search focuses on
+    // the primary artist + clean title — prevents diluted results from
+    // queries like "Artist feat. Someone TrackName (Official Video)"
+    const { primaryArtist, cleanTitle } = normalizeForSearch(artist, title);
+    const query = `${primaryArtist} ${cleanTitle}`;
     const results = await ntsSearch(query);
     return results.map((r) => ({
       url: `https://www.nts.live${r.path}`,

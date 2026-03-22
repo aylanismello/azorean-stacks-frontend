@@ -48,11 +48,27 @@ export async function PATCH(
     return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
   }
 
+  // Only allow updating seeds owned by the current user.
+  // Legacy seeds with user_id=NULL are claimed on first update.
+  const { data: existing } = await supabase
+    .from("seeds")
+    .select("user_id")
+    .eq("id", params.id)
+    .single();
+
+  if (existing && existing.user_id && existing.user_id !== user.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Claim unowned seeds on update
+  if (existing && !existing.user_id) {
+    updates.user_id = user.id;
+  }
+
   const { data, error } = await supabase
     .from("seeds")
     .update(updates)
     .eq("id", params.id)
-    .or(`user_id.eq.${user.id},user_id.is.null`)
     .select()
     .single();
 

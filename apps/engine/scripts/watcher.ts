@@ -36,7 +36,13 @@ const CONCURRENCY = {
 const PRIORITY_DOWNLOAD_CONCURRENCY = 20; // Max concurrent downloads for priority pipeline
 const PRIORITY_ENRICH_CONCURRENCY = 3;    // Max concurrent enrichments (low to avoid Spotify 429s)
 
-const GARBAGE_TITLES = new Set(["unknown track", "untitled", "id", "?", "unknown", ""]);
+const GARBAGE_TITLES = new Set([
+  "unknown track", "untitled", "id", "?", "unknown", "",
+  "track id", "unreleased", "n/a", "tba", "tbc", "forthcoming",
+  "clip", "drop", "dub plate", "dubplate", "white label",
+]);
+// Patterns that indicate tracklist metadata rather than real tracks
+const GARBAGE_PATTERNS = /^(intro|outro|jingle|station id|station ident|interlude|unknown artist|various artists?|dj mix|continuous mix|mixed by .+|tracklist|setlist|playlist|listener call|phone call|shout ?out)$/i;
 
 // ─── STATUS TRACKING ────────────────────────────────────────
 
@@ -250,6 +256,8 @@ async function processSeed(seedId: string) {
         const lTitle = track.title.toLowerCase().trim();
         const lArtist = track.artist.toLowerCase().trim();
         if (GARBAGE_TITLES.has(lTitle) || lTitle.length <= 1 || lArtist.length <= 1) continue;
+        if (GARBAGE_PATTERNS.test(lTitle) || GARBAGE_PATTERNS.test(lArtist)) continue;
+        if (lArtist === lTitle) continue; // artist=title likely bad parse
 
         const escArtist = track.artist.trim().replace(/[%_\\]/g, (c) => `\\${c}`);
         const escTitle = track.title.trim().replace(/[%_\\]/g, (c) => `\\${c}`);

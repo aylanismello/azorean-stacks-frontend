@@ -350,6 +350,10 @@ async function discoverFromSource(
       stats.fullMatchEpisodeIds.push(episodeId);
     }
 
+    // co_occurrence weight: full match (seed song in tracklist) = 1.0,
+    // artist-only match (same artist but different song) = 0.5 — weaker signal
+    const coOccWeight = matchType === "full" ? 1 : 0.5;
+
     let epNew = 0;
     for (let pos = 0; pos < rawTracks.length; pos++) {
       const track = rawTracks[pos];
@@ -367,7 +371,7 @@ async function discoverFromSource(
       const key = `${correctedArtist.toLowerCase().trim()}::${correctedTitle.toLowerCase().trim()}`;
       const existing = coMap.get(key);
       if (existing) {
-        existing.co_occurrence++;
+        existing.co_occurrence += coOccWeight;
       } else {
         coMap.set(key, {
           artist: correctedArtist,
@@ -375,7 +379,7 @@ async function discoverFromSource(
           source: sourceName,
           source_url: episodeUrl,
           source_context: context,
-          co_occurrence: 1,
+          co_occurrence: coOccWeight,
           episode_id: episodeId,
         });
         epNew++;
@@ -481,9 +485,11 @@ async function runDiscover(): Promise<number> {
   for (let i = 0; i < candidateArtists.length; i += 10) {
     const batch = candidateArtists.slice(i, i + 10);
     const results = await Promise.all(
-      batch.map((artistName) =>
-        db.from("tracks").select("artist, title").ilike("artist", artistName).then((r: any) => r.data || [])
-      )
+      batch.map((artistName) => {
+        // Escape ILIKE special characters to prevent wildcard injection
+        const escaped = artistName.replace(/[%_\\]/g, (c) => `\\${c}`);
+        return db.from("tracks").select("artist, title").ilike("artist", escaped).then((r: any) => r.data || []);
+      })
     );
     for (const existing of results) {
       for (const t of existing) {
