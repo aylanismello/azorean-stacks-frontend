@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { supabase, getServiceClient } from "@/lib/supabase";
+import { getServiceClient } from "@/lib/supabase";
 import { diversifyTracks } from "@/lib/diversify";
 
 export const dynamic = "force-dynamic";
@@ -60,13 +60,13 @@ export async function GET(req: NextRequest) {
 
   const [seedTrackRes, episodeRes, esRes] = await Promise.all([
     seedTrackIds.length > 0
-      ? supabase.from("tracks").select("id, artist, title").in("id", seedTrackIds)
+      ? db.from("tracks").select("id, artist, title").in("id", seedTrackIds)
       : { data: [] },
     episodeIds.length > 0
-      ? supabase.from("episodes").select("id, title, source, aired_date, artwork_url, url").in("id", episodeIds)
+      ? db.from("episodes").select("id, title, source, aired_date, artwork_url, url").in("id", episodeIds)
       : { data: [] },
     episodeIds.length > 0
-      ? supabase.from("episode_seeds").select("episode_id, match_type").in("episode_id", episodeIds)
+      ? db.from("episode_seeds").select("episode_id, match_type").in("episode_id", episodeIds)
       : { data: [] },
   ]);
 
@@ -98,7 +98,7 @@ export async function GET(req: NextRequest) {
 
     if (track.storage_path) {
       signPromises.push(
-        supabase.storage
+        db.storage
           .from("tracks")
           .createSignedUrl(track.storage_path, 3600)
           .then(({ data: signed }) => {

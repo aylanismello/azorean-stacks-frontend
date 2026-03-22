@@ -86,7 +86,13 @@ function isSameTrack(
 // POST /api/discover
 export async function POST(req: NextRequest) {
   const db = getServiceClient();
-  const { seed_id, user_id } = await req.json();
+  let seed_id: string | undefined;
+  let user_id: string | undefined;
+  try {
+    ({ seed_id, user_id } = await req.json());
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   if (!seed_id || !user_id) {
     return NextResponse.json(

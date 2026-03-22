@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { supabase, getServiceClient } from "@/lib/supabase";
+import { getServiceClient } from "@/lib/supabase";
 import { diversifyTracks } from "@/lib/diversify";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,7 @@ async function attachMatchTypes(tracks: any[]) {
   const episodeIds = Array.from(new Set(tracks.map((t: any) => t.episode_id).filter(Boolean)));
   if (episodeIds.length === 0) return;
 
-  const { data: esLinks } = await supabase
+  const { data: esLinks } = await getServiceClient()
     .from("episode_seeds")
     .select("episode_id, match_type")
     .in("episode_id", episodeIds);
@@ -67,7 +67,7 @@ async function normalizeAndSign(tracks: any[]) {
     track._ranked_score = track.taste_score ?? 0;
     if (track.storage_path) {
       signPromises.push(
-        supabase.storage
+        getServiceClient().storage
           .from("tracks")
           .createSignedUrl(track.storage_path, 3600)
           .then(({ data: signed }) => {
@@ -136,7 +136,7 @@ export async function GET(req: NextRequest) {
 
     const orderMap = new Map(trackIdsForEpisode.map((id: string, i: number) => [id, i]));
 
-    let query = supabase
+    let query = db
       .from("tracks")
       .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url, url), seeds!track_id(id)", { count: "exact" })
       .in("id", trackIdsForEpisode);
@@ -179,7 +179,7 @@ export async function GET(req: NextRequest) {
     if (superLikedIds.length === 0) return NextResponse.json({ tracks: [], total: 0 });
 
     const paged = superLikedIds.slice(offset, offset + limit);
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("tracks")
       .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url, url), seeds!track_id(id)")
       .in("id", paged);
@@ -199,7 +199,7 @@ export async function GET(req: NextRequest) {
     if (utIds.length === 0) return NextResponse.json({ tracks: [], total: 0 });
 
     const paged = utIds.slice(offset, offset + limit);
-    let query = supabase
+    let query = db
       .from("tracks")
       .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url, url), seeds!track_id(id)")
       .in("id", paged);
@@ -247,7 +247,7 @@ export async function GET(req: NextRequest) {
   let totalCount: number | null = null;
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
-    let query = supabase
+    let query = db
       .from("tracks")
       .select("*, seed_track:tracks!seed_track_id(artist, title), episode:episodes!episode_id(id, title, source, aired_date, artwork_url, url), seeds!track_id(id)", { count: "exact" });
 

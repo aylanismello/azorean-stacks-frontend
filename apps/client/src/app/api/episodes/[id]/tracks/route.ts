@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase, getServiceClient } from "@/lib/supabase";
+import { getServiceClient } from "@/lib/supabase";
 import { createServerClient } from "@supabase/ssr";
 
 export const dynamic = "force-dynamic";
@@ -68,7 +68,7 @@ export async function GET(
 
     if (track.storage_path) {
       signPromises.push(
-        supabase.storage
+        db.storage
           .from("tracks")
           .createSignedUrl(track.storage_path, 3600)
           .then(({ data: signed }) => {
