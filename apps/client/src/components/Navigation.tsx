@@ -9,7 +9,6 @@ import { useTheme } from "./ThemeProvider";
 import { useGlobalPlayer } from "./GlobalPlayerProvider";
 
 const links = [
-  { href: "/swipe", label: "Swipe", icon: "✦" },
   { href: "/stacks", label: "Stacks", icon: "◉" },
   { href: "/tracks", label: "Tracks", icon: "✓" },
   { href: "/seeds", label: "Seeds", icon: "◎" },
@@ -21,9 +20,9 @@ const links = [
 // Fewer tabs on mobile — Playing first, Episodes + Stats in More sheet
 const mobileLinks = [
   { href: "/", label: "Playing", icon: "▶" },
-  { href: "/swipe", label: "Swipe", icon: "✦" },
   { href: "/stacks", label: "Stacks", icon: "◉" },
   { href: "/tracks", label: "Tracks", icon: "✓" },
+  { href: "/seeds", label: "Seeds", icon: "◎" },
 ];
 
 function ThemeToggle() {
