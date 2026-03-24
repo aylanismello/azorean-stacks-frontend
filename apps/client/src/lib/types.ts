@@ -19,6 +19,7 @@ export interface Track {
 
   seed_track: { artist: string; title: string } | null;
   episode: { id: string; title: string | null; source: string; aired_date: string | null; artwork_url: string | null; url?: string | null } | null;
+  episodes?: Array<{ id: string; title: string | null; source: string; aired_date: string | null; artwork_url: string | null; url?: string | null }>;
   metadata: Record<string, unknown>;
   /** @deprecated Use UserTrack.status instead for multi-user */
   status: "pending" | "approved" | "rejected" | "skipped" | "bad_source";

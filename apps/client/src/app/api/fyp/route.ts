@@ -58,20 +58,41 @@ export async function GET(req: NextRequest) {
   const seedTrackIds = Array.from(new Set(rows.map((t: any) => t.seed_track_id).filter(Boolean)));
   const episodeIds = Array.from(new Set(rows.map((t: any) => t.episode_id).filter(Boolean)));
 
-  const [seedTrackRes, episodeRes, esRes] = await Promise.all([
+  // Query episode_tracks junction to get ALL episodes per track
+  const [seedTrackRes, etRes] = await Promise.all([
     seedTrackIds.length > 0
       ? db.from("tracks").select("id, artist, title").in("id", seedTrackIds)
       : { data: [] },
-    episodeIds.length > 0
-      ? db.from("episodes").select("id, title, source, aired_date, artwork_url, url").in("id", episodeIds)
+    trackIds.length > 0
+      ? db.from("episode_tracks").select("track_id, episode_id").in("track_id", trackIds)
       : { data: [] },
-    episodeIds.length > 0
-      ? db.from("episode_seeds").select("episode_id, match_type").in("episode_id", episodeIds)
+  ]);
+
+  // Collect all episode IDs: from tracks.episode_id + from episode_tracks junction
+  const junctionEpisodeIds = (etRes.data || []).map((r: any) => r.episode_id);
+  const allEpisodeIds = Array.from(new Set([...episodeIds, ...junctionEpisodeIds].filter(Boolean)));
+
+  const [episodeRes, esRes] = await Promise.all([
+    allEpisodeIds.length > 0
+      ? db.from("episodes").select("id, title, source, aired_date, artwork_url, url").in("id", allEpisodeIds)
+      : { data: [] },
+    allEpisodeIds.length > 0
+      ? db.from("episode_seeds").select("episode_id, match_type").in("episode_id", allEpisodeIds)
       : { data: [] },
   ]);
 
   const seedTrackMap = new Map((seedTrackRes.data || []).map((s: any) => [s.id, s]));
   const episodeMap = new Map((episodeRes.data || []).map((e: any) => [e.id, e]));
+
+  // Build track → episodes[] map from junction table
+  const trackEpisodesMap = new Map<string, any[]>();
+  for (const row of (etRes.data || [])) {
+    const ep = episodeMap.get(row.episode_id);
+    if (!ep) continue;
+    const arr = trackEpisodesMap.get(row.track_id) || [];
+    arr.push(ep);
+    trackEpisodesMap.set(row.track_id, arr);
+  }
 
   // Best match_type per episode
   const matchTypeMap = new Map<string, string>();
@@ -87,6 +108,7 @@ export async function GET(req: NextRequest) {
   for (const track of rows) {
     track.seed_track = seedTrackMap.get(track.seed_track_id) || null;
     track.episode = episodeMap.get(track.episode_id) || null;
+    track.episodes = trackEpisodesMap.get(track.id) || [];
     track._match_type = matchTypeMap.get(track.episode_id) || null;
     // Seed classification columns from RPC (stored on tracks table)
     track.is_seed = track.is_seed ?? false;
