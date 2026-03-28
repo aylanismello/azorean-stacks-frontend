@@ -71,20 +71,15 @@ async function markSuccess(track: any, storagePath: string, signedUrl: string): 
   }).eq("id", track.id);
 }
 
-async function downloadOne(track: any): Promise<boolean> {
-  if (!track.youtube_url) return false;
-  if (!existsSync(TMP_DIR)) mkdirSync(TMP_DIR, { recursive: true });
-
-  const videoId = `dl-${track.id.slice(0, 8)}`;
+async function tryDownloadUrl(url: string, videoId: string, label: string): Promise<{ ok: boolean; stderr: string }> {
   const outPath = `${TMP_DIR}/${videoId}.%(ext)s`;
-  const expectedPath = `${TMP_DIR}/${videoId}.mp3`;
 
   const dlProc = Bun.spawn(
     [YT_DLP_BIN, "-x", "--audio-format", "mp3", "--audio-quality", "0",
      "--no-playlist", "--no-warnings",
      "--retries", "3", "--fragment-retries", "3",
      "--socket-timeout", "30", "--extractor-retries", "3",
-     "-o", outPath, track.youtube_url],
+     "-o", outPath, url],
     { stdout: "ignore", stderr: "pipe" },
   );
 
@@ -93,17 +88,62 @@ async function downloadOne(track: any): Promise<boolean> {
   try {
     [stderrText, exitCode] = await Promise.all([
       withTimeout(new Response(dlProc.stderr).text(), DL_TIMEOUT + 5_000, "stderr").catch(() => ""),
-      withTimeout(dlProc.exited, DL_TIMEOUT, `${track.artist} - ${track.title}`),
+      withTimeout(dlProc.exited, DL_TIMEOUT, label),
     ]);
   } catch (err) {
-    // Kill the orphaned yt-dlp process on timeout
     try { dlProc.kill(); } catch {}
-    await markFailed(track);
-    return false;
+    return { ok: false, stderr: "timeout" };
   }
-  if (exitCode !== 0) {
-    if (stderrText.trim()) {
-      console.error(`    yt-dlp error for ${track.artist} - ${track.title}: ${stderrText.trim().slice(0, 200)}`);
+  return { ok: exitCode === 0, stderr: stderrText };
+}
+
+async function soundcloudFallback(artist: string, title: string): Promise<string | null> {
+  try {
+    const query = `${artist} ${title}`;
+    const proc = Bun.spawn(
+      [YT_DLP_BIN, "--print", "webpage_url", "--no-download", `scsearch1:${query}`],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const [url, exitCode] = await Promise.all([
+      withTimeout(new Response(proc.stdout).text(), 15_000, "sc-search").catch(() => ""),
+      withTimeout(proc.exited, 15_000, "sc-search-exit").catch(() => 1),
+    ]);
+    if (exitCode === 0 && url.trim().startsWith("http")) return url.trim();
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function downloadOne(track: any): Promise<boolean> {
+  if (!track.youtube_url) return false;
+  if (!existsSync(TMP_DIR)) mkdirSync(TMP_DIR, { recursive: true });
+
+  const videoId = `dl-${track.id.slice(0, 8)}`;
+  const expectedPath = `${TMP_DIR}/${videoId}.mp3`;
+  const label = `${track.artist} - ${track.title}`;
+
+  // Try primary URL (YouTube or SoundCloud)
+  let result = await tryDownloadUrl(track.youtube_url, videoId, label);
+
+  // If YouTube failed with bot/429 error, try SoundCloud fallback
+  if (!result.ok && track.youtube_url.includes("youtube.com") &&
+      (result.stderr.includes("Sign in to confirm") || result.stderr.includes("429"))) {
+    console.log(`    ↳ YouTube blocked — trying SoundCloud for ${track.artist} - ${track.title}`);
+    const scUrl = await soundcloudFallback(track.artist, track.title);
+    if (scUrl) {
+      result = await tryDownloadUrl(scUrl, videoId, label);
+      if (result.ok) {
+        // Update the track's youtube_url to the working SoundCloud URL
+        await db.from("tracks").update({ youtube_url: scUrl }).eq("id", track.id);
+        console.log(`    ↳ SoundCloud fallback worked!`);
+      }
+    }
+  }
+
+  if (!result.ok) {
+    if (result.stderr.trim()) {
+      console.error(`    yt-dlp error for ${label}: ${result.stderr.trim().slice(0, 200)}`);
     }
     await markFailed(track);
     return false;
