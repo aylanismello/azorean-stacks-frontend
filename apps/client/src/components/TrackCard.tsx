@@ -508,18 +508,47 @@ export function TrackCard({ track, onVote, onSuperLike, onSkipEpisode, skippingE
 
   const seedArtist = seedContext?.artist || track.seed_track?.artist || meta.seed_artist;
   const seedTitle = seedContext?.title || track.seed_track?.title || meta.seed_title;
-  const discoveryContext = seedArtist && (
-    <p className="text-xs text-foreground/50 leading-relaxed truncate">
-      via{" "}
-      <span className="text-foreground/70">{seedArtist}</span>
-      {seedTitle && (
-        <>
-          {" — "}
-          <span className="text-foreground/60">{seedTitle}</span>
-        </>
+  const episodeLinks = track.episodes && track.episodes.length > 0 ? (
+    <span className="inline-flex flex-wrap gap-1 ml-1">
+      {track.episodes.slice(0, 5).map((ep) => (
+        ep.url ? (
+          <a
+            key={ep.id}
+            href={ep.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] px-1.5 py-0.5 rounded bg-foreground/5 text-foreground/50 hover:text-accent hover:bg-foreground/10 transition-colors truncate max-w-[120px]"
+            title={ep.title || ep.source}
+          >
+            {ep.title?.slice(0, 20) || ep.source}
+          </a>
+        ) : (
+          <span key={ep.id} className="text-[10px] px-1.5 py-0.5 rounded bg-foreground/5 text-foreground/40 truncate max-w-[120px]">
+            {ep.title?.slice(0, 20) || ep.source}
+          </span>
+        )
+      ))}
+      {track.episodes.length > 5 && (
+        <span className="text-[10px] text-foreground/30">+{track.episodes.length - 5} more</span>
       )}
-      {meta.co_occurrence > 1 && ` · ${meta.co_occurrence} sets`}
-    </p>
+    </span>
+  ) : null;
+
+  const discoveryContext = seedArtist && (
+    <div className="text-xs text-foreground/50 leading-relaxed">
+      <p className="truncate">
+        via{" "}
+        <span className="text-foreground/70">{seedArtist}</span>
+        {seedTitle && (
+          <>
+            {" — "}
+            <span className="text-foreground/60">{seedTitle}</span>
+          </>
+        )}
+        {!episodeLinks && meta.co_occurrence > 1 && ` · ${meta.co_occurrence} sets`}
+      </p>
+      {episodeLinks}
+    </div>
   );
 
   const sourceContext = track.source_context && (

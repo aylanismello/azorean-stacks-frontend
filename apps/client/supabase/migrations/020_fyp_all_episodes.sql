@@ -1,0 +1,59 @@
+-- Migration 020: Add episode_ids array to get_fyp_tracks RPC output
+--
+-- IMPORTANT: This migration modifies the get_fyp_tracks Postgres function.
+-- The get_fyp_tracks function body is defined in Supabase and is NOT fully
+-- tracked in the repo. Apply the change below in the Supabase SQL editor,
+-- reconciling with the live function body.
+--
+-- The key change: add an episode_ids column (uuid[]) to the return type
+-- that aggregates ALL episodes from the episode_tracks junction table,
+-- rather than relying solely on tracks.episode_id (which stores only
+-- the first-discovered episode).
+--
+-- DO NOT remove tracks.episode_id — it is kept for backward compatibility.
+--
+-- How to apply:
+--   1. Open the Supabase SQL editor
+--   2. Run: SELECT pg_get_functiondef(oid) FROM pg_proc WHERE proname = 'get_fyp_tracks';
+--      to get the current function body
+--   3. Add the following to the RETURNS TABLE(...) clause:
+--        episode_ids uuid[]
+--   4. Add this to the SELECT clause (as a scalar subquery or lateral join):
+--        ARRAY(SELECT et.episode_id FROM episode_tracks et WHERE et.track_id = t.id ORDER BY et.position NULLS LAST) AS episode_ids
+--   5. Re-create the function with CREATE OR REPLACE FUNCTION
+--
+-- Example addition to existing function:
+--
+-- CREATE OR REPLACE FUNCTION get_fyp_tracks(
+--   p_user_id uuid,
+--   p_limit int DEFAULT 20,
+--   p_offset int DEFAULT 0,
+--   p_seed_id uuid DEFAULT NULL,
+--   p_genre text DEFAULT NULL,
+--   p_seed_artist text DEFAULT NULL,
+--   p_hide_low boolean DEFAULT false
+-- )
+-- RETURNS TABLE(
+--   ... existing columns ...,
+--   episode_id uuid,          -- kept for backward compat (from tracks.episode_id)
+--   episode_ids uuid[],       -- NEW: all episodes from episode_tracks junction
+--   ... remaining columns ...
+-- )
+-- AS $$
+--   SELECT
+--     ... existing columns ...,
+--     t.episode_id,
+--     ARRAY(
+--       SELECT et.episode_id
+--       FROM episode_tracks et
+--       WHERE et.track_id = t.id
+--       ORDER BY et.position NULLS LAST
+--     ) AS episode_ids,
+--     ... remaining columns ...
+--   FROM tracks t
+--   LEFT JOIN user_tracks ut ON ut.track_id = t.id AND ut.user_id = p_user_id
+--   LEFT JOIN seeds s ON s.track_id = t.id
+--   WHERE ...
+--   ORDER BY ...
+--   LIMIT p_limit OFFSET p_offset;
+-- $$ LANGUAGE sql STABLE;
