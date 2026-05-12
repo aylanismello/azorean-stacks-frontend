@@ -3,6 +3,7 @@
  * so watcher.ts (and future consumers) can reuse them without duplication.
  */
 import { getSupabase } from "./supabase";
+import { Sentry } from "./sentry";
 
 const db = getSupabase();
 const YT_DLP_BIN =
@@ -539,6 +540,10 @@ export async function enrichTrack(track: any): Promise<boolean> {
   const { error } = await db.from("tracks").update(updates).eq("id", track.id);
   if (error) {
     log("fail", `DB update failed for ${label}: ${error.message}`);
+    Sentry.captureException(new Error(`DB update failed: ${error.message}`), {
+      tags: { component: "pipeline", action: "enrich" },
+      extra: { track_id: track.id, artist: track.artist, title: track.title },
+    });
     return false;
   }
 
@@ -586,6 +591,10 @@ export async function enrichTrackFast(track: any): Promise<boolean> {
   const { error } = await db.from("tracks").update(updates).eq("id", track.id);
   if (error) {
     log("fail", `DB update failed for ${label}: ${error.message}`);
+    Sentry.captureException(new Error(`DB update failed: ${error.message}`), {
+      tags: { component: "pipeline", action: "enrich_fast" },
+      extra: { track_id: track.id, artist: track.artist, title: track.title },
+    });
     return false;
   }
 
@@ -677,6 +686,10 @@ export async function enrichTrackMetadata(track: any): Promise<boolean> {
   const { error } = await db.from("tracks").update(updates).eq("id", track.id);
   if (error) {
     log("fail", `DB update failed for ${label}: ${error.message}`);
+    Sentry.captureException(new Error(`DB update failed: ${error.message}`), {
+      tags: { component: "pipeline", action: "enrich_metadata" },
+      extra: { track_id: track.id, artist: track.artist, title: track.title },
+    });
     return false;
   }
 
@@ -749,6 +762,10 @@ export async function downloadTrack(track: any): Promise<boolean> {
     contentType: "audio/mpeg", upsert: true,
   });
   if (error) {
+    Sentry.captureException(new Error(`Storage upload failed: ${error.message}`), {
+      tags: { component: "pipeline", action: "download" },
+      extra: { track_id: track.id, artist: track.artist, title: track.title, storage_path: storagePath },
+    });
     await db.from("tracks").update({
       dl_attempts: (track.dl_attempts || 0) + 1,
       dl_failed_at: new Date().toISOString(),
